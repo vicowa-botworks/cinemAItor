@@ -1,0 +1,11 @@
+{
+  "formatter": {
+    "lineWidth": 100
+  },
+  "linter": {
+    "rules": {
+      "tags": ["recommended"],
+      "exclude": ["no-window", "no-window-prefix", "no-import-prefix", "no-unversioned-import"]
+    }
+  }
+}

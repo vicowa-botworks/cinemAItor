@@ -1,0 +1,5 @@
+# Frontend uses CDN imports intentionally - no build step
+frontend/src/components/
+frontend/tests/
+frontend/src/api.ts
+frontend/src/app.ts

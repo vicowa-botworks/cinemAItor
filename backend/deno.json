@@ -1,0 +1,14 @@
+{
+  "imports": {
+    "@oak/oak": "jsr:@oak/oak@^17.0.0",
+    "@oak/router": "jsr:@oak/router@^2.0.0",
+    "@oak/cors": "jsr:@oak/cors@^1.0.0",
+    "@db/sqlite": "jsr:@db/sqlite@^0.13.0",
+    "@cinemaItor/": "./src/"
+  },
+  "linter": {
+    "rules": {
+      "include": ["no-explicit-any"]
+    }
+  }
+}
