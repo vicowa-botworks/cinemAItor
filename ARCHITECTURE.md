@@ -32,7 +32,7 @@ write scenes, and generate content using AI tools.
 
 | Component  | Technology                                     |
 | ---------- | ---------------------------------------------- |
-| Linting    | Deno built-in `deno lint`                      |
+| Linting    | `deno lint` (backend), ESLint (frontend)       |
 | Formatting | Deno built-in `deno fmt`                       |
 | Testing    | Deno built-in test runner (`@std/testing/bdd`) |
 | CI/CD      | GitHub Actions                                 |

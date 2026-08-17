@@ -2,17 +2,11 @@
   "formatter": {
     "lineWidth": 100
   },
-  "linter": {
-    "rules": {
-      "exclude": [
-        "no-import-prefix",
-        "no-unversioned-import",
-        "no-window",
-        "no-window-prefix",
-        "no-unused-vars",
-        "no-explicit-any",
-        "require-await"
-      ]
-    }
+  "devDependencies": {
+    "@eslint/js": "^9.33.0",
+    "eslint": "^9.33.0",
+    "globals": "^16.3.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.33.0"
   }
 }

@@ -13,7 +13,7 @@
 - [x] Shadow DOM components: app-root, app-header, login-form, movie-list, movie-card, movie-detail
 - [x] Hash-based client-side routing
 - [x] API client with token management
-- [x] Linting configured (Deno lint)
+- [x] Linting configured (Deno lint for backend, ESLint for frontend)
 - [x] Formatting configured (Deno fmt)
 - [x] Backend test suite (schema operations)
 - [x] Frontend test suite (API client)

@@ -1,6 +1,6 @@
 import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, property, state } from "lit/decorators.ts";
+import { customElement, state } from "lit/decorators.ts";
 
 @customElement("app-header")
 export class AppHeader extends LitElement {

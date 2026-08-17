@@ -2,7 +2,7 @@ import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/l
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
 import { customElement, state } from "lit/decorators.ts";
 import { api } from "./api.ts";
-import "./components/app-header.ts";
+import { AppHeader } from "./components/app-header.ts";
 import "./components/login-form.ts";
 import "./components/movie-list.ts";
 import "./components/movie-detail.ts";
@@ -79,9 +79,9 @@ export class AppRoot extends LitElement {
   }
 
   private _updateHeader(): void {
-    const header = this.shadowRoot?.querySelector("app-header") as HTMLElement;
+    const header = this.shadowRoot?.querySelector("app-header") as AppHeader;
     if (header) {
-      (header as any).setUserData(this.userName, this.loggedIn);
+      header.setUserData(this.userName, this.loggedIn);
     }
   }
 

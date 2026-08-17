@@ -3,7 +3,7 @@ import {
   html,
   LitElement,
 } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state } from "lit/decorators.ts";
+import { customElement } from "lit/decorators.ts";
 
 @customElement("app-root")
 export class AppRoot extends LitElement {

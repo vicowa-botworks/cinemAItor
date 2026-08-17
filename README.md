@@ -68,7 +68,7 @@ deno task test:backend
 # Run only frontend tests
 deno task test:frontend
 
-# Lint all code
+# Lint all code (backend: deno lint, frontend: ESLint)
 deno task lint
 
 # Format all code

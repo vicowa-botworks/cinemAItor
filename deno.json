@@ -7,7 +7,9 @@
     "test:backend": "cd backend && deno test --allow-net --allow-env --allow-read --allow-write --allow-ffi",
     "test:frontend": "cd frontend && deno test --allow-net --allow-env",
     "test": "deno task test:backend && deno task test:frontend",
-    "lint": "deno lint",
+    "lint": "deno task lint:backend && deno task lint:frontend",
+    "lint:backend": "cd backend && deno lint",
+    "lint:frontend": "cd frontend && deno run -A npm:eslint@^9.33.0 .",
     "fmt": "deno fmt",
     "start": "cd backend && deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi src/server.ts"
   },
