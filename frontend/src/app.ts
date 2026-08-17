@@ -1,4 +1,4 @@
-import { html, css } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
+import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
 import { customElement, state } from "lit/decorators.ts";
 import { api } from "./api.ts";
@@ -24,10 +24,14 @@ export class AppRoot extends LitElement {
     }
   `;
 
-  @state() private loggedIn = false;
-  @state() private userName = "";
-  @state() private currentView = "login";
-  @state() private viewParams: Record<string, unknown> = {};
+  @state()
+  private loggedIn = false;
+  @state()
+  private userName = "";
+  @state()
+  private currentView = "login";
+  @state()
+  private viewParams: Record<string, unknown> = {};
 
   override connectedCallback(): Promise<void> {
     super.connectedCallback?.();
@@ -139,9 +143,11 @@ export class AppRoot extends LitElement {
       case "movie-detail":
         return html`<movie-detail></movie-detail>`;
       case "create":
-        return html`<div style="text-align:center; padding:60px; color:var(--color-text-muted);">
-          <p>Create Movie - Coming Soon</p>
-        </div>`;
+        return html`
+          <div style="text-align:center; padding:60px; color:var(--color-text-muted);">
+            <p>Create Movie - Coming Soon</p>
+          </div>
+        `;
       default:
         return html`<login-form></login-form>`;
     }

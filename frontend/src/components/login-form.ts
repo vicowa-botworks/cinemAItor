@@ -1,4 +1,4 @@
-import { html, css } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
+import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
 import { customElement, state } from "lit/decorators.ts";
 import { api } from "../api.ts";
@@ -102,12 +102,18 @@ export class LoginForm extends LitElement {
     }
   `;
 
-  @state() private isLogin = true;
-  @state() private email = "";
-  @state() private password = "";
-  @state() private displayName = "";
-  @state() private error = "";
-  @state() private loading = false;
+  @state()
+  private isLogin = true;
+  @state()
+  private email = "";
+  @state()
+  private password = "";
+  @state()
+  private displayName = "";
+  @state()
+  private error = "";
+  @state()
+  private loading = false;
 
   private _toggleMode(): void {
     this.isLogin = !this.isLogin;
@@ -124,7 +130,9 @@ export class LoginForm extends LitElement {
         const result = await api.login(this.email, this.password);
         api.setToken(result.token);
         localStorage.setItem("token", result.token);
-        window.dispatchEvent(new CustomEvent("auth-change", { detail: { loggedIn: true, user: result.user } }));
+        window.dispatchEvent(
+          new CustomEvent("auth-change", { detail: { loggedIn: true, user: result.user } }),
+        );
         window.location.hash = "#/movies";
       } else {
         if (!this.displayName.trim()) {
@@ -134,7 +142,9 @@ export class LoginForm extends LitElement {
         const result = await api.register(this.email, this.password, this.displayName);
         api.setToken(result.token);
         localStorage.setItem("token", result.token);
-        window.dispatchEvent(new CustomEvent("auth-change", { detail: { loggedIn: true, user: result.user } }));
+        window.dispatchEvent(
+          new CustomEvent("auth-change", { detail: { loggedIn: true, user: result.user } }),
+        );
         window.location.hash = "#/movies";
       }
     } catch (err: unknown) {
@@ -149,26 +159,33 @@ export class LoginForm extends LitElement {
       <div class="login-container">
         <div class="login-card">
           <div class="tabs">
-            <button class="tab ${this.isLogin ? 'active' : ''}" @click=${this._toggleMode}>Login</button>
-            <button class="tab ${!this.isLogin ? 'active' : ''}" @click=${this._toggleMode}>Register</button>
+            <button class="tab ${this.isLogin ? "active" : ""}" @click=${this
+              ._toggleMode}>Login</button>
+            <button class="tab ${!this.isLogin ? "active" : ""}" @click=${this
+              ._toggleMode}>Register</button>
           </div>
 
           <form @submit=${this._submit}>
-            ${!this.isLogin ? html`
-              <div class="form-group">
-                <label for="displayName">Display Name</label>
-                <input id="displayName" type="text" .value=${this.displayName} @input=${this._onDisplayNameInput} required />
-              </div>
-            ` : ""}
+            ${!this.isLogin
+              ? html`
+                <div class="form-group">
+                  <label for="displayName">Display Name</label>
+                  <input id="displayName" type="text" .value=${this.displayName} @input=${this
+                    ._onDisplayNameInput} required />
+                </div>
+              `
+              : ""}
 
             <div class="form-group">
               <label for="email">Email</label>
-              <input id="email" type="email" .value=${this.email} @input=${this._onEmailInput} required />
+              <input id="email" type="email" .value=${this.email} @input=${this
+                ._onEmailInput} required />
             </div>
 
             <div class="form-group">
               <label for="password">Password</label>
-              <input id="password" type="password" .value=${this.password} @input=${this._onPasswordInput} required minlength="8" />
+              <input id="password" type="password" .value=${this.password} @input=${this
+                ._onPasswordInput} required minlength="8" />
             </div>
 
             <button type="submit" class="btn-submit" ?disabled=${this.loading}>

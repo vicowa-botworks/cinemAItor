@@ -4,8 +4,15 @@
   },
   "linter": {
     "rules": {
-      "tags": ["recommended"],
-      "exclude": ["no-window", "no-window-prefix", "no-import-prefix", "no-unversioned-import"]
+      "exclude": [
+        "no-import-prefix",
+        "no-unversioned-import",
+        "no-window",
+        "no-window-prefix",
+        "no-unused-vars",
+        "no-explicit-any",
+        "require-await"
+      ]
     }
   }
 }

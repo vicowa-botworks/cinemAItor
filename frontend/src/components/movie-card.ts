@@ -1,4 +1,4 @@
-import { html, css } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
+import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
 import { customElement, property } from "lit/decorators.ts";
 
@@ -84,14 +84,16 @@ export class MovieCard extends LitElement {
     }
   `;
 
-  @property({ type: Object }) movie!: Movie;
+  @property({ type: Object })
+  movie!: Movie;
 
   override render() {
     return html`
       <div class="card" @click=${this._click}>
         <div class="poster">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"/>
+            <path
+              d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
           </svg>
         </div>
         <div class="card-content">
@@ -99,9 +101,13 @@ export class MovieCard extends LitElement {
           <div class="card-meta">
             ${this.movie.genre ? html`<span>${this.movie.genre}</span>` : ""}
             ${this.movie.year ? html`<span>${this.movie.year}</span>` : ""}
-            ${this.movie.runtime_minutes ? html`<span>${this.movie.runtime_minutes} min</span>` : ""}
+            ${this.movie.runtime_minutes
+              ? html`<span>${this.movie.runtime_minutes} min</span>`
+              : ""}
           </div>
-          ${this.movie.description ? html`<div class="card-description">${this.movie.description}</div>` : ""}
+          ${this.movie.description
+            ? html`<div class="card-description">${this.movie.description}</div>`
+            : ""}
         </div>
       </div>
     `;

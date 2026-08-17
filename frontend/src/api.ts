@@ -66,7 +66,15 @@ class ApiClient {
     return this.request(`/movies/${id}`);
   }
 
-  async createMovie(data: { title: string; description?: string; genre?: string; year?: number; runtime_minutes?: number }) {
+  async createMovie(
+    data: {
+      title: string;
+      description?: string;
+      genre?: string;
+      year?: number;
+      runtime_minutes?: number;
+    },
+  ) {
     return this.request("/movies", {
       method: "POST",
       body: JSON.stringify(data),
@@ -90,7 +98,16 @@ class ApiClient {
     return this.request(`/movies/${movieId}/scenes`);
   }
 
-  async createScene(movieId: number, data: { scene_number: number; description: string; dialogue?: string; visual_description?: string; duration_seconds?: number }) {
+  async createScene(
+    movieId: number,
+    data: {
+      scene_number: number;
+      description: string;
+      dialogue?: string;
+      visual_description?: string;
+      duration_seconds?: number;
+    },
+  ) {
     return this.request(`/movies/${movieId}/scenes`, {
       method: "POST",
       body: JSON.stringify(data),

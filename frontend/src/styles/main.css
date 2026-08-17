@@ -53,7 +53,9 @@ button:active {
   transform: scale(0.98);
 }
 
-input, textarea, select {
+input,
+textarea,
+select {
   font-family: var(--font-family);
   font-size: 14px;
   padding: 10px 14px;
@@ -66,7 +68,9 @@ input, textarea, select {
   width: 100%;
 }
 
-input:focus, textarea:focus, select:focus {
+input:focus,
+textarea:focus,
+select:focus {
   border-color: var(--color-primary);
 }
 

@@ -1,5 +1,5 @@
-import { describe, it, beforeEach, afterEach } from "jsr:@std/testing/bdd";
-import { assertEquals, assert } from "jsr:@std/assert";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { assert, assertEquals } from "@std/assert";
 import { getDb, resetDb } from "../src/db/database.ts";
 import * as schema from "../src/db/schema.ts";
 
@@ -53,7 +53,14 @@ describe("Movies", () => {
   });
 
   it("should create and retrieve a movie", () => {
-    const movieId = schema.createMovie("Test Movie", userId, "A test description", "Sci-Fi", 2024, 120);
+    const movieId = schema.createMovie(
+      "Test Movie",
+      userId,
+      "A test description",
+      "Sci-Fi",
+      2024,
+      120,
+    );
 
     assert(movieId > 0, "movieId should be greater than 0");
 
@@ -65,8 +72,8 @@ describe("Movies", () => {
   });
 
   it("should list all movies for a user", () => {
-    const movieId1 = schema.createMovie("Movie 1", userId, "Desc 1");
-    const movieId2 = schema.createMovie("Movie 2", userId, "Desc 2");
+    const _movieId1 = schema.createMovie("Movie 1", userId, "Desc 1");
+    const _movieId2 = schema.createMovie("Movie 2", userId, "Desc 2");
 
     const movies = schema.getUserMovies(userId);
     assertEquals(movies.length, 2);
@@ -115,7 +122,15 @@ describe("Scenes", () => {
   });
 
   it("should create and retrieve scenes for a movie", () => {
-    const sceneId = schema.createScene(movieId, userId, 1, "Opening scene", "Hello world", "Wide shot", 60);
+    const sceneId = schema.createScene(
+      movieId,
+      userId,
+      1,
+      "Opening scene",
+      "Hello world",
+      "Wide shot",
+      60,
+    );
 
     assert(sceneId > 0, "sceneId should be greater than 0");
 

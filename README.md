@@ -104,23 +104,23 @@ cinemAItor/
 
 ### Authentication
 
-| Method | Endpoint           | Description        | Auth Required |
-|--------|--------------------|--------------------|---------------|
+| Method | Endpoint             | Description       | Auth Required |
+| ------ | -------------------- | ----------------- | ------------- |
 | POST   | `/api/auth/register` | Register new user | No            |
 | POST   | `/api/auth/login`    | Login             | No            |
 | GET    | `/api/auth/me`       | Get current user  | Yes           |
 
 ### Movies
 
-| Method  | Endpoint                  | Description        | Auth Required |
-|---------|---------------------------|--------------------|---------------|
-| GET     | `/api/movies`             | List all movies    | Yes           |
-| GET     | `/api/movies/:id`         | Get a movie        | Yes           |
-| POST    | `/api/movies`             | Create a movie     | Yes           |
-| PUT     | `/api/movies/:id`         | Update a movie     | Yes           |
-| DELETE  | `/api/movies/:id`         | Delete a movie     | Yes           |
-| GET     | `/api/movies/:id/scenes`  | List scenes        | Yes           |
-| POST    | `/api/movies/:id/scenes`  | Add a scene        | Yes           |
+| Method | Endpoint                 | Description     | Auth Required |
+| ------ | ------------------------ | --------------- | ------------- |
+| GET    | `/api/movies`            | List all movies | Yes           |
+| GET    | `/api/movies/:id`        | Get a movie     | Yes           |
+| POST   | `/api/movies`            | Create a movie  | Yes           |
+| PUT    | `/api/movies/:id`        | Update a movie  | Yes           |
+| DELETE | `/api/movies/:id`        | Delete a movie  | Yes           |
+| GET    | `/api/movies/:id/scenes` | List scenes     | Yes           |
+| POST   | `/api/movies/:id/scenes` | Add a scene     | Yes           |
 
 All authenticated endpoints require a `Bearer <token>` header.
 
