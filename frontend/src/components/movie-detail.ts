@@ -1,4 +1,4 @@
-import { html, css } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
+import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
 import { customElement, state } from "lit/decorators.ts";
 import { api } from "../api.ts";
@@ -134,7 +134,8 @@ export class MovieDetail extends LitElement {
       font-size: 14px;
     }
 
-    .loading, .error {
+    .loading,
+    .error {
       text-align: center;
       padding: 40px;
       color: var(--color-text-muted);
@@ -145,10 +146,14 @@ export class MovieDetail extends LitElement {
     }
   `;
 
-  @state() private movie: Movie | null = null;
-  @state() private loading = true;
-  @state() private error = "";
-  @state() private movieId: number | null = null;
+  @state()
+  private movie: Movie | null = null;
+  @state()
+  private loading = true;
+  @state()
+  private error = "";
+  @state()
+  private movieId: number | null = null;
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback?.();
@@ -193,11 +198,19 @@ export class MovieDetail extends LitElement {
 
   override render() {
     if (this.loading) {
-      return html`<div class="detail-container"><div class="loading">Loading...</div></div>`;
+      return html`
+        <div class="detail-container">
+          <div class="loading">Loading...</div>
+        </div>
+      `;
     }
 
     if (this.error && !this.movie) {
-      return html`<div class="detail-container"><div class="error">${this.error}</div></div>`;
+      return html`
+        <div class="detail-container">
+          <div class="error">${this.error}</div>
+        </div>
+      `;
     }
 
     if (!this.movie) return null;
@@ -208,8 +221,10 @@ export class MovieDetail extends LitElement {
 
         <div class="movie-header">
           <div class="movie-poster">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5">
-              <path d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"/>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" opacity="0.5">
+              <path
+                d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
             </svg>
           </div>
           <div class="movie-info">
@@ -217,12 +232,19 @@ export class MovieDetail extends LitElement {
             <div class="meta-tags">
               ${this.movie.genre ? html`<span class="meta-tag">${this.movie.genre}</span>` : ""}
               ${this.movie.year ? html`<span class="meta-tag">${this.movie.year}</span>` : ""}
-              ${this.movie.runtime_minutes ? html`<span class="meta-tag">${this.movie.runtime_minutes} min</span>` : ""}
-              ${this.movie.rating > 0 ? html`<span class="meta-tag rating">★ ${this.movie.rating}</span>` : ""}
+              ${this.movie.runtime_minutes
+                ? html`<span class="meta-tag">${this.movie.runtime_minutes} min</span>`
+                : ""}
+              ${this.movie.rating > 0
+                ? html`<span class="meta-tag rating">★ ${this.movie.rating}</span>`
+                : ""}
             </div>
-            ${this.movie.description ? html`<p class="description">${this.movie.description}</p>` : ""}
+            ${this.movie.description
+              ? html`<p class="description">${this.movie.description}</p>`
+              : ""}
             <div class="actions">
-              <button class="btn-edit" @click=${() => window.location.hash = `#/movie/${this.movieId}/edit`}>Edit</button>
+              <button class="btn-edit" @click=${() =>
+                window.location.hash = `#/movie/${this.movieId}/edit`}>Edit</button>
               <button class="btn-delete" @click=${this._deleteMovie}>Delete</button>
             </div>
           </div>

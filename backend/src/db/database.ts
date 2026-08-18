@@ -1,4 +1,4 @@
-import { Database } from "jsr:@db/sqlite";
+import { Database } from "@db/sqlite";
 
 let db: Database | null = null;
 

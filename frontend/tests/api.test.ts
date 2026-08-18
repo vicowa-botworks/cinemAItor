@@ -1,5 +1,5 @@
-import { describe, it, beforeEach, afterEach } from "jsr:@std/testing/bdd";
-import { assertEquals, assert } from "jsr:@std/assert";
+import { afterEach, beforeEach, describe, it } from "jsr:@std/testing/bdd";
+import { assert, assertEquals } from "jsr:@std/assert";
 import { api } from "../src/api.ts";
 
 describe("ApiClient", () => {

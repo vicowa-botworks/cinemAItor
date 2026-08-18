@@ -23,9 +23,13 @@ jobs:
         working-directory: ./backend
         run: deno lint
 
-      - name: Lint frontend
+      - name: Install frontend dependencies
         working-directory: ./frontend
-        run: deno lint
+        run: deno install
+
+      - name: Lint frontend (ESLint)
+        working-directory: ./frontend
+        run: deno run -A npm:eslint@^9.33.0 .
 
   format:
     name: Format Check

@@ -1,10 +1,10 @@
-import { Router } from "jsr:@oak/oak/router";
-import { authMiddleware } from "../middleware/auth.ts";
-import { createUser, getUserByEmail } from "../db/schema.ts";
-import { generateToken } from "../middleware/auth.ts";
+import { Router } from "@oak/oak/router";
+import { authMiddleware } from "@cinemaItor/middleware/auth.ts";
+import { createUser, getUserByEmail } from "@cinemaItor/db/schema.ts";
+import { generateToken } from "@cinemaItor/middleware/auth.ts";
 
 const router = new Router()
-  .post("/api/auth/register", async (ctx, next) => {
+  .post("/api/auth/register", async (ctx, _next) => {
     const body = ctx.request.body;
     if (body.type !== "json") {
       ctx.response.status = 400;
@@ -43,7 +43,7 @@ const router = new Router()
       user: { id: userId, email, display_name },
     };
   })
-  .post("/api/auth/login", async (ctx, next) => {
+  .post("/api/auth/login", async (ctx, _next) => {
     const body = ctx.request.body;
     if (body.type !== "json") {
       ctx.response.status = 400;
@@ -80,8 +80,8 @@ const router = new Router()
       user: { id: user.id, email: user.email, display_name: user.display_name, role: user.role },
     };
   })
-  .get("/api/auth/me", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .get("/api/auth/me", authMiddleware, (ctx, _next) => {
+    const userId = (ctx as unknown as { userId: number }).userId;
     const user = getUserById(userId);
 
     if (!user) {

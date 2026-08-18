@@ -1,5 +1,5 @@
-import { describe, it } from "jsr:@std/testing/bdd";
-import { assertEquals, assert } from "jsr:@std/assert";
+import { describe, it } from "@std/testing/bdd";
+import { assert, assertEquals } from "@std/assert";
 import { generateToken, verifyToken } from "../src/middleware/auth.ts";
 
 describe("JWT Auth", () => {

@@ -1,5 +1,15 @@
 const API_BASE = "/api";
 
+class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 class ApiClient {
   private token: string | null = null;
 
@@ -32,65 +42,81 @@ class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
-      const err = new Error(error.error || "Request failed");
-      (err as any).status = response.status;
+      const err = new ApiError(error.error || "Request failed", response.status);
       throw err;
     }
 
     return response.json();
   }
 
-  async register(email: string, password: string, displayName: string) {
+  register(email: string, password: string, displayName: string) {
     return this.request("/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, password, display_name: displayName }),
     });
   }
 
-  async login(email: string, password: string) {
+  login(email: string, password: string) {
     return this.request("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
   }
 
-  async getMe() {
+  getMe() {
     return this.request("/auth/me");
   }
 
-  async getMovies() {
+  getMovies() {
     return this.request("/movies");
   }
 
-  async getMovie(id: number) {
+  getMovie(id: number) {
     return this.request(`/movies/${id}`);
   }
 
-  async createMovie(data: { title: string; description?: string; genre?: string; year?: number; runtime_minutes?: number }) {
+  createMovie(
+    data: {
+      title: string;
+      description?: string;
+      genre?: string;
+      year?: number;
+      runtime_minutes?: number;
+    },
+  ) {
     return this.request("/movies", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async updateMovie(id: number, data: Record<string, unknown>) {
+  updateMovie(id: number, data: Record<string, unknown>) {
     return this.request(`/movies/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
-  async deleteMovie(id: number) {
+  deleteMovie(id: number) {
     return this.request(`/movies/${id}`, {
       method: "DELETE",
     });
   }
 
-  async getScenes(movieId: number) {
+  getScenes(movieId: number) {
     return this.request(`/movies/${movieId}/scenes`);
   }
 
-  async createScene(movieId: number, data: { scene_number: number; description: string; dialogue?: string; visual_description?: string; duration_seconds?: number }) {
+  createScene(
+    movieId: number,
+    data: {
+      scene_number: number;
+      description: string;
+      dialogue?: string;
+      visual_description?: string;
+      duration_seconds?: number;
+    },
+  ) {
     return this.request(`/movies/${movieId}/scenes`, {
       method: "POST",
       body: JSON.stringify(data),

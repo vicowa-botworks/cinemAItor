@@ -1,5 +1,4 @@
-import { Context } from "jsr:@oak/oak";
-import { getUserById } from "../db/schema.ts";
+import { getUserById } from "@cinemaItor/db/schema.ts";
 
 const SECRET_KEY = Deno.env.get("JWT_SECRET") || "dev-secret-key-change-in-production";
 const TOKEN_EXPIRY_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
@@ -8,6 +7,13 @@ export interface TokenPayload {
   sub: number;
   iat: number;
   exp: number;
+}
+
+interface AuthContext {
+  request: { headers: { get: (name: string) => string | null } };
+  response: { status: number; body: unknown };
+  userId?: number;
+  userRole?: string;
 }
 
 function base64urlEncode(data: Uint8Array): string {
@@ -99,7 +105,7 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
   }
 }
 
-export async function authMiddleware(ctx: Context, next: () => Promise<void>) {
+export async function authMiddleware(ctx: AuthContext, next: () => Promise<void>) {
   const authHeader = ctx.request.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     ctx.response.status = 401;
@@ -123,7 +129,7 @@ export async function authMiddleware(ctx: Context, next: () => Promise<void>) {
     return;
   }
 
-  (ctx as any).userId = user.id;
-  (ctx as any).userRole = user.role;
+  ctx.userId = user.id;
+  ctx.userRole = user.role;
   await next();
 }

@@ -1,6 +1,6 @@
-import { html, css } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
+import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state, property } from "lit/decorators.ts";
+import { customElement, state } from "lit/decorators.ts";
 
 @customElement("app-header")
 export class AppHeader extends LitElement {
@@ -74,8 +74,10 @@ export class AppHeader extends LitElement {
     }
   `;
 
-  @state() private userName = "";
-  @state() private isLoggedIn = false;
+  @state()
+  private userName = "";
+  @state()
+  private isLoggedIn = false;
 
   setUserData(name: string, loggedIn: boolean): void {
     this.userName = name;
@@ -89,16 +91,18 @@ export class AppHeader extends LitElement {
         <div class="header-content">
           <div class="logo" @click=${this._goHome}>CinemaItor</div>
           <nav class="nav">
-            ${this.isLoggedIn ? html`
-              <a href="#/movies" class="${this._isActive('/movies')}">My Movies</a>
-              <a href="#/create" class="${this._isActive('/create')}">Create</a>
-              <div class="user-info">
-                <span class="user-name">${this.userName}</span>
-                <button class="btn-logout" @click=${this._logout}>Logout</button>
-              </div>
-            ` : html`
-              <a href="#/login" class="${this._isActive('/login')}">Login</a>
-            `}
+            ${this.isLoggedIn
+              ? html`
+                <a href="#/movies" class="${this._isActive("/movies")}">My Movies</a>
+                <a href="#/create" class="${this._isActive("/create")}">Create</a>
+                <div class="user-info">
+                  <span class="user-name">${this.userName}</span>
+                  <button class="btn-logout" @click=${this._logout}>Logout</button>
+                </div>
+              `
+              : html`
+                <a href="#/login" class="${this._isActive("/login")}">Login</a>
+              `}
           </nav>
         </div>
       </header>

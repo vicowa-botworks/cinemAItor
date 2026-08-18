@@ -1,4 +1,4 @@
-import { html, css } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
+import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
 import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
 import { customElement, state } from "lit/decorators.ts";
 import { api } from "../api.ts";
@@ -75,9 +75,12 @@ export class MovieList extends LitElement {
     }
   `;
 
-  @state() private movies: Movie[] = [];
-  @state() private loading = true;
-  @state() private error = "";
+  @state()
+  private movies: Movie[] = [];
+  @state()
+  private loading = true;
+  @state()
+  private error = "";
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback?.();
@@ -124,25 +127,31 @@ export class MovieList extends LitElement {
           <button class="btn-create" @click=${this._navigateToCreate}>+ New Movie</button>
         </div>
 
-        ${this.error ? html`<p style="color: var(--color-error); text-align: center;">${this.error}</p>` : ""}
+        ${this.error
+          ? html`<p style="color: var(--color-error); text-align: center;">${this.error}</p>`
+          : ""}
 
         ${this.movies.length === 0
           ? html`
-              <div class="empty-state">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"/>
-                </svg>
-                <p>No movies yet. Create your first movie!</p>
-              </div>
-            `
+            <div class="empty-state">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.5">
+                <path
+                  d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+              </svg>
+              <p>No movies yet. Create your first movie!</p>
+            </div>
+          `
           : html`
-              <div class="movies-grid">
-                ${this.movies.map((movie) => html`
-                  <movie-card .movie=${movie} @navigate=${(e: Event) => this._navigateToMovie((e as CustomEvent).detail)}></movie-card>
-                `)}
-              </div>
-            `
-        }
+            <div class="movies-grid">
+              ${this.movies.map((movie) =>
+                html`
+                  <movie-card .movie=${movie} @navigate=${(e: Event) =>
+                    this._navigateToMovie((e as CustomEvent).detail)}></movie-card>
+                `
+              )}
+            </div>
+          `}
       </div>
     `;
   }

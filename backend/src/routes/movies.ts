@@ -1,15 +1,25 @@
-import { Router } from "jsr:@oak/oak/router";
-import { authMiddleware } from "../middleware/auth.ts";
-import * as schema from "../db/schema.ts";
+import { Router } from "@oak/oak/router";
+import { authMiddleware } from "@cinemaItor/middleware/auth.ts";
+import * as schema from "@cinemaItor/db/schema.ts";
+
+interface OakContext {
+  userId: number;
+  userRole: string;
+  request: { body: { type: string; value: unknown } };
+  response: { status: number; body: unknown };
+  params?: Record<string, string>;
+}
 
 const movieRouter = new Router()
-  .get("/api/movies", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .get("/api/movies", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const movies = schema.getUserMovies(userId);
     ctx.response.body = movies;
   })
-  .get("/api/movies/:id", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .get("/api/movies/:id", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const id = Number(ctx.params?.id);
     if (isNaN(id)) {
       ctx.response.status = 400;
@@ -24,8 +34,9 @@ const movieRouter = new Router()
     }
     ctx.response.body = movie;
   })
-  .post("/api/movies", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .post("/api/movies", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const body = ctx.request.body;
     if (body.type !== "json") {
       ctx.response.status = 400;
@@ -33,7 +44,8 @@ const movieRouter = new Router()
       return;
     }
 
-    const { title, description, genre, year, runtime_minutes, poster_url, backdrop_url } = body.value as Record<string, unknown>;
+    const { title, description, genre, year, runtime_minutes, poster_url, backdrop_url } = body
+      .value as Record<string, unknown>;
 
     if (!title) {
       ctx.response.status = 400;
@@ -55,8 +67,9 @@ const movieRouter = new Router()
     ctx.response.status = 201;
     ctx.response.body = { id: movieId, title };
   })
-  .put("/api/movies/:id", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .put("/api/movies/:id", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const id = Number(ctx.params?.id);
     if (isNaN(id)) {
       ctx.response.status = 400;
@@ -88,8 +101,9 @@ const movieRouter = new Router()
 
     ctx.response.body = { message: "Movie updated" };
   })
-  .delete("/api/movies/:id", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .delete("/api/movies/:id", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const id = Number(ctx.params?.id);
     if (isNaN(id)) {
       ctx.response.status = 400;
@@ -106,8 +120,9 @@ const movieRouter = new Router()
 
     ctx.response.body = { message: "Movie deleted" };
   })
-  .get("/api/movies/:id/scenes", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .get("/api/movies/:id/scenes", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const movieId = Number(ctx.params?.id);
     if (isNaN(movieId)) {
       ctx.response.status = 400;
@@ -125,8 +140,9 @@ const movieRouter = new Router()
     const scenes = schema.getScenesByMovieId(movieId, userId);
     ctx.response.body = scenes;
   })
-  .post("/api/movies/:id/scenes", authMiddleware, async (ctx, next) => {
-    const userId = (ctx as any).userId;
+  .post("/api/movies/:id/scenes", authMiddleware, (_ctx) => {
+    const ctx = _ctx as unknown as OakContext;
+    const userId = ctx.userId;
     const movieId = Number(ctx.params?.id);
     if (isNaN(movieId)) {
       ctx.response.status = 400;
@@ -148,7 +164,8 @@ const movieRouter = new Router()
       return;
     }
 
-    const { scene_number, description, dialogue, visual_description, duration_seconds } = body.value as Record<string, unknown>;
+    const { scene_number, description, dialogue, visual_description, duration_seconds } = body
+      .value as Record<string, unknown>;
 
     if (scene_number === undefined || !description) {
       ctx.response.status = 400;

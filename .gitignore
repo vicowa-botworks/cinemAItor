@@ -2,6 +2,7 @@
 deno.lock
 backend/deno.lock
 frontend/deno.lock
+node_modules/
 
 # Environment
 .env

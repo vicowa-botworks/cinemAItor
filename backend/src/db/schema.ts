@@ -120,14 +120,38 @@ export function updateMovie(
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  if (updates.title !== undefined) { fields.push("title = ?"); values.push(updates.title); }
-  if (updates.description !== undefined) { fields.push("description = ?"); values.push(updates.description); }
-  if (updates.genre !== undefined) { fields.push("genre = ?"); values.push(updates.genre); }
-  if (updates.year !== undefined) { fields.push("year = ?"); values.push(updates.year); }
-  if (updates.runtime_minutes !== undefined) { fields.push("runtime_minutes = ?"); values.push(updates.runtime_minutes); }
-  if (updates.poster_url !== undefined) { fields.push("poster_url = ?"); values.push(updates.poster_url); }
-  if (updates.backdrop_url !== undefined) { fields.push("backdrop_url = ?"); values.push(updates.backdrop_url); }
-  if (updates.rating !== undefined) { fields.push("rating = ?"); values.push(updates.rating); }
+  if (updates.title !== undefined) {
+    fields.push("title = ?");
+    values.push(updates.title);
+  }
+  if (updates.description !== undefined) {
+    fields.push("description = ?");
+    values.push(updates.description);
+  }
+  if (updates.genre !== undefined) {
+    fields.push("genre = ?");
+    values.push(updates.genre);
+  }
+  if (updates.year !== undefined) {
+    fields.push("year = ?");
+    values.push(updates.year);
+  }
+  if (updates.runtime_minutes !== undefined) {
+    fields.push("runtime_minutes = ?");
+    values.push(updates.runtime_minutes);
+  }
+  if (updates.poster_url !== undefined) {
+    fields.push("poster_url = ?");
+    values.push(updates.poster_url);
+  }
+  if (updates.backdrop_url !== undefined) {
+    fields.push("backdrop_url = ?");
+    values.push(updates.backdrop_url);
+  }
+  if (updates.rating !== undefined) {
+    fields.push("rating = ?");
+    values.push(updates.rating);
+  }
 
   if (fields.length === 0) return false;
 
@@ -135,7 +159,7 @@ export function updateMovie(
   values.push(id, userId);
 
   const stmt = db.prepare(`UPDATE movies SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`);
-  return (stmt.run as ( ...params: unknown[]) => number)(...values) > 0;
+  return (stmt.run as (...params: unknown[]) => number)(...values) > 0;
 }
 
 export function deleteMovie(id: number, userId: number): boolean {
