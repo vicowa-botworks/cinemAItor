@@ -18,7 +18,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.9.5
 
       - name: Lint backend
         working-directory: ./backend
@@ -42,7 +42,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.9.5
 
       - name: Type check backend
         working-directory: ./backend
@@ -66,7 +66,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.9.5
 
       - name: Check formatting
         run: deno fmt --check
@@ -81,7 +81,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.9.5
 
       - name: Run backend tests
         working-directory: ./backend
@@ -97,7 +97,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.9.5
 
       - name: Run frontend tests
         working-directory: ./frontend
