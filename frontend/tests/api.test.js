@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "jsr:@std/testing/bdd";
 import { assert, assertEquals } from "jsr:@std/assert";
-import { api } from "../src/api.ts";
+import { api } from "../src/api.js";
 
 describe("ApiClient", () => {
   beforeEach(() => {

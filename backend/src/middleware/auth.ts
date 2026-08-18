@@ -1,6 +1,8 @@
+import { type Context, type Next } from "@oak/oak";
 import { getUserById } from "@cinemaItor/db/schema.ts";
 
-const SECRET_KEY = Deno.env.get("JWT_SECRET") || "dev-secret-key-change-in-production";
+const SECRET_KEY = Deno.env.get("JWT_SECRET") ||
+  "dev-secret-key-change-in-production";
 const TOKEN_EXPIRY_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
 export interface TokenPayload {
@@ -9,9 +11,7 @@ export interface TokenPayload {
   exp: number;
 }
 
-interface AuthContext {
-  request: { headers: { get: (name: string) => string | null } };
-  response: { status: number; body: unknown };
+export interface AuthedContext extends Context {
   userId?: number;
   userRole?: string;
 }
@@ -21,10 +21,13 @@ function base64urlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/,
+    "",
+  );
 }
 
-function base64urlDecode(input: string): Uint8Array {
+function base64urlDecode(input: string): Uint8Array<ArrayBuffer> {
   let base64 = input.replace(/-/g, "+").replace(/_/g, "/");
   while (base64.length % 4 !== 0) {
     base64 += "=";
@@ -44,7 +47,9 @@ export async function generateToken(userId: number): Promise<string> {
     iat,
     exp: iat + Math.floor(TOKEN_EXPIRY_MS / 1000),
   };
-  const payloadStr = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const payloadStr = base64urlEncode(
+    new TextEncoder().encode(JSON.stringify(payload)),
+  );
   const signature = await signHMAC(payloadStr);
   return `${payloadStr}.${signature}`;
 }
@@ -65,7 +70,10 @@ async function signHMAC(payload: string): Promise<string> {
   return base64urlEncode(new Uint8Array(signature));
 }
 
-async function verifyHMAC(payload: string, signature: string): Promise<boolean> {
+async function verifyHMAC(
+  payload: string,
+  signature: string,
+): Promise<boolean> {
   try {
     const key = await crypto.subtle.importKey(
       "raw",
@@ -95,7 +103,9 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
   if (!valid) return null;
 
   try {
-    const payload = JSON.parse(new TextDecoder().decode(base64urlDecode(payloadStr)));
+    const payload = JSON.parse(
+      new TextDecoder().decode(base64urlDecode(payloadStr)),
+    );
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
@@ -105,7 +115,10 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
   }
 }
 
-export async function authMiddleware(ctx: AuthContext, next: () => Promise<void>) {
+export async function authMiddleware(
+  ctx: AuthedContext,
+  next: Next,
+): Promise<void> {
   const authHeader = ctx.request.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     ctx.response.status = 401;

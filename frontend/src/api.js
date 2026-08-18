@@ -1,9 +1,7 @@
 const API_BASE = "/api";
 
 class ApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
+  constructor(message, status) {
     super(message);
     this.name = "ApiError";
     this.status = status;
@@ -11,28 +9,28 @@ class ApiError extends Error {
 }
 
 class ApiClient {
-  private token: string | null = null;
+  #token = null;
 
-  setToken(token: string): void {
-    this.token = token;
+  setToken(token) {
+    this.#token = token;
   }
 
-  clearToken(): void {
-    this.token = null;
+  clearToken() {
+    this.#token = null;
   }
 
-  getToken(): string | null {
-    return this.token;
+  getToken() {
+    return this.#token;
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const headers: Record<string, string> = {
+  async request(path, options = {}) {
+    const headers = {
       "Content-Type": "application/json",
       ...options.headers,
     };
 
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
+    if (this.#token) {
+      headers["Authorization"] = `Bearer ${this.#token}`;
     }
 
     const response = await fetch(`${API_BASE}${path}`, {
@@ -42,21 +40,20 @@ class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
-      const err = new ApiError(error.error || "Request failed", response.status);
-      throw err;
+      throw new ApiError(error.error || "Request failed", response.status);
     }
 
     return response.json();
   }
 
-  register(email: string, password: string, displayName: string) {
+  register(email, password, displayName) {
     return this.request("/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, password, display_name: displayName }),
     });
   }
 
-  login(email: string, password: string) {
+  login(email, password) {
     return this.request("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -71,52 +68,35 @@ class ApiClient {
     return this.request("/movies");
   }
 
-  getMovie(id: number) {
+  getMovie(id) {
     return this.request(`/movies/${id}`);
   }
 
-  createMovie(
-    data: {
-      title: string;
-      description?: string;
-      genre?: string;
-      year?: number;
-      runtime_minutes?: number;
-    },
-  ) {
+  createMovie(data) {
     return this.request("/movies", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  updateMovie(id: number, data: Record<string, unknown>) {
+  updateMovie(id, data) {
     return this.request(`/movies/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
-  deleteMovie(id: number) {
+  deleteMovie(id) {
     return this.request(`/movies/${id}`, {
       method: "DELETE",
     });
   }
 
-  getScenes(movieId: number) {
+  getScenes(movieId) {
     return this.request(`/movies/${movieId}/scenes`);
   }
 
-  createScene(
-    movieId: number,
-    data: {
-      scene_number: number;
-      description: string;
-      dialogue?: string;
-      visual_description?: string;
-      duration_seconds?: number;
-    },
-  ) {
+  createScene(movieId, data) {
     return this.request(`/movies/${movieId}/scenes`, {
       method: "POST",
       body: JSON.stringify(data),

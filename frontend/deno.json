@@ -1,4 +1,7 @@
 {
+  "imports": {
+    "lit": "npm:lit@^3.2.1"
+  },
   "formatter": {
     "lineWidth": 100
   },

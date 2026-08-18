@@ -1,10 +1,7 @@
-import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
-import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state } from "lit/decorators.ts";
+import { css, html, LitElement } from "lit";
 
-@customElement("app-header")
 export class AppHeader extends LitElement {
-  static override styles = css`
+  static styles = css`
     header {
       background-color: var(--color-surface);
       border-bottom: 1px solid var(--color-border);
@@ -74,18 +71,23 @@ export class AppHeader extends LitElement {
     }
   `;
 
-  @state()
-  private userName = "";
-  @state()
-  private isLoggedIn = false;
+  static properties = {
+    userName: {},
+    isLoggedIn: {},
+  };
 
-  setUserData(name: string, loggedIn: boolean): void {
-    this.userName = name;
-    this.isLoggedIn = loggedIn;
-    this.requestUpdate();
+  constructor() {
+    super();
+    this.userName = "";
+    this.isLoggedIn = false;
   }
 
-  override render() {
+  setUserData(name, loggedIn) {
+    this.userName = name;
+    this.isLoggedIn = loggedIn;
+  }
+
+  render() {
     return html`
       <header>
         <div class="header-content">
@@ -109,18 +111,20 @@ export class AppHeader extends LitElement {
     `;
   }
 
-  private _isActive(path: string): string {
+  _isActive(path) {
     const current = window.location.hash || "#/login";
     return current.includes(path) ? "active" : "";
   }
 
-  private _goHome(): void {
+  _goHome() {
     window.location.hash = this.isLoggedIn ? "#/movies" : "#/login";
   }
 
-  private _logout(): void {
+  _logout() {
     localStorage.removeItem("token");
     window.dispatchEvent(new CustomEvent("auth-change", { detail: { loggedIn: false } }));
     window.location.hash = "#/login";
   }
 }
+
+customElements.define("app-header", AppHeader);

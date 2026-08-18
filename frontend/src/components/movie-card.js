@@ -1,22 +1,7 @@
-import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
-import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, property } from "lit/decorators.ts";
+import { css, html, LitElement } from "lit";
 
-interface Movie {
-  id: number;
-  title: string;
-  description: string | null;
-  genre: string | null;
-  year: number | null;
-  runtime_minutes: number | null;
-  poster_url: string | null;
-  backdrop_url: string | null;
-  rating: number;
-}
-
-@customElement("movie-card")
 export class MovieCard extends LitElement {
-  static override styles = css`
+  static styles = css`
     .card {
       background-color: var(--color-surface);
       border: 1px solid var(--color-border);
@@ -84,10 +69,16 @@ export class MovieCard extends LitElement {
     }
   `;
 
-  @property({ type: Object })
-  movie!: Movie;
+  static properties = {
+    movie: { type: Object },
+  };
 
-  override render() {
+  constructor() {
+    super();
+    this.movie = null;
+  }
+
+  render() {
     return html`
       <div class="card" @click=${this._click}>
         <div class="poster">
@@ -113,7 +104,9 @@ export class MovieCard extends LitElement {
     `;
   }
 
-  private _click(): void {
+  _click() {
     this.dispatchEvent(new CustomEvent("navigate", { detail: this.movie.id, bubbles: true }));
   }
 }
+
+customElements.define("movie-card", MovieCard);
