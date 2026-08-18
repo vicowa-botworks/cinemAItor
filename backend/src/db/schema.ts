@@ -55,9 +55,11 @@ export function createUser(
 ): number {
   const db = getDb();
   const stmt = db.prepare(
-    "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
+    "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?) RETURNING id",
   );
-  return stmt.run(email, passwordHash, displayName);
+  const row = stmt.get<{ id: number }>(email, passwordHash, displayName);
+  if (!row) throw new Error("Failed to create user");
+  return row.id;
 }
 
 export function getUserById(id: number): User | undefined {
@@ -85,9 +87,9 @@ export function createMovie(
   const db = getDb();
   const stmt = db.prepare(
     `INSERT INTO movies (title, description, genre, year, runtime_minutes, poster_url, backdrop_url, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   );
-  return stmt.run(
+  const row = stmt.get<{ id: number }>(
     title,
     description ?? null,
     genre ?? null,
@@ -97,6 +99,8 @@ export function createMovie(
     backdropUrl ?? null,
     userId,
   );
+  if (!row) throw new Error("Failed to create movie");
+  return row.id;
 }
 
 export function getMovieById(id: number, userId: number): Movie | undefined {
@@ -107,7 +111,9 @@ export function getMovieById(id: number, userId: number): Movie | undefined {
 
 export function getUserMovies(userId: number): Movie[] {
   const db = getDb();
-  const stmt = db.prepare("SELECT * FROM movies WHERE user_id = ? ORDER BY created_at DESC");
+  const stmt = db.prepare(
+    "SELECT * FROM movies WHERE user_id = ? ORDER BY created_at DESC",
+  );
   return stmt.all(userId) as Movie[];
 }
 
@@ -158,7 +164,9 @@ export function updateMovie(
   fields.push("updated_at = datetime('now')");
   values.push(id, userId);
 
-  const stmt = db.prepare(`UPDATE movies SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`);
+  const stmt = db.prepare(
+    `UPDATE movies SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`,
+  );
   return (stmt.run as (...params: unknown[]) => number)(...values) > 0;
 }
 
@@ -180,9 +188,9 @@ export function createScene(
   const db = getDb();
   const stmt = db.prepare(
     `INSERT INTO scenes (movie_id, scene_number, description, dialogue, visual_description, duration_seconds, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   );
-  return stmt.run(
+  const row = stmt.get<{ id: number }>(
     movieId,
     sceneNumber,
     description,
@@ -191,6 +199,8 @@ export function createScene(
     durationSeconds ?? null,
     userId,
   );
+  if (!row) throw new Error("Failed to create scene");
+  return row.id;
 }
 
 export function getScenesByMovieId(movieId: number, userId: number): Scene[] {
@@ -214,9 +224,17 @@ export function createPrompt(
   const db = getDb();
   const stmt = db.prepare(
     `INSERT INTO prompts (movie_id, scene_id, user_id, role, content)
-     VALUES (?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?) RETURNING id`,
   );
-  return stmt.run(movieId ?? null, sceneId ?? null, userId, role, content);
+  const row = stmt.get<{ id: number }>(
+    movieId ?? null,
+    sceneId ?? null,
+    userId,
+    role,
+    content,
+  );
+  if (!row) throw new Error("Failed to create prompt");
+  return row.id;
 }
 
 export function getPromptsByMovieId(movieId: number, userId: number): Prompt[] {

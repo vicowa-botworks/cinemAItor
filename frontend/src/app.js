@@ -1,15 +1,12 @@
-import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
-import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state } from "lit/decorators.ts";
-import { api } from "./api.ts";
-import { AppHeader } from "./components/app-header.ts";
-import "./components/login-form.ts";
-import "./components/movie-list.ts";
-import "./components/movie-detail.ts";
+import { css, html, LitElement } from "lit";
+import { api } from "./api.js";
+import "./components/app-header.js";
+import "./components/login-form.js";
+import "./components/movie-list.js";
+import "./components/movie-detail.js";
 
-@customElement("app-root")
 export class AppRoot extends LitElement {
-  static override styles = css`
+  static styles = css`
     :host {
       display: block;
       min-height: 100vh;
@@ -24,28 +21,34 @@ export class AppRoot extends LitElement {
     }
   `;
 
-  @state()
-  private loggedIn = false;
-  @state()
-  private userName = "";
-  @state()
-  private currentView = "login";
-  @state()
-  private viewParams: Record<string, unknown> = {};
+  static properties = {
+    loggedIn: {},
+    userName: {},
+    currentView: {},
+    viewParams: {},
+  };
 
-  override connectedCallback(): Promise<void> {
+  constructor() {
+    super();
+    this.loggedIn = false;
+    this.userName = "";
+    this.currentView = "login";
+    this.viewParams = {};
+  }
+
+  connectedCallback() {
     super.connectedCallback?.();
     this._checkAuth();
     window.addEventListener("hashchange", () => this._route());
-    window.addEventListener("auth-change", (e: Event) => this._onAuthChange(e));
+    window.addEventListener("auth-change", (e) => this._onAuthChange(e));
     return Promise.resolve();
   }
 
-  private _checkAuth(): void {
+  _checkAuth() {
     const token = localStorage.getItem("token");
     if (token) {
       api.setToken(token);
-      api.getMe().then((user: { display_name: string }) => {
+      api.getMe().then((user) => {
         this.userName = user.display_name;
         this.loggedIn = true;
         this._updateHeader();
@@ -58,8 +61,8 @@ export class AppRoot extends LitElement {
     }
   }
 
-  private _onAuthChange(e: Event): void {
-    const detail = (e as CustomEvent).detail;
+  _onAuthChange(e) {
+    const detail = e.detail;
     this.loggedIn = detail.loggedIn;
     if (detail.loggedIn && detail.user) {
       this.userName = detail.user.display_name;
@@ -70,7 +73,7 @@ export class AppRoot extends LitElement {
     this._route();
   }
 
-  private _logout(): void {
+  _logout() {
     localStorage.removeItem("token");
     api.clearToken();
     this.loggedIn = false;
@@ -78,14 +81,14 @@ export class AppRoot extends LitElement {
     this._updateHeader();
   }
 
-  private _updateHeader(): void {
-    const header = this.shadowRoot?.querySelector("app-header") as AppHeader;
+  _updateHeader() {
+    const header = this.shadowRoot?.querySelector("app-header");
     if (header) {
       header.setUserData(this.userName, this.loggedIn);
     }
   }
 
-  private _route(): void {
+  _route() {
     const hash = window.location.hash || "#/login";
 
     if (hash === "#/login" || hash === "") {
@@ -123,7 +126,7 @@ export class AppRoot extends LitElement {
     this.requestUpdate();
   }
 
-  override render() {
+  render() {
     return html`
       <div class="app">
         <app-header></app-header>
@@ -134,7 +137,7 @@ export class AppRoot extends LitElement {
     `;
   }
 
-  private _renderView() {
+  _renderView() {
     switch (this.currentView) {
       case "login":
         return html`<login-form></login-form>`;
@@ -153,3 +156,5 @@ export class AppRoot extends LitElement {
     }
   }
 }
+
+customElements.define("app-root", AppRoot);

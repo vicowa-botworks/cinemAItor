@@ -1,23 +1,9 @@
-import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
-import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state } from "lit/decorators.ts";
-import { api } from "../api.ts";
+import { css, html, LitElement } from "lit";
+import { api } from "../api.js";
+import "./movie-card.js";
 
-interface Movie {
-  id: number;
-  title: string;
-  description: string | null;
-  genre: string | null;
-  year: number | null;
-  runtime_minutes: number | null;
-  poster_url: string | null;
-  backdrop_url: string | null;
-  rating: number;
-}
-
-@customElement("movie-list")
 export class MovieList extends LitElement {
-  static override styles = css`
+  static styles = css`
     .movie-list-container {
       max-width: 1200px;
       margin: 0 auto;
@@ -75,43 +61,45 @@ export class MovieList extends LitElement {
     }
   `;
 
-  @state()
-  private movies: Movie[] = [];
-  @state()
-  private loading = true;
-  @state()
-  private error = "";
+  static properties = {
+    movies: {},
+    loading: {},
+    error: {},
+  };
 
-  async connectedCallback(): Promise<void> {
+  constructor() {
+    super();
+    this.movies = [];
+    this.loading = true;
+    this.error = "";
+  }
+
+  async connectedCallback() {
     super.connectedCallback?.();
     await this._loadMovies();
   }
 
-  override updated(): void {
-    // Re-fetch when component becomes visible
-  }
-
-  private async _loadMovies(): Promise<void> {
+  async _loadMovies() {
     this.loading = true;
     this.error = "";
     try {
       this.movies = await api.getMovies();
-    } catch (err: unknown) {
-      this.error = (err as Error).message || "Failed to load movies";
+    } catch (err) {
+      this.error = err.message || "Failed to load movies";
     } finally {
       this.loading = false;
     }
   }
 
-  private _navigateToCreate(): void {
+  _navigateToCreate() {
     window.location.hash = "#/create";
   }
 
-  private _navigateToMovie(id: number): void {
+  _navigateToMovie(id) {
     window.location.hash = `#/movie/${id}`;
   }
 
-  override render() {
+  render() {
     if (this.loading) {
       return html`
         <div class="movie-list-container">
@@ -146,8 +134,8 @@ export class MovieList extends LitElement {
             <div class="movies-grid">
               ${this.movies.map((movie) =>
                 html`
-                  <movie-card .movie=${movie} @navigate=${(e: Event) =>
-                    this._navigateToMovie((e as CustomEvent).detail)}></movie-card>
+                  <movie-card .movie=${movie} @navigate=${(e) =>
+                    this._navigateToMovie(e.detail)}></movie-card>
                 `
               )}
             </div>
@@ -156,3 +144,5 @@ export class MovieList extends LitElement {
     `;
   }
 }
+
+customElements.define("movie-list", MovieList);

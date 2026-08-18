@@ -38,6 +38,21 @@ describe("Database", () => {
     const user = schema.getUserById(99999);
     assert(user === undefined, "user should be undefined");
   });
+
+  it("should assign distinct ids to consecutive users", () => {
+    const secondId = schema.createUser(
+      uniqueEmail("second"),
+      "hash111",
+      "Second User",
+    );
+    assert(secondId !== userId, "second user should get a distinct id");
+    const second = schema.getUserById(secondId);
+    assert(
+      second !== undefined,
+      "second user should be retrievable by returned id",
+    );
+    assertEquals(second?.display_name, "Second User");
+  });
 });
 
 describe("Movies", () => {
@@ -45,7 +60,11 @@ describe("Movies", () => {
 
   beforeEach(() => {
     getDb(true);
-    userId = schema.createUser(uniqueEmail("movietest"), "hash789", "Movie User");
+    userId = schema.createUser(
+      uniqueEmail("movietest"),
+      "hash789",
+      "Movie User",
+    );
   });
 
   afterEach(() => {
@@ -80,7 +99,11 @@ describe("Movies", () => {
   });
 
   it("should not return movies from other users", () => {
-    const otherUser = schema.createUser(uniqueEmail("other"), "hashghi", "Other");
+    const otherUser = schema.createUser(
+      uniqueEmail("other"),
+      "hashghi",
+      "Other",
+    );
     const movies = schema.getUserMovies(otherUser);
     assertEquals(movies.length, 0, "other user should have no movies");
   });
@@ -88,7 +111,10 @@ describe("Movies", () => {
   it("should update a movie", () => {
     const movieId = schema.createMovie("Original Title", userId);
 
-    const updated = schema.updateMovie(movieId, userId, { title: "Updated Title", rating: 4.5 });
+    const updated = schema.updateMovie(movieId, userId, {
+      title: "Updated Title",
+      rating: 4.5,
+    });
     assertEquals(updated, true);
 
     const movie = schema.getMovieById(movieId, userId);
@@ -113,7 +139,11 @@ describe("Scenes", () => {
 
   beforeEach(() => {
     getDb(true);
-    userId = schema.createUser(uniqueEmail("scenetest"), "hashpqr", "Scene User");
+    userId = schema.createUser(
+      uniqueEmail("scenetest"),
+      "hashpqr",
+      "Scene User",
+    );
     movieId = schema.createMovie("Scene Movie", userId);
   });
 

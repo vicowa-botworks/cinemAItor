@@ -1,22 +1,23 @@
 import { Router } from "@oak/oak/router";
-import { authMiddleware } from "@cinemaItor/middleware/auth.ts";
-import { createUser, getUserByEmail } from "@cinemaItor/db/schema.ts";
-import { generateToken } from "@cinemaItor/middleware/auth.ts";
+import { type AuthedContext, authMiddleware, generateToken } from "@cinemaItor/middleware/auth.ts";
+import { createUser, getUserByEmail, getUserById } from "@cinemaItor/db/schema.ts";
 
 const router = new Router()
   .post("/api/auth/register", async (ctx, _next) => {
     const body = ctx.request.body;
-    if (body.type !== "json") {
+    if (body.type() !== "json") {
       ctx.response.status = 400;
       ctx.response.body = { error: "Request body must be JSON" };
       return;
     }
 
-    const { email, password, display_name } = body.value;
+    const { email, password, display_name } = await body.json();
 
     if (!email || !password || !display_name) {
       ctx.response.status = 400;
-      ctx.response.body = { error: "Email, password, and display_name are required" };
+      ctx.response.body = {
+        error: "Email, password, and display_name are required",
+      };
       return;
     }
 
@@ -45,13 +46,13 @@ const router = new Router()
   })
   .post("/api/auth/login", async (ctx, _next) => {
     const body = ctx.request.body;
-    if (body.type !== "json") {
+    if (body.type() !== "json") {
       ctx.response.status = 400;
       ctx.response.body = { error: "Request body must be JSON" };
       return;
     }
 
-    const { email, password } = body.value;
+    const { email, password } = await body.json();
 
     if (!email || !password) {
       ctx.response.status = 400;
@@ -77,12 +78,17 @@ const router = new Router()
 
     ctx.response.body = {
       token,
-      user: { id: user.id, email: user.email, display_name: user.display_name, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        display_name: user.display_name,
+        role: user.role,
+      },
     };
   })
   .get("/api/auth/me", authMiddleware, (ctx, _next) => {
-    const userId = (ctx as unknown as { userId: number }).userId;
-    const user = getUserById(userId);
+    const userId = (ctx as unknown as AuthedContext).userId;
+    const user = userId ? getUserById(userId) : null;
 
     if (!user) {
       ctx.response.status = 404;
@@ -120,7 +126,10 @@ async function hashPassword(password: string): Promise<string> {
   return `${saltStr}:${hash}`;
 }
 
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
+async function verifyPassword(
+  password: string,
+  hash: string,
+): Promise<boolean> {
   const [saltStr, hashStr] = hash.split(":");
   if (!saltStr || !hashStr) return false;
 
@@ -149,10 +158,13 @@ function base64urlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/,
+    "",
+  );
 }
 
-function base64urlDecode(input: string): Uint8Array {
+function base64urlDecode(input: string): Uint8Array<ArrayBuffer> {
   let base64 = input.replace(/-/g, "+").replace(/_/g, "/");
   while (base64.length % 4 !== 0) {
     base64 += "=";

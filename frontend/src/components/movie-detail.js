@@ -1,23 +1,8 @@
-import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
-import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state } from "lit/decorators.ts";
-import { api } from "../api.ts";
+import { css, html, LitElement } from "lit";
+import { api } from "../api.js";
 
-interface Movie {
-  id: number;
-  title: string;
-  description: string | null;
-  genre: string | null;
-  year: number | null;
-  runtime_minutes: number | null;
-  poster_url: string | null;
-  backdrop_url: string | null;
-  rating: number;
-}
-
-@customElement("movie-detail")
 export class MovieDetail extends LitElement {
-  static override styles = css`
+  static styles = css`
     .detail-container {
       max-width: 900px;
       margin: 0 auto;
@@ -146,16 +131,22 @@ export class MovieDetail extends LitElement {
     }
   `;
 
-  @state()
-  private movie: Movie | null = null;
-  @state()
-  private loading = true;
-  @state()
-  private error = "";
-  @state()
-  private movieId: number | null = null;
+  static properties = {
+    movie: {},
+    loading: {},
+    error: {},
+    movieId: {},
+  };
 
-  async connectedCallback(): Promise<void> {
+  constructor() {
+    super();
+    this.movie = null;
+    this.loading = true;
+    this.error = "";
+    this.movieId = null;
+  }
+
+  async connectedCallback() {
     super.connectedCallback?.();
     const hash = window.location.hash;
     const match = hash.match(/\/movie\/(\d+)/);
@@ -168,35 +159,35 @@ export class MovieDetail extends LitElement {
     }
   }
 
-  private async _loadMovie(): Promise<void> {
+  async _loadMovie() {
     if (!this.movieId) return;
     this.loading = true;
     this.error = "";
     try {
       this.movie = await api.getMovie(this.movieId);
-    } catch (err: unknown) {
-      this.error = (err as Error).message || "Failed to load movie";
+    } catch (err) {
+      this.error = err.message || "Failed to load movie";
     } finally {
       this.loading = false;
     }
   }
 
-  private _goBack(): void {
+  _goBack() {
     window.location.hash = "#/movies";
   }
 
-  private _deleteMovie(): void {
+  _deleteMovie() {
     if (!confirm("Are you sure you want to delete this movie?")) return;
     if (!this.movieId) return;
 
     api.deleteMovie(this.movieId).then(() => {
       window.location.hash = "#/movies";
-    }).catch((err: unknown) => {
-      this.error = (err as Error).message || "Failed to delete movie";
+    }).catch((err) => {
+      this.error = err.message || "Failed to delete movie";
     });
   }
 
-  override render() {
+  render() {
     if (this.loading) {
       return html`
         <div class="detail-container">
@@ -258,3 +249,5 @@ export class MovieDetail extends LitElement {
     `;
   }
 }
+
+customElements.define("movie-detail", MovieDetail);

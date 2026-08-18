@@ -9,21 +9,19 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["**/*.ts"],
+    files: ["**/*.js"],
     languageOptions: {
       globals: {
         ...globals.browser,
       },
       parserOptions: {
-        project: false,
+        ecmaVersion: "latest",
+        sourceType: "module",
       },
-    },
-    rules: {
-      "no-undef": "off",
     },
   },
   {
-    files: ["src/server.ts", "tests/**/*.ts"],
+    files: ["src/server.js", "tests/**/*.js"],
     languageOptions: {
       globals: {
         ...globals.browser,

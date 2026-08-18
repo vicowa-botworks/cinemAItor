@@ -1,11 +1,8 @@
-import { css, html } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-html/lit-html.ts";
-import { LitElement } from "https://cdn.jsdelivr.net/gh/lit/deps@0.7.1/lit-element/lit-element.ts";
-import { customElement, state } from "lit/decorators.ts";
-import { api } from "../api.ts";
+import { css, html, LitElement } from "lit";
+import { api } from "../api.js";
 
-@customElement("login-form")
 export class LoginForm extends LitElement {
-  static override styles = css`
+  static styles = css`
     .login-container {
       display: flex;
       justify-content: center;
@@ -102,25 +99,31 @@ export class LoginForm extends LitElement {
     }
   `;
 
-  @state()
-  private isLogin = true;
-  @state()
-  private email = "";
-  @state()
-  private password = "";
-  @state()
-  private displayName = "";
-  @state()
-  private error = "";
-  @state()
-  private loading = false;
+  static properties = {
+    isLogin: {},
+    email: {},
+    password: {},
+    displayName: {},
+    error: {},
+    loading: {},
+  };
 
-  private _toggleMode(): void {
+  constructor() {
+    super();
+    this.isLogin = true;
+    this.email = "";
+    this.password = "";
+    this.displayName = "";
+    this.error = "";
+    this.loading = false;
+  }
+
+  _toggleMode() {
     this.isLogin = !this.isLogin;
     this.error = "";
   }
 
-  private async _submit(e: Event): Promise<void> {
+  async _submit(e) {
     e.preventDefault();
     this.error = "";
     this.loading = true;
@@ -147,14 +150,14 @@ export class LoginForm extends LitElement {
         );
         window.location.hash = "#/movies";
       }
-    } catch (err: unknown) {
-      this.error = (err as Error).message || "Authentication failed";
+    } catch (err) {
+      this.error = err.message || "Authentication failed";
     } finally {
       this.loading = false;
     }
   }
 
-  override render() {
+  render() {
     return html`
       <div class="login-container">
         <div class="login-card">
@@ -199,15 +202,17 @@ export class LoginForm extends LitElement {
     `;
   }
 
-  private _onDisplayNameInput(e: Event): void {
-    this.displayName = (e.target as HTMLInputElement).value;
+  _onDisplayNameInput(e) {
+    this.displayName = e.target.value;
   }
 
-  private _onEmailInput(e: Event): void {
-    this.email = (e.target as HTMLInputElement).value;
+  _onEmailInput(e) {
+    this.email = e.target.value;
   }
 
-  private _onPasswordInput(e: Event): void {
-    this.password = (e.target as HTMLInputElement).value;
+  _onPasswordInput(e) {
+    this.password = e.target.value;
   }
 }
+
+customElements.define("login-form", LoginForm);

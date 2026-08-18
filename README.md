@@ -71,6 +71,9 @@ deno task test:frontend
 # Lint all code (backend: deno lint, frontend: ESLint)
 deno task lint
 
+# Type check all code
+deno task check
+
 # Format all code
 deno task fmt
 
@@ -89,10 +92,11 @@ cinemAItor/
 │   │   ├── db/           # Database layer
 │   │   └── middleware/   # Auth middleware
 │   └── tests/            # Backend tests
-├── frontend/             # Deno + vanilla JS frontend
+├── frontend/             # Browser app: vanilla JS + Lit (no build step)
 │   ├── src/
-│   │   ├── app.ts        # Main app component
-│   │   ├── api.ts        # API client
+│   │   ├── app.js        # Main app component
+│   │   ├── api.js        # API client
+│   │   ├── server.js     # Static file server (Deno, dev only)
 │   │   ├── components/   # Web components
 │   │   └── styles/       # Global styles
 │   ├── tests/            # Frontend tests

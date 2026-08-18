@@ -17,7 +17,7 @@
 - [x] Formatting configured (Deno fmt)
 - [x] Backend test suite (schema operations)
 - [x] Frontend test suite (API client)
-- [x] GitHub Actions CI pipeline (lint, format, test)
+- [x] GitHub Actions CI pipeline (lint, type check, format, test)
 - [x] Documentation: README.md, ARCHITECTURE.md
 
 ### In Progress

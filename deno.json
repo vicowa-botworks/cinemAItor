@@ -2,7 +2,7 @@
   "tasks": {
     "setup": "deno install && cd backend && deno install && cd ../frontend && deno install",
     "dev:backend": "cd backend && deno run --watch --allow-net --allow-env --allow-read --allow-write --allow-ffi src/server.ts",
-    "dev:frontend": "cd frontend && deno run --allow-net --allow-env src/server.ts",
+    "dev:frontend": "cd frontend && deno run --allow-net --allow-env --allow-read src/server.js",
     "dev": "deno run -A dev.ts",
     "test:backend": "cd backend && deno test --allow-net --allow-env --allow-read --allow-write --allow-ffi",
     "test:frontend": "cd frontend && deno test --allow-net --allow-env",
@@ -10,6 +10,9 @@
     "lint": "deno task lint:backend && deno task lint:frontend",
     "lint:backend": "cd backend && deno lint",
     "lint:frontend": "cd frontend && deno run -A npm:eslint@^9.33.0 .",
+    "check": "deno task check:backend && deno task check:frontend",
+    "check:backend": "cd backend && deno check src tests",
+    "check:frontend": "cd frontend && deno check src tests",
     "fmt": "deno fmt",
     "start": "cd backend && deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi src/server.ts"
   },

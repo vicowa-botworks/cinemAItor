@@ -16,8 +16,14 @@ app.use(async (ctx, next) => {
   if (origin && corsOptions.origin.includes(origin)) {
     ctx.response.headers.set("Access-Control-Allow-Origin", origin);
   }
-  ctx.response.headers.set("Access-Control-Allow-Methods", corsOptions.allowMethods.join(", "));
-  ctx.response.headers.set("Access-Control-Allow-Headers", corsOptions.allowHeaders.join(", "));
+  ctx.response.headers.set(
+    "Access-Control-Allow-Methods",
+    corsOptions.allowMethods.join(", "),
+  );
+  ctx.response.headers.set(
+    "Access-Control-Allow-Headers",
+    corsOptions.allowHeaders.join(", "),
+  );
 
   if (ctx.request.method === "OPTIONS") {
     ctx.response.status = 204;

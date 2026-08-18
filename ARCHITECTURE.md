@@ -23,7 +23,7 @@ write scenes, and generate content using AI tools.
 | Component    | Technology                                     | Justification                                              |
 | ------------ | ---------------------------------------------- | ---------------------------------------------------------- |
 | Runtime      | Deno (serve command)                           | Serves static files and proxies API requests               |
-| UI Framework | Lit (via CDN)                                  | Lightweight web components library with reactive rendering |
+| UI Framework | Lit (ESM CDN via import map)                   | Lightweight web components library with reactive rendering |
 | Styling      | CSS with Shadow DOM                            | Encapsulated styles per component                          |
 | State        | Browser storage (localStorage) + custom events | Simple, no external state management                       |
 | Routing      | Hash-based (`#/movies`, `#/login`)             | No server-side routing needed                              |
@@ -33,6 +33,7 @@ write scenes, and generate content using AI tools.
 | Component  | Technology                                     |
 | ---------- | ---------------------------------------------- |
 | Linting    | `deno lint` (backend), ESLint (frontend)       |
+| Type Check | `deno check` (backend and frontend)            |
 | Formatting | Deno built-in `deno fmt`                       |
 | Testing    | Deno built-in test runner (`@std/testing/bdd`) |
 | CI/CD      | GitHub Actions                                 |
@@ -57,7 +58,9 @@ write scenes, and generate content using AI tools.
 
 ### Frontend Architecture
 
-The frontend uses a component-based architecture built on Web Components with Lit:
+The frontend is plain JavaScript (no build step). It uses a component-based architecture built on
+Web Components with Lit, loaded from an ESM CDN via an import map. For production, a minifier is the
+only planned processing step:
 
 ```
 app-root (main router)
@@ -189,7 +192,7 @@ Authenticated Request:
 
 #### Frontend
 
-- Lit (loaded via CDN in browser) - Web components library
+- Lit (loaded from ESM CDN via import map in the browser) - Web components library
 - No other dependencies
 
 ## Future Considerations

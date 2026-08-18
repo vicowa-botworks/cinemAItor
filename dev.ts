@@ -6,7 +6,7 @@ const backend = new Deno.Command(Deno.execPath(), {
 });
 
 const frontend = new Deno.Command(Deno.execPath(), {
-  args: ["run", "-A", "src/server.ts"],
+  args: ["run", "-A", "src/server.js"],
   cwd: new URL("frontend", import.meta.url),
   stdout: "inherit",
   stderr: "inherit",
