@@ -11,7 +11,7 @@ describe("Database", () => {
   let userId: number;
 
   beforeEach(() => {
-    getDb(true);
+    getDb(":memory:");
     userId = schema.createUser(uniqueEmail("test"), "hash123", "Test User");
   });
 
@@ -59,7 +59,7 @@ describe("Movies", () => {
   let userId: number;
 
   beforeEach(() => {
-    getDb(true);
+    getDb(":memory:");
     userId = schema.createUser(
       uniqueEmail("movietest"),
       "hash789",
@@ -138,7 +138,7 @@ describe("Scenes", () => {
   let movieId: number;
 
   beforeEach(() => {
-    getDb(true);
+    getDb(":memory:");
     userId = schema.createUser(
       uniqueEmail("scenetest"),
       "hashpqr",
