@@ -2,7 +2,8 @@
 
 This is an execution plan for building the product described in `GOAL.md`.
 
-It is intentionally organized by **dependencies, work packages, milestones, and acceptance criteria** rather than by calendar time. No time estimates are included.
+It is intentionally organized by **dependencies, work packages, milestones, and acceptance
+criteria** rather than by calendar time. No time estimates are included.
 
 The plan assumes:
 
@@ -179,19 +180,19 @@ Important architectural decisions:
 
 # 4. Recommended Technology Choices
 
-| Area | Choice | Notes |
-|---|---|---|
-| Backend | Deno | Runs directly, no build step |
-| API | HTTP + WebSocket | REST for CRUD, WS for jobs/live updates |
-| Database | SQLite | Metadata, queue, versions, audit |
-| Frontend | Vanilla JavaScript | Web components + Shadow DOM |
-| Frontend build | None | ES modules only |
-| Media processing | FFmpeg | Required |
-| Job processing | In-process or separate Deno runner | Queue-backed |
-| Model runtime | Adapter layer | ComfyUI, local CLI, local HTTP server, etc. |
-| 3D preview | Three.js or equivalent vendored ES module | No build step |
-| Packaging | Docker / tarball / install script | Linux primary |
-| Testing | Deno test, Playwright for UI | Optional real-model tests behind flag |
+| Area             | Choice                                    | Notes                                       |
+| ---------------- | ----------------------------------------- | ------------------------------------------- |
+| Backend          | Deno                                      | Runs directly, no build step                |
+| API              | HTTP + WebSocket                          | REST for CRUD, WS for jobs/live updates     |
+| Database         | SQLite                                    | Metadata, queue, versions, audit            |
+| Frontend         | Vanilla JavaScript                        | Web components + Shadow DOM                 |
+| Frontend build   | None                                      | ES modules only                             |
+| Media processing | FFmpeg                                    | Required                                    |
+| Job processing   | In-process or separate Deno runner        | Queue-backed                                |
+| Model runtime    | Adapter layer                             | ComfyUI, local CLI, local HTTP server, etc. |
+| 3D preview       | Three.js or equivalent vendored ES module | No build step                               |
+| Packaging        | Docker / tarball / install script         | Linux primary                               |
+| Testing          | Deno test, Playwright for UI              | Optional real-model tests behind flag       |
 
 ## 4.1 Deno Notes
 
@@ -1816,318 +1817,318 @@ The backlog below is intentionally acceptance-based.
 
 ## 11.1 Foundations
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| FND-001 | Create Deno backend skeleton | Server starts, health endpoint works |
-| FND-002 | Create config system | Config from env + file, validated |
-| FND-003 | Create structured logging | Logs include request/job/user context |
-| FND-004 | Create error model | Consistent API error shape |
-| FND-005 | Create static frontend server | Serves local HTML/JS/CSS |
-| FND-006 | Create web component shell | App loads pages via components |
-| FND-007 | Create SQLite migration system | Migrations run idempotently |
-| FND-008 | Create base DB schema | Core tables exist |
-| FND-009 | Create WebSocket gateway | Client can subscribe to events |
-| FND-010 | Create unit test harness | Deno tests pass |
-| FND-011 | Create CI pipeline | fmt/lint/test run |
-| FND-012 | Create local install script | One-command local start |
-| FND-013 | Create Docker image | App runs in container |
+| ID      | Task                           | Acceptance Criteria                   |
+| ------- | ------------------------------ | ------------------------------------- |
+| FND-001 | Create Deno backend skeleton   | Server starts, health endpoint works  |
+| FND-002 | Create config system           | Config from env + file, validated     |
+| FND-003 | Create structured logging      | Logs include request/job/user context |
+| FND-004 | Create error model             | Consistent API error shape            |
+| FND-005 | Create static frontend server  | Serves local HTML/JS/CSS              |
+| FND-006 | Create web component shell     | App loads pages via components        |
+| FND-007 | Create SQLite migration system | Migrations run idempotently           |
+| FND-008 | Create base DB schema          | Core tables exist                     |
+| FND-009 | Create WebSocket gateway       | Client can subscribe to events        |
+| FND-010 | Create unit test harness       | Deno tests pass                       |
+| FND-011 | Create CI pipeline             | fmt/lint/test run                     |
+| FND-012 | Create local install script    | One-command local start               |
+| FND-013 | Create Docker image            | App runs in container                 |
 
 ## 11.2 Storage and Media
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| STO-001 | Define storage layout | `app_data` structure created |
-| STO-002 | Implement checksum utility | SHA256 works for files |
-| STO-003 | Implement content-addressed store | Files stored by hash |
-| STO-004 | Implement upload pipeline | Uploads stream to disk safely |
-| STO-005 | Implement atomic file writes | No partial files remain |
-| STO-006 | Implement duplicate detection | Same hash reuses stored file |
-| STO-007 | Implement thumbnail generation | Image/video thumbnails work |
-| STO-008 | Implement proxy generation | Proxy files created for video/audio |
-| STO-009 | Implement waveform generation | Audio waveform preview works |
-| STO-010 | Implement integrity scan | Missing/corrupt files detected |
-| STO-011 | Implement storage usage report | Size by project/asset/model/cache |
-| STO-012 | Implement cache cleanup | Safe cleanup of regenerable files |
+| ID      | Task                              | Acceptance Criteria                 |
+| ------- | --------------------------------- | ----------------------------------- |
+| STO-001 | Define storage layout             | `app_data` structure created        |
+| STO-002 | Implement checksum utility        | SHA256 works for files              |
+| STO-003 | Implement content-addressed store | Files stored by hash                |
+| STO-004 | Implement upload pipeline         | Uploads stream to disk safely       |
+| STO-005 | Implement atomic file writes      | No partial files remain             |
+| STO-006 | Implement duplicate detection     | Same hash reuses stored file        |
+| STO-007 | Implement thumbnail generation    | Image/video thumbnails work         |
+| STO-008 | Implement proxy generation        | Proxy files created for video/audio |
+| STO-009 | Implement waveform generation     | Audio waveform preview works        |
+| STO-010 | Implement integrity scan          | Missing/corrupt files detected      |
+| STO-011 | Implement storage usage report    | Size by project/asset/model/cache   |
+| STO-012 | Implement cache cleanup           | Safe cleanup of regenerable files   |
 
 ## 11.3 Auth and Authorization
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| AUT-001 | Bootstrap first local user | Initial account can be created |
-| AUT-002 | Password login/logout | Session works |
-| AUT-003 | Role-based permissions | admin/editor/viewer enforced |
-| AUT-004 | Project ownership | Users can only access permitted projects |
-| AUT-005 | Asset ownership | Users can only access permitted assets |
-| AUT-006 | Audit logging | Sensitive actions logged |
-| AUT-007 | Session invalidation | Logout revokes access |
-| AUT-008 | Secret storage | API/session secrets handled safely |
+| ID      | Task                       | Acceptance Criteria                      |
+| ------- | -------------------------- | ---------------------------------------- |
+| AUT-001 | Bootstrap first local user | Initial account can be created           |
+| AUT-002 | Password login/logout      | Session works                            |
+| AUT-003 | Role-based permissions     | admin/editor/viewer enforced             |
+| AUT-004 | Project ownership          | Users can only access permitted projects |
+| AUT-005 | Asset ownership            | Users can only access permitted assets   |
+| AUT-006 | Audit logging              | Sensitive actions logged                 |
+| AUT-007 | Session invalidation       | Logout revokes access                    |
+| AUT-008 | Secret storage             | API/session secrets handled safely       |
 
 ## 11.4 Projects
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| PRJ-001 | Create project | Project row + directories created |
-| PRJ-002 | Project settings | Aspect/fps/resolution/audio defaults stored |
-| PRJ-003 | Open project | Metadata loads, directories verified |
-| PRJ-004 | Save project | Metadata persisted |
-| PRJ-005 | Close project | Active project state cleared safely |
-| PRJ-006 | Rename project | References remain valid |
-| PRJ-007 | Archive/delete project | Soft delete/archive with confirmation |
-| PRJ-008 | Project snapshots | Snapshot can be created and restored |
-| PRJ-009 | Missing media report | Missing files listed per project |
-| PRJ-010 | Recent projects list | Dashboard shows recents |
-| PRJ-011 | Project search | Search by name/description/status |
+| ID      | Task                   | Acceptance Criteria                         |
+| ------- | ---------------------- | ------------------------------------------- |
+| PRJ-001 | Create project         | Project row + directories created           |
+| PRJ-002 | Project settings       | Aspect/fps/resolution/audio defaults stored |
+| PRJ-003 | Open project           | Metadata loads, directories verified        |
+| PRJ-004 | Save project           | Metadata persisted                          |
+| PRJ-005 | Close project          | Active project state cleared safely         |
+| PRJ-006 | Rename project         | References remain valid                     |
+| PRJ-007 | Archive/delete project | Soft delete/archive with confirmation       |
+| PRJ-008 | Project snapshots      | Snapshot can be created and restored        |
+| PRJ-009 | Missing media report   | Missing files listed per project            |
+| PRJ-010 | Recent projects list   | Dashboard shows recents                     |
+| PRJ-011 | Project search         | Search by name/description/status           |
 
 ## 11.5 Assets and Versioning
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| AST-001 | Create asset | Asset metadata stored |
-| AST-002 | Upload asset | File stored, version created |
-| AST-003 | Assign unique `@name` | Slug unique globally |
-| AST-004 | Add aliases | Asset can have multiple `@` names |
-| AST-005 | Global/project scope | Assets can be global or project-scoped |
-| AST-006 | Asset metadata | Type, description, tags, license, source stored |
-| AST-007 | Asset versions | New upload/generation creates new version |
-| AST-008 | Active version pointer | Asset points to active version |
-| AST-009 | Restore version | Old version can become active again |
-| AST-010 | Version notes | Notes stored per version |
-| AST-011 | Version preview | Each version previewable |
-| AST-012 | Asset search | Search by name/type/tag/project/date |
-| AST-013 | Asset filters | Filter by type/status/license/project |
-| AST-014 | Asset preview panel | Thumbnail/waveform/3D placeholder shown |
-| AST-015 | Dependency tracking | Shows scenes/timelines referencing asset |
-| AST-016 | Missing reference warning | Deleting referenced asset warns |
-| AST-017 | Soft delete/archive | Deleted assets recoverable |
+| ID      | Task                      | Acceptance Criteria                             |
+| ------- | ------------------------- | ----------------------------------------------- |
+| AST-001 | Create asset              | Asset metadata stored                           |
+| AST-002 | Upload asset              | File stored, version created                    |
+| AST-003 | Assign unique `@name`     | Slug unique globally                            |
+| AST-004 | Add aliases               | Asset can have multiple `@` names               |
+| AST-005 | Global/project scope      | Assets can be global or project-scoped          |
+| AST-006 | Asset metadata            | Type, description, tags, license, source stored |
+| AST-007 | Asset versions            | New upload/generation creates new version       |
+| AST-008 | Active version pointer    | Asset points to active version                  |
+| AST-009 | Restore version           | Old version can become active again             |
+| AST-010 | Version notes             | Notes stored per version                        |
+| AST-011 | Version preview           | Each version previewable                        |
+| AST-012 | Asset search              | Search by name/type/tag/project/date            |
+| AST-013 | Asset filters             | Filter by type/status/license/project           |
+| AST-014 | Asset preview panel       | Thumbnail/waveform/3D placeholder shown         |
+| AST-015 | Dependency tracking       | Shows scenes/timelines referencing asset        |
+| AST-016 | Missing reference warning | Deleting referenced asset warns                 |
+| AST-017 | Soft delete/archive       | Deleted assets recoverable                      |
 
 ## 11.6 Reference Engine
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| REF-001 | Parse `@name` tokens | Detects valid tokens in prompt text |
-| REF-002 | Resolve references | Maps token to asset + active version |
-| REF-003 | Versioned references | Supports `@name:v2` style syntax |
-| REF-004 | Role assignment | Character/location/style/etc. can be set |
-| REF-005 | Missing reference status | Unresolved references flagged |
-| REF-006 | Reference audit | Lists all references by project/scene |
-| REF-007 | Reference replacement | Broken ref can be remapped |
-| REF-008 | Reference suggestions | UI can suggest assets while typing |
-| REF-009 | Reference position storage | Start/end positions stored when useful |
-| REF-010 | Prompt integration | Prompt editor highlights references |
+| ID      | Task                       | Acceptance Criteria                      |
+| ------- | -------------------------- | ---------------------------------------- |
+| REF-001 | Parse `@name` tokens       | Detects valid tokens in prompt text      |
+| REF-002 | Resolve references         | Maps token to asset + active version     |
+| REF-003 | Versioned references       | Supports `@name:v2` style syntax         |
+| REF-004 | Role assignment            | Character/location/style/etc. can be set |
+| REF-005 | Missing reference status   | Unresolved references flagged            |
+| REF-006 | Reference audit            | Lists all references by project/scene    |
+| REF-007 | Reference replacement      | Broken ref can be remapped               |
+| REF-008 | Reference suggestions      | UI can suggest assets while typing       |
+| REF-009 | Reference position storage | Start/end positions stored when useful   |
+| REF-010 | Prompt integration         | Prompt editor highlights references      |
 
 ## 11.7 Prompt Versioning
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| PMP-001 | Store prompt versions | Prompt edits create new version |
-| PMP-002 | Prompt content hash | Duplicate content detected |
-| PMP-003 | Prompt history UI | User can view prompt versions |
-| PMP-004 | Restore prompt | Older prompt can be restored |
-| PMP-005 | Link generations to prompt version | Job stores prompt version used |
+| ID      | Task                               | Acceptance Criteria             |
+| ------- | ---------------------------------- | ------------------------------- |
+| PMP-001 | Store prompt versions              | Prompt edits create new version |
+| PMP-002 | Prompt content hash                | Duplicate content detected      |
+| PMP-003 | Prompt history UI                  | User can view prompt versions   |
+| PMP-004 | Restore prompt                     | Older prompt can be restored    |
+| PMP-005 | Link generations to prompt version | Job stores prompt version used  |
 
 ## 11.8 Model Manager
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| MOD-001 | Model registry | Installed models listed |
-| MOD-002 | Model metadata | Name/version/license/backend/tasks stored |
-| MOD-003 | Install model | Model files downloaded/copied locally |
-| MOD-004 | Verify model | Hash/checksum validation works |
-| MOD-005 | Remove model | Model removed with metadata cleanup |
-| MOD-006 | Enable/disable model | Disabled model not usable |
-| MOD-007 | Health check | Model load/run test works |
-| MOD-008 | Task mapping | Model associated with supported tasks |
-| MOD-009 | Hardware detection | CPU/RAM/GPU info detected |
-| MOD-010 | Requirement warnings | Missing dependencies shown |
-| MOD-011 | Model presets | Default settings per model stored |
-| MOD-012 | License display | License visible in UI |
-| MOD-013 | Model source consent | Network/model source use is explicit |
-| MOD-014 | Model catalog | Local/user-controlled catalog browsable |
+| ID      | Task                 | Acceptance Criteria                       |
+| ------- | -------------------- | ----------------------------------------- |
+| MOD-001 | Model registry       | Installed models listed                   |
+| MOD-002 | Model metadata       | Name/version/license/backend/tasks stored |
+| MOD-003 | Install model        | Model files downloaded/copied locally     |
+| MOD-004 | Verify model         | Hash/checksum validation works            |
+| MOD-005 | Remove model         | Model removed with metadata cleanup       |
+| MOD-006 | Enable/disable model | Disabled model not usable                 |
+| MOD-007 | Health check         | Model load/run test works                 |
+| MOD-008 | Task mapping         | Model associated with supported tasks     |
+| MOD-009 | Hardware detection   | CPU/RAM/GPU info detected                 |
+| MOD-010 | Requirement warnings | Missing dependencies shown                |
+| MOD-011 | Model presets        | Default settings per model stored         |
+| MOD-012 | License display      | License visible in UI                     |
+| MOD-013 | Model source consent | Network/model source use is explicit      |
+| MOD-014 | Model catalog        | Local/user-controlled catalog browsable   |
 
 ## 11.9 Generation Pipeline
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| GEN-001 | Job queue | Jobs stored and claimed safely |
-| GEN-002 | Job API | Create/list/get jobs |
-| GEN-003 | Job runner | Runner executes queued jobs |
-| GEN-004 | Job events | Progress events stored and streamed |
-| GEN-005 | Job cancel | Active job can be cancelled |
-| GEN-006 | Job retry | Failed job can be retried |
-| GEN-007 | Adapter interface | Common model runtime interface exists |
-| GEN-008 | Mock adapter | Tests can simulate generation |
-| GEN-009 | Text-to-image adapter | T2I generation works |
-| GEN-010 | Image-to-video adapter | I2V generation works |
-| GEN-011 | Candidate output | Multiple candidates can be produced |
-| GEN-012 | Seed control | Fixed/random seed supported |
-| GEN-013 | Settings schema | Settings stored as JSON |
-| GEN-014 | Input references | Input asset versions attached |
-| GEN-015 | Provenance | Output version records full generation context |
-| GEN-016 | Concurrency control | One GPU job at a time by default |
-| GEN-017 | Job recovery | Jobs recover gracefully after restart |
-| GEN-018 | Error reporting | Clear user-facing errors |
-| GEN-019 | Low-res preview option | Preview generation supported |
-| GEN-020 | Full-quality generation | Final generation supported after preview |
+| ID      | Task                    | Acceptance Criteria                            |
+| ------- | ----------------------- | ---------------------------------------------- |
+| GEN-001 | Job queue               | Jobs stored and claimed safely                 |
+| GEN-002 | Job API                 | Create/list/get jobs                           |
+| GEN-003 | Job runner              | Runner executes queued jobs                    |
+| GEN-004 | Job events              | Progress events stored and streamed            |
+| GEN-005 | Job cancel              | Active job can be cancelled                    |
+| GEN-006 | Job retry               | Failed job can be retried                      |
+| GEN-007 | Adapter interface       | Common model runtime interface exists          |
+| GEN-008 | Mock adapter            | Tests can simulate generation                  |
+| GEN-009 | Text-to-image adapter   | T2I generation works                           |
+| GEN-010 | Image-to-video adapter  | I2V generation works                           |
+| GEN-011 | Candidate output        | Multiple candidates can be produced            |
+| GEN-012 | Seed control            | Fixed/random seed supported                    |
+| GEN-013 | Settings schema         | Settings stored as JSON                        |
+| GEN-014 | Input references        | Input asset versions attached                  |
+| GEN-015 | Provenance              | Output version records full generation context |
+| GEN-016 | Concurrency control     | One GPU job at a time by default               |
+| GEN-017 | Job recovery            | Jobs recover gracefully after restart          |
+| GEN-018 | Error reporting         | Clear user-facing errors                       |
+| GEN-019 | Low-res preview option  | Preview generation supported                   |
+| GEN-020 | Full-quality generation | Final generation supported after preview       |
 
 ## 11.10 Storyboard
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| STB-001 | Create storyboard | Storyboard per project |
-| STB-002 | Add panel | Panel represents a shot |
-| STB-003 | Panel prompt | Prompt editor with references |
-| STB-004 | Panel references | Assets can be attached |
-| STB-005 | Panel duration | Duration stored |
-| STB-006 | Panel camera fields | Shot size/angle/movement stored |
-| STB-007 | Panel mood/lighting | Mood/time/lighting stored |
-| STB-008 | Panel status | Draft/approved/generated/needs revision |
-| STB-009 | Panel preview generation | Generate image preview |
-| STB-010 | Panel ordering | Panels can be reordered |
-| STB-011 | Panel notes | Notes stored |
-| STB-012 | Storyboard export | Export as PDF/PNG/ZIP later |
+| ID      | Task                     | Acceptance Criteria                     |
+| ------- | ------------------------ | --------------------------------------- |
+| STB-001 | Create storyboard        | Storyboard per project                  |
+| STB-002 | Add panel                | Panel represents a shot                 |
+| STB-003 | Panel prompt             | Prompt editor with references           |
+| STB-004 | Panel references         | Assets can be attached                  |
+| STB-005 | Panel duration           | Duration stored                         |
+| STB-006 | Panel camera fields      | Shot size/angle/movement stored         |
+| STB-007 | Panel mood/lighting      | Mood/time/lighting stored               |
+| STB-008 | Panel status             | Draft/approved/generated/needs revision |
+| STB-009 | Panel preview generation | Generate image preview                  |
+| STB-010 | Panel ordering           | Panels can be reordered                 |
+| STB-011 | Panel notes              | Notes stored                            |
+| STB-012 | Storyboard export        | Export as PDF/PNG/ZIP later             |
 
 ## 11.11 Scenes and Shots
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| SCN-001 | Create scene | Scene within project |
-| SCN-002 | Scene prompt | Prompt with references |
-| SCN-003 | Scene references | References resolved and listed |
-| SCN-004 | Scene status | Draft/generated/editing/approved/rejected |
-| SCN-005 | Scene duration | Target duration stored |
-| SCN-006 | Scene versioning | Prompt/structure changes versioned |
-| SCN-007 | Generate scene media | Generate clip from scene |
-| SCN-008 | Shot list | Scene can contain multiple shots |
-| SCN-009 | Shot prompt | Each shot has prompt |
-| SCN-010 | Shot references | Each shot resolves references |
-| SCN-011 | Shot duration | Duration per shot |
-| SCN-012 | Generate shot | Generate clip from shot |
-| SCN-013 | Scene notes | Notes stored |
-| SCN-014 | Scene audio plan | Dialogue/SFX/music fields stored |
+| ID      | Task                 | Acceptance Criteria                       |
+| ------- | -------------------- | ----------------------------------------- |
+| SCN-001 | Create scene         | Scene within project                      |
+| SCN-002 | Scene prompt         | Prompt with references                    |
+| SCN-003 | Scene references     | References resolved and listed            |
+| SCN-004 | Scene status         | Draft/generated/editing/approved/rejected |
+| SCN-005 | Scene duration       | Target duration stored                    |
+| SCN-006 | Scene versioning     | Prompt/structure changes versioned        |
+| SCN-007 | Generate scene media | Generate clip from scene                  |
+| SCN-008 | Shot list            | Scene can contain multiple shots          |
+| SCN-009 | Shot prompt          | Each shot has prompt                      |
+| SCN-010 | Shot references      | Each shot resolves references             |
+| SCN-011 | Shot duration        | Duration per shot                         |
+| SCN-012 | Generate shot        | Generate clip from shot                   |
+| SCN-013 | Scene notes          | Notes stored                              |
+| SCN-014 | Scene audio plan     | Dialogue/SFX/music fields stored          |
 
 ## 11.12 Review Workflow
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| REV-001 | Candidate view | Show candidates for job |
-| REV-002 | Approve candidate | Candidate marked approved |
-| REV-003 | Reject candidate | Candidate marked rejected |
-| REV-004 | Use candidate | Approved candidate placed into asset/timeline |
+| ID      | Task                   | Acceptance Criteria                           |
+| ------- | ---------------------- | --------------------------------------------- |
+| REV-001 | Candidate view         | Show candidates for job                       |
+| REV-002 | Approve candidate      | Candidate marked approved                     |
+| REV-003 | Reject candidate       | Candidate marked rejected                     |
+| REV-004 | Use candidate          | Approved candidate placed into asset/timeline |
 | REV-005 | Promote active version | Approved version becomes asset active version |
-| REV-006 | A/B comparison | Two candidates compared side by side |
-| REV-007 | Shortlist | Favorites marked |
-| REV-008 | Review notes | Notes per candidate |
-| REV-009 | Review board view | Many shots/assets reviewable in one view |
+| REV-006 | A/B comparison         | Two candidates compared side by side          |
+| REV-007 | Shortlist              | Favorites marked                              |
+| REV-008 | Review notes           | Notes per candidate                           |
+| REV-009 | Review board view      | Many shots/assets reviewable in one view      |
 
 ## 11.13 Timeline Editor
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| TIM-001 | Create timeline | Timeline per project |
-| TIM-002 | Video track | Add video track |
-| TIM-003 | Audio track | Add audio track |
-| TIM-004 | Add clip | Asset version placed on track |
-| TIM-005 | Reorder clip | Drag/reorder works |
-| TIM-006 | Trim clip | In/out points adjust |
-| TIM-007 | Split clip | Split at playhead |
-| TIM-008 | Delete clip | Item removed |
-| TIM-009 | Duplicate clip | Item duplicated |
-| TIM-010 | Playback | Play selected range/full timeline |
-| TIM-011 | Undo/redo | Timeline actions reversible |
-| TIM-012 | Timeline snapshots | Snapshots can be saved/restored |
-| TIM-013 | Markers | Markers/notes added |
-| TIM-014 | Lock/mute tracks | Track state changes work |
-| TIM-015 | Text overlay | Titles/credits added later |
-| TIM-016 | Subtitles | SRT/VTT support later |
-| TIM-017 | Effects | Basic effects later |
-| TIM-018 | Color grading | LUT/grade applied later |
-| TIM-019 | Transitions | Fade/dissolve/cut/wipe later |
+| ID      | Task               | Acceptance Criteria               |
+| ------- | ------------------ | --------------------------------- |
+| TIM-001 | Create timeline    | Timeline per project              |
+| TIM-002 | Video track        | Add video track                   |
+| TIM-003 | Audio track        | Add audio track                   |
+| TIM-004 | Add clip           | Asset version placed on track     |
+| TIM-005 | Reorder clip       | Drag/reorder works                |
+| TIM-006 | Trim clip          | In/out points adjust              |
+| TIM-007 | Split clip         | Split at playhead                 |
+| TIM-008 | Delete clip        | Item removed                      |
+| TIM-009 | Duplicate clip     | Item duplicated                   |
+| TIM-010 | Playback           | Play selected range/full timeline |
+| TIM-011 | Undo/redo          | Timeline actions reversible       |
+| TIM-012 | Timeline snapshots | Snapshots can be saved/restored   |
+| TIM-013 | Markers            | Markers/notes added               |
+| TIM-014 | Lock/mute tracks   | Track state changes work          |
+| TIM-015 | Text overlay       | Titles/credits added later        |
+| TIM-016 | Subtitles          | SRT/VTT support later             |
+| TIM-017 | Effects            | Basic effects later               |
+| TIM-018 | Color grading      | LUT/grade applied later           |
+| TIM-019 | Transitions        | Fade/dissolve/cut/wipe later      |
 
 ## 11.14 Audio and Music
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| AUD-001 | Import audio | WAV/MP3/etc. imported |
-| AUD-002 | Audio asset versioning | Audio versions supported |
-| AUD-003 | Add audio to timeline | Audio clip placed on track |
-| AUD-004 | Audio trim | In/out points adjust |
-| AUD-005 | Basic gain | Per-clip volume control |
-| AUD-006 | Waveform display | Waveform preview works |
-| AUD-007 | Basic mixer | Track-level gain/mute/lock |
-| AUD-008 | Music import | Music file can be imported and used |
-| AUD-009 | Music generation | Generate music from prompt/mood |
-| AUD-010 | Voiceover generation | Generate voice from text |
-| AUD-011 | SFX generation | Generate sound effects |
-| AUD-012 | Audio cleanup | Denoise/normalize later |
-| AUD-013 | Ducking | Music lowers under dialogue |
-| AUD-014 | Subtitle generation | Generate subtitles from voiceover/dialogue |
-| AUD-015 | Music stems | Separate stems if model supports |
+| ID      | Task                   | Acceptance Criteria                        |
+| ------- | ---------------------- | ------------------------------------------ |
+| AUD-001 | Import audio           | WAV/MP3/etc. imported                      |
+| AUD-002 | Audio asset versioning | Audio versions supported                   |
+| AUD-003 | Add audio to timeline  | Audio clip placed on track                 |
+| AUD-004 | Audio trim             | In/out points adjust                       |
+| AUD-005 | Basic gain             | Per-clip volume control                    |
+| AUD-006 | Waveform display       | Waveform preview works                     |
+| AUD-007 | Basic mixer            | Track-level gain/mute/lock                 |
+| AUD-008 | Music import           | Music file can be imported and used        |
+| AUD-009 | Music generation       | Generate music from prompt/mood            |
+| AUD-010 | Voiceover generation   | Generate voice from text                   |
+| AUD-011 | SFX generation         | Generate sound effects                     |
+| AUD-012 | Audio cleanup          | Denoise/normalize later                    |
+| AUD-013 | Ducking                | Music lowers under dialogue                |
+| AUD-014 | Subtitle generation    | Generate subtitles from voiceover/dialogue |
+| AUD-015 | Music stems            | Separate stems if model supports           |
 
 ## 11.15 Render and Export
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| EXP-001 | Export presets | Draft/final presets defined |
-| EXP-002 | Render queue | Exports queued as jobs |
-| EXP-003 | MP4 export | Timeline rendered to MP4 |
-| EXP-004 | WAV export | Audio rendered to WAV |
-| EXP-005 | Render progress | Progress reported |
-| EXP-006 | Render log | Warnings/errors captured |
-| EXP-007 | Render validation | Missing media checked before render |
-| EXP-008 | Export history | Exports listed and versioned |
-| EXP-009 | Subtitle export | SRT/VTT export later |
-| EXP-010 | Storyboard export | PDF/PNG/ZIP export later |
-| EXP-011 | Project bundle export | Metadata + optional media exported |
-| EXP-012 | Multiple exports | Same timeline exported in multiple formats |
-| EXP-013 | Archival master | High-quality master export later |
+| ID      | Task                  | Acceptance Criteria                        |
+| ------- | --------------------- | ------------------------------------------ |
+| EXP-001 | Export presets        | Draft/final presets defined                |
+| EXP-002 | Render queue          | Exports queued as jobs                     |
+| EXP-003 | MP4 export            | Timeline rendered to MP4                   |
+| EXP-004 | WAV export            | Audio rendered to WAV                      |
+| EXP-005 | Render progress       | Progress reported                          |
+| EXP-006 | Render log            | Warnings/errors captured                   |
+| EXP-007 | Render validation     | Missing media checked before render        |
+| EXP-008 | Export history        | Exports listed and versioned               |
+| EXP-009 | Subtitle export       | SRT/VTT export later                       |
+| EXP-010 | Storyboard export     | PDF/PNG/ZIP export later                   |
+| EXP-011 | Project bundle export | Metadata + optional media exported         |
+| EXP-012 | Multiple exports      | Same timeline exported in multiple formats |
+| EXP-013 | Archival master       | High-quality master export later           |
 
 ## 11.16 Diagnostics and Operations
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| DIA-001 | Hardware report | CPU/RAM/GPU info visible |
-| DIA-002 | Model health report | Model load errors visible |
-| DIA-003 | Storage report | Disk usage and orphaned files visible |
-| DIA-004 | Diagnostics export | Redacted diagnostics package created |
-| DIA-005 | Log viewer | Recent logs viewable |
-| DIA-006 | Backup project | Project backup created |
-| DIA-007 | Restore backup | Backup restored |
-| DIA-008 | Crash recovery | App recovers from interrupted operations |
+| ID      | Task                | Acceptance Criteria                      |
+| ------- | ------------------- | ---------------------------------------- |
+| DIA-001 | Hardware report     | CPU/RAM/GPU info visible                 |
+| DIA-002 | Model health report | Model load errors visible                |
+| DIA-003 | Storage report      | Disk usage and orphaned files visible    |
+| DIA-004 | Diagnostics export  | Redacted diagnostics package created     |
+| DIA-005 | Log viewer          | Recent logs viewable                     |
+| DIA-006 | Backup project      | Project backup created                   |
+| DIA-007 | Restore backup      | Backup restored                          |
+| DIA-008 | Crash recovery      | App recovers from interrupted operations |
 
 ## 11.17 3D Support
 
 Place after core MVP unless product decision changes.
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| 3D-001 | Import 3D | GLB/GLTF/OBJ/FBX/USD accepted |
-| 3D-002 | 3D preview | Rotate/pan/scale in viewport |
-| 3D-003 | 3D versioning | 3D files versioned |
-| 3D-004 | Export views | Front/side/top/perspective images |
-| 3D-005 | Use as reference | Exported views can be `@named` and used in prompts |
-| 3D-006 | Format conversion | Basic conversion where supported |
-| 3D-007 | 3D-to-video | Generate video from 3D views later |
-| 3D-008 | 3D generation | Image/text-to-3D later |
+| ID     | Task              | Acceptance Criteria                                |
+| ------ | ----------------- | -------------------------------------------------- |
+| 3D-001 | Import 3D         | GLB/GLTF/OBJ/FBX/USD accepted                      |
+| 3D-002 | 3D preview        | Rotate/pan/scale in viewport                       |
+| 3D-003 | 3D versioning     | 3D files versioned                                 |
+| 3D-004 | Export views      | Front/side/top/perspective images                  |
+| 3D-005 | Use as reference  | Exported views can be `@named` and used in prompts |
+| 3D-006 | Format conversion | Basic conversion where supported                   |
+| 3D-007 | 3D-to-video       | Generate video from 3D views later                 |
+| 3D-008 | 3D generation     | Image/text-to-3D later                             |
 
 ## 11.18 Skill System
 
 Post-MVP, JSON/YAML first.
 
-| ID | Task | Acceptance Criteria |
-|---|---|---|
-| SKL-001 | Skill format | JSON/YAML schema defined |
-| SKL-002 | Skill metadata | Name/version/author/license stored |
-| SKL-003 | Skill input schema | Required/optional inputs validated |
-| SKL-004 | Skill output schema | Outputs defined |
-| SKL-005 | Skill engine | Executes declared steps |
-| SKL-006 | Skill parameters | User supplies parameters |
-| SKL-007 | Skill versioning | Skill versions stored |
-| SKL-008 | Skill enable/disable | Skills can be toggled |
-| SKL-009 | Skill permissions | Required permissions declared |
-| SKL-010 | Skill examples | Sample inputs/outputs included |
-| SKL-011 | Skill import/export | Portable skill file supported |
-| SKL-012 | Skill testing | Test cases can be run |
-| SKL-013 | Skill chaining | Multiple skills can run in sequence |
+| ID      | Task                 | Acceptance Criteria                 |
+| ------- | -------------------- | ----------------------------------- |
+| SKL-001 | Skill format         | JSON/YAML schema defined            |
+| SKL-002 | Skill metadata       | Name/version/author/license stored  |
+| SKL-003 | Skill input schema   | Required/optional inputs validated  |
+| SKL-004 | Skill output schema  | Outputs defined                     |
+| SKL-005 | Skill engine         | Executes declared steps             |
+| SKL-006 | Skill parameters     | User supplies parameters            |
+| SKL-007 | Skill versioning     | Skill versions stored               |
+| SKL-008 | Skill enable/disable | Skills can be toggled               |
+| SKL-009 | Skill permissions    | Required permissions declared       |
+| SKL-010 | Skill examples       | Sample inputs/outputs included      |
+| SKL-011 | Skill import/export  | Portable skill file supported       |
+| SKL-012 | Skill testing        | Test cases can be run               |
+| SKL-013 | Skill chaining       | Multiple skills can run in sequence |
 
 ---
 
@@ -2333,12 +2334,12 @@ Implement with FFmpeg:
 
 Use practical defaults:
 
-| Type | Master | Proxy |
-|---|---|---|
+| Type  | Master        | Proxy                           |
+| ----- | ------------- | ------------------------------- |
 | Video | Original file | 720p or 1080p low-bitrate H.264 |
-| Audio | WAV/FLAC | MP3/AAC preview |
-| Image | Original | JPG preview |
-| 3D | Source model | Lightweight preview mesh/image |
+| Audio | WAV/FLAC      | MP3/AAC preview                 |
+| Image | Original      | JPG preview                     |
+| 3D    | Source model  | Lightweight preview mesh/image  |
 
 Rules:
 
@@ -3089,7 +3090,7 @@ permissions:
 steps:
   - type: generate_music
     prompt: "tense cinematic score with low strings"
-    duration: {{ inputs.duration }}
+    duration: { { inputs.duration } }
     output:
       asset_type: music
       status: draft
@@ -3480,6 +3481,7 @@ If those foundations are built correctly, the product can expand into:
 
 The MVP should be judged by one question:
 
-> Can a user reliably create, generate, version, edit, and export a short AI-assisted movie on user-controlled hardware?
+> Can a user reliably create, generate, version, edit, and export a short AI-assisted movie on
+> user-controlled hardware?
 
 If yes, the product core is validated.

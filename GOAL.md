@@ -1,8 +1,9 @@
-# Product Proposal: Local AI Movie Studio  
-**Working Title:** Local AI Movie Studio  
-**Document Type:** Product Goal Document / Feature Specification  
-**Version:** 0.1 Draft  
-**Status:** For internal review and roadmap planning  
+# Product Proposal: Local AI Movie Studio
+
+**Working Title:** Local AI Movie Studio\
+**Document Type:** Product Goal Document / Feature Specification\
+**Version:** 0.1 Draft\
+**Status:** For internal review and roadmap planning
 
 ---
 
@@ -10,8 +11,12 @@
 
 We are proposing a **local-first web application** for creating movies with the help of AI.
 
-For the rest of this document when mentioning "local", what 
-we really mean is user controlled. So self hosted is also local. The video models could be running on a separate system from the users local machine, but still be under the user's control (e.g. they build their own AI inference dedicated server). Also it should be possible to have the backend and frontend of this product to be running on a (user controlled) cloud server, while using AI models hosted in their private network running "in house" (similar to how github can use self hosted runners for their github actions)
+For the rest of this document when mentioning "local", what we really mean is user controlled. So
+self hosted is also local. The video models could be running on a separate system from the users
+local machine, but still be under the user's control (e.g. they build their own AI inference
+dedicated server). Also it should be possible to have the backend and frontend of this product to be
+running on a (user controlled) cloud server, while using AI models hosted in their private network
+running "in house" (similar to how github can use self hosted runners for their github actions)
 
 The product will allow users to:
 
@@ -29,7 +34,8 @@ The product will allow users to:
 - Install and manage open-source local models
 - Optionally use third-party paid APIs when local generation is insufficient
 
-The product’s primary focus is **local model AI generation**, with 3rd party cloud APIs treated as optional fallbacks or extensions.
+The product’s primary focus is **local model AI generation**, with 3rd party cloud APIs treated as
+optional fallbacks or extensions.
 
 This document defines:
 
@@ -48,7 +54,8 @@ This document defines:
 
 # 2. Product Vision
 
-The goal is to build a practical AI movie creation studio that works primarily on the user’s controlled hardware.
+The goal is to build a practical AI movie creation studio that works primarily on the user’s
+controlled hardware.
 
 It should feel like a professional creative tool, not just a prompt box.
 
@@ -92,19 +99,19 @@ The end result should be a usable movie project with:
 
 # 4. Core Problems We Are Solving
 
-1. **AI video tools are fragmented.**  
+1. **AI video tools are fragmented.**\
    Users need multiple tools for image generation, video generation, audio, editing, and export.
 
-2. **AI generation is hard to organize.**  
+2. **AI generation is hard to organize.**\
    Without asset management, projects become unmanageable quickly.
 
-3. **Local/user controlled AI is underutilized in creative workflows.**  
+3. **Local/user controlled AI is underutilized in creative workflows.**\
    Most tools push users to cloud APIs. We want user controlled models to be the default path.
 
-4. **Versioning and provenance are missing.**  
+4. **Versioning and provenance are missing.**\
    Users need to restore previous generations, prompts, edits, and outputs.
 
-5. **Reference-driven creation is not standard.**  
+5. **Reference-driven creation is not standard.**\
    Users should be able to say things like:
 
    ```text
@@ -204,33 +211,33 @@ The product should be divided into separate modules.
 
 ## 7.1 Core Modules
 
-| Module | Purpose |
-|---|---|
-| Project Manager | Create and manage movie projects |
-| Asset Library | Store, organize, version, and reference assets |
-| Reference Engine | Resolve `@asset` references inside prompts and scenes |
-| Generation Orchestrator | Manage AI generation jobs |
-| Model Manager | Install, configure, and manage local models |
-| Skill Engine | Create and run reusable AI workflows |
-| Storyboard Module | Plan shots and scenes visually |
-| Scene Module | Define scenes with prompts, references, and generated media |
-| Timeline Editor | Assemble clips, audio, overlays, and effects |
-| Audio Engine | Manage dialogue, voiceover, SFX, music, and mixing |
-| Render / Export Module | Produce final output files |
-| Version Control System | Track and restore project states |
-| Storage Manager | Handle media files, caches, proxies, and backups |
-| Diagnostics | Track errors, hardware status, and model health |
+| Module                  | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| Project Manager         | Create and manage movie projects                            |
+| Asset Library           | Store, organize, version, and reference assets              |
+| Reference Engine        | Resolve `@asset` references inside prompts and scenes       |
+| Generation Orchestrator | Manage AI generation jobs                                   |
+| Model Manager           | Install, configure, and manage local models                 |
+| Skill Engine            | Create and run reusable AI workflows                        |
+| Storyboard Module       | Plan shots and scenes visually                              |
+| Scene Module            | Define scenes with prompts, references, and generated media |
+| Timeline Editor         | Assemble clips, audio, overlays, and effects                |
+| Audio Engine            | Manage dialogue, voiceover, SFX, music, and mixing          |
+| Render / Export Module  | Produce final output files                                  |
+| Version Control System  | Track and restore project states                            |
+| Storage Manager         | Handle media files, caches, proxies, and backups            |
+| Diagnostics             | Track errors, hardware status, and model health             |
 
 ## 7.2 Optional Modules
 
-| Module | Purpose |
-|---|---|
-| Cloud Gateway | Call third-party APIs when enabled |
-| Collaboration Sync | Share projects and assets |
-| Review Board | Candidate comparison and approval |
+| Module              | Purpose                                 |
+| ------------------- | --------------------------------------- |
+| Cloud Gateway       | Call third-party APIs when enabled      |
+| Collaboration Sync  | Share projects and assets               |
+| Review Board        | Candidate comparison and approval       |
 | Continuity Analyzer | Detect visual and audio inconsistencies |
-| Script Parser | Convert scripts into scenes and shots |
-| AI Assistant | Help with prompts, planning, and review |
+| Script Parser       | Convert scripts into scenes and shots   |
+| AI Assistant        | Help with prompts, planning, and review |
 
 ---
 
@@ -284,12 +291,14 @@ The primary user flow should be:
    - Or import music manually
 
 10. **Render and export**
-   - Draft or final
-   - Different formats
-   - Version the output
+
+- Draft or final
+- Different formats
+- Version the output
 
 11. **Version everything**
-   - Restore previous prompts, scenes, edits, or exports
+
+- Restore previous prompts, scenes, edits, or exports
 
 ---
 
@@ -313,20 +322,20 @@ Allow users to create and manage movie projects.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Create project | User can create a new movie project with name and settings |
-| P0 | Project settings | Aspect ratio, frame rate, resolution, audio settings, default export preset |
-| P0 | Open project | Open previously saved projects |
-| P0 | Save project | Save project state locally |
-| P0 | Close project | Close active project safely |
-| P0 | Rename project | Change project name without breaking asset references |
-| P0 | Delete project | Soft delete or archive first, with warning |
-| P1 | Duplicate project | Create copy of project, optionally with new asset references |
-| P1 | Project templates | Start from templates such as short film, social reel, music video |
-| P1 | Project import/export | Export/import project bundle including metadata, optionally media |
-| P1 | Project backup | Create local backup or archive |
-| P2 | Project comparison | Compare two project versions at high level |
+| Priority | Feature               | Specification                                                               |
+| -------- | --------------------- | --------------------------------------------------------------------------- |
+| P0       | Create project        | User can create a new movie project with name and settings                  |
+| P0       | Project settings      | Aspect ratio, frame rate, resolution, audio settings, default export preset |
+| P0       | Open project          | Open previously saved projects                                              |
+| P0       | Save project          | Save project state locally                                                  |
+| P0       | Close project         | Close active project safely                                                 |
+| P0       | Rename project        | Change project name without breaking asset references                       |
+| P0       | Delete project        | Soft delete or archive first, with warning                                  |
+| P1       | Duplicate project     | Create copy of project, optionally with new asset references                |
+| P1       | Project templates     | Start from templates such as short film, social reel, music video           |
+| P1       | Project import/export | Export/import project bundle including metadata, optionally media           |
+| P1       | Project backup        | Create local backup or archive                                              |
+| P2       | Project comparison    | Compare two project versions at high level                                  |
 
 ### Project specification
 
@@ -365,32 +374,33 @@ Provide a centralized library for assets that can be reused across projects.
 
 ### Core idea
 
-Assets are not just files.  
-An asset is a versioned, metadata-rich object that can be referenced in prompts, scenes, storyboards, and timelines.
+Assets are not just files.\
+An asset is a versioned, metadata-rich object that can be referenced in prompts, scenes,
+storyboards, and timelines.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Global asset library | Store assets outside individual projects |
-| P0 | Project asset library | Allow assets scoped to a specific project |
-| P0 | Upload assets | Upload images, video, audio, 3D, fonts, LUTs, subtitles |
-| P0 | Generate assets | Create new assets using AI |
-| P0 | Asset metadata | Store type, description, tags, source, license, provenance |
-| P0 | Asset versions | Keep multiple versions per asset |
-| P0 | Asset preview | Show thumbnail, waveform, 3D preview, or clip preview |
-| P0 | Asset search | Search by name, tag, type, project, date |
-| P0 | Asset naming | Unique `@name` per asset |
-| P1 | Asset collections | Organize assets into folders or smart collections |
-| P1 | Asset tags | Multi-tag assets for discovery |
-| P1 | Asset filtering | Filter by type, status, project, date, license, resolution |
-| P1 | Asset duplication | Duplicate asset or version |
-| P1 | Asset replacement | Replace media for a specific asset version |
-| P1 | Asset dependency tracking | Show which projects/scenes use an asset |
-| P1 | Missing reference detection | Warn if an asset is deleted but still referenced |
-| P1 | Asset license tracking | Store rights and usage restrictions |
-| P2 | Asset marketplace | Optional local or online skill/asset sharing |
-| P2 | Batch operations | Batch rename, tag, move, delete, export |
+| Priority | Feature                     | Specification                                              |
+| -------- | --------------------------- | ---------------------------------------------------------- |
+| P0       | Global asset library        | Store assets outside individual projects                   |
+| P0       | Project asset library       | Allow assets scoped to a specific project                  |
+| P0       | Upload assets               | Upload images, video, audio, 3D, fonts, LUTs, subtitles    |
+| P0       | Generate assets             | Create new assets using AI                                 |
+| P0       | Asset metadata              | Store type, description, tags, source, license, provenance |
+| P0       | Asset versions              | Keep multiple versions per asset                           |
+| P0       | Asset preview               | Show thumbnail, waveform, 3D preview, or clip preview      |
+| P0       | Asset search                | Search by name, tag, type, project, date                   |
+| P0       | Asset naming                | Unique `@name` per asset                                   |
+| P1       | Asset collections           | Organize assets into folders or smart collections          |
+| P1       | Asset tags                  | Multi-tag assets for discovery                             |
+| P1       | Asset filtering             | Filter by type, status, project, date, license, resolution |
+| P1       | Asset duplication           | Duplicate asset or version                                 |
+| P1       | Asset replacement           | Replace media for a specific asset version                 |
+| P1       | Asset dependency tracking   | Show which projects/scenes use an asset                    |
+| P1       | Missing reference detection | Warn if an asset is deleted but still referenced           |
+| P1       | Asset license tracking      | Store rights and usage restrictions                        |
+| P2       | Asset marketplace           | Optional local or online skill/asset sharing               |
+| P2       | Batch operations            | Batch rename, tag, move, delete, export                    |
 
 ### Asset types
 
@@ -470,18 +480,18 @@ Ensure users can always return to previous versions of assets.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Version creation | New version created when asset is changed or regenerated |
-| P0 | Version list | Show all versions of an asset |
-| P0 | Restore version | Restore any previous version as active |
-| P0 | Version notes | Add notes to a version |
-| P0 | Version preview | Preview each version |
-| P1 | Version comparison | Compare two versions side by side |
-| P1 | Version pinning | Pin a specific version for use in a scene |
-| P1 | Version status | Mark version as approved, rejected, draft |
-| P1 | Version history graph | Show how versions are related |
-| P2 | Version branching | Allow experimental branches from a version |
+| Priority | Feature               | Specification                                            |
+| -------- | --------------------- | -------------------------------------------------------- |
+| P0       | Version creation      | New version created when asset is changed or regenerated |
+| P0       | Version list          | Show all versions of an asset                            |
+| P0       | Restore version       | Restore any previous version as active                   |
+| P0       | Version notes         | Add notes to a version                                   |
+| P0       | Version preview       | Preview each version                                     |
+| P1       | Version comparison    | Compare two versions side by side                        |
+| P1       | Version pinning       | Pin a specific version for use in a scene                |
+| P1       | Version status        | Mark version as approved, rejected, draft                |
+| P1       | Version history graph | Show how versions are related                            |
+| P2       | Version branching     | Allow experimental branches from a version               |
 
 ### Version specification
 
@@ -528,19 +538,19 @@ Allow users to reference assets in prompts, scenes, and storyboards using `@name
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | `@asset` reference parsing | Detect and parse `@name` tokens in prompts |
-| P0 | Unique asset names | Each asset reference name must be unique |
-| P0 | Reference resolution | Map `@name` to asset and active version |
-| P0 | Missing reference warning | Warn if a referenced asset does not exist |
-| P0 | Reference roles | Allow references to have roles such as character, location, prop, style, voice, music |
-| P1 | Versioned references | Support `@asset:v2` or similar |
-| P1 | Aliases | Allow one asset to have multiple `@` names |
-| P1 | Reference suggestions | Suggest assets while typing |
-| P1 | Reference replacement | Replace a broken reference with another asset |
-| P1 | Reference audit | List all references in a project or scene |
-| P2 | Reference namespaces | Support scoped names like `@project1/person` |
+| Priority | Feature                    | Specification                                                                         |
+| -------- | -------------------------- | ------------------------------------------------------------------------------------- |
+| P0       | `@asset` reference parsing | Detect and parse `@name` tokens in prompts                                            |
+| P0       | Unique asset names         | Each asset reference name must be unique                                              |
+| P0       | Reference resolution       | Map `@name` to asset and active version                                               |
+| P0       | Missing reference warning  | Warn if a referenced asset does not exist                                             |
+| P0       | Reference roles            | Allow references to have roles such as character, location, prop, style, voice, music |
+| P1       | Versioned references       | Support `@asset:v2` or similar                                                        |
+| P1       | Aliases                    | Allow one asset to have multiple `@` names                                            |
+| P1       | Reference suggestions      | Suggest assets while typing                                                           |
+| P1       | Reference replacement      | Replace a broken reference with another asset                                         |
+| P1       | Reference audit            | List all references in a project or scene                                             |
+| P2       | Reference namespaces       | Support scoped names like `@project1/person`                                          |
 
 ### Reference roles
 
@@ -598,48 +608,48 @@ Generate assets using local AI models, with optional cloud fallback.
 
 ### Supported generation types
 
-| Type | Priority | Notes |
-|---|---|---|
-| Text-to-image | P0 | Core image generation |
-| Image-to-image | P0 | Variation, restyling, editing |
-| Text-to-video | P1 | Depends on local model availability |
-| Image-to-video | P0 | Often more reliable than text-to-video locally |
-| Reference-to-video | P0 | Often more reliable than text-to-video locally |
-| Video-to-video | P1 | Restyling, upscale, motion transfer |
-| Text-to-audio | P1 | SFX or short audio generation |
-| Music generation | P1 | Mood-based score generation |
-| Voice generation | P1 | Voiceover or dialogue |
-| 3D generation | P2 | Local 3D generation is advanced |
-| Upscaling | P1 | Image/video super resolution |
-| Denoising | P1 | Video/image cleanup |
-| Background removal | P1 | Useful for character/prop assets |
+| Type               | Priority | Notes                                          |
+| ------------------ | -------- | ---------------------------------------------- |
+| Text-to-image      | P0       | Core image generation                          |
+| Image-to-image     | P0       | Variation, restyling, editing                  |
+| Text-to-video      | P1       | Depends on local model availability            |
+| Image-to-video     | P0       | Often more reliable than text-to-video locally |
+| Reference-to-video | P0       | Often more reliable than text-to-video locally |
+| Video-to-video     | P1       | Restyling, upscale, motion transfer            |
+| Text-to-audio      | P1       | SFX or short audio generation                  |
+| Music generation   | P1       | Mood-based score generation                    |
+| Voice generation   | P1       | Voiceover or dialogue                          |
+| 3D generation      | P2       | Local 3D generation is advanced                |
+| Upscaling          | P1       | Image/video super resolution                   |
+| Denoising          | P1       | Video/image cleanup                            |
+| Background removal | P1       | Useful for character/prop assets               |
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Generate image from prompt | Create image asset version |
-| P0 | Generate video from image | Create short video clip from image and prompt |
-| P0 | Generate video from prompt | If supported by installed model |
-| P0 | Generate audio | Generate SFX or short audio |
-| P0 | Generation job | Every generation creates a job |
-| P0 | Job queue | Jobs run sequentially or with limited concurrency |
-| P0 | Job status | Queued, running, processing, succeeded, failed, cancelled |
-| P0 | Job progress | Show progress where possible |
-| P0 | Job cancel | User can cancel active job |
-| P0 | Job retry | Retry failed jobs |
-| P0 | Seed control | Allow fixed or random seed |
-| P0 | Prompt versioning | Store prompt used for generation |
-| P0 | Negative prompts | Support negative prompt if model supports it |
-| P0 | Reference inputs | Allow images, styles, audio, voice, 3D references |
-| P1 | Variation generation | Generate multiple candidates from same prompt |
-| P1 | A/B comparison | Compare two or more generated outputs |
-| P1 | Batch generation | Generate multiple shots or assets |
-| P1 | Generation presets | Save preferred settings |
-| P1 | Preview generation | Generate low-resolution preview first |
-| P1 | Full-quality generation | Generate final asset after preview approval |
-| P2 | Predicted generation time | Estimate duration based on model and hardware |
-| P2 | Cloud fallback | Optionally send job to cloud if local fails or is too slow |
+| Priority | Feature                    | Specification                                              |
+| -------- | -------------------------- | ---------------------------------------------------------- |
+| P0       | Generate image from prompt | Create image asset version                                 |
+| P0       | Generate video from image  | Create short video clip from image and prompt              |
+| P0       | Generate video from prompt | If supported by installed model                            |
+| P0       | Generate audio             | Generate SFX or short audio                                |
+| P0       | Generation job             | Every generation creates a job                             |
+| P0       | Job queue                  | Jobs run sequentially or with limited concurrency          |
+| P0       | Job status                 | Queued, running, processing, succeeded, failed, cancelled  |
+| P0       | Job progress               | Show progress where possible                               |
+| P0       | Job cancel                 | User can cancel active job                                 |
+| P0       | Job retry                  | Retry failed jobs                                          |
+| P0       | Seed control               | Allow fixed or random seed                                 |
+| P0       | Prompt versioning          | Store prompt used for generation                           |
+| P0       | Negative prompts           | Support negative prompt if model supports it               |
+| P0       | Reference inputs           | Allow images, styles, audio, voice, 3D references          |
+| P1       | Variation generation       | Generate multiple candidates from same prompt              |
+| P1       | A/B comparison             | Compare two or more generated outputs                      |
+| P1       | Batch generation           | Generate multiple shots or assets                          |
+| P1       | Generation presets         | Save preferred settings                                    |
+| P1       | Preview generation         | Generate low-resolution preview first                      |
+| P1       | Full-quality generation    | Generate final asset after preview approval                |
+| P2       | Predicted generation time  | Estimate duration based on model and hardware              |
+| P2       | Cloud fallback             | Optionally send job to cloud if local fails or is too slow |
 
 ### Generation specification
 
@@ -690,26 +700,26 @@ This is a core module because the product is local-model focused.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Model registry | Keep list of installed models |
-| P0 | Install model | Download and install local model |
-| P0 | Remove model | Remove model and clean metadata |
-| P0 | Enable/disable model | Toggle model availability |
-| P0 | Model metadata | Store name, version, task, license, backend, requirements, capabilities |
-| P0 | Model health check | Test whether model loads and runs |
-| P0 | Model task mapping | Associate model with supported tasks |
-| P1 | Model search | Search local or remote catalog |
-| P1 | Model verification | Checksum or signature validation |
-| P1 | Model update | Update to newer version |
-| P1 | Model rollback | Return to previous model version |
-| P1 | Model benchmark | Run test generation to measure speed/quality |
-| P1 | Model presets | Save recommended settings for a model |
-| P1 | Missing dependency warning | Warn if model dependencies are missing |
-| P1 | License display | Show model license clearly |
-| P2 | Model auto-install | Install missing model when first needed |
-| P2 | Model recommendation | Recommend models based on task and hardware |
-| P2 | Model marketplace | Browse optional model sources |
+| Priority | Feature                    | Specification                                                           |
+| -------- | -------------------------- | ----------------------------------------------------------------------- |
+| P0       | Model registry             | Keep list of installed models                                           |
+| P0       | Install model              | Download and install local model                                        |
+| P0       | Remove model               | Remove model and clean metadata                                         |
+| P0       | Enable/disable model       | Toggle model availability                                               |
+| P0       | Model metadata             | Store name, version, task, license, backend, requirements, capabilities |
+| P0       | Model health check         | Test whether model loads and runs                                       |
+| P0       | Model task mapping         | Associate model with supported tasks                                    |
+| P1       | Model search               | Search local or remote catalog                                          |
+| P1       | Model verification         | Checksum or signature validation                                        |
+| P1       | Model update               | Update to newer version                                                 |
+| P1       | Model rollback             | Return to previous model version                                        |
+| P1       | Model benchmark            | Run test generation to measure speed/quality                            |
+| P1       | Model presets              | Save recommended settings for a model                                   |
+| P1       | Missing dependency warning | Warn if model dependencies are missing                                  |
+| P1       | License display            | Show model license clearly                                              |
+| P2       | Model auto-install         | Install missing model when first needed                                 |
+| P2       | Model recommendation       | Recommend models based on task and hardware                             |
+| P2       | Model marketplace          | Browse optional model sources                                           |
 
 ### Model metadata
 
@@ -756,7 +766,7 @@ Each model should include:
 
 Allow users to create and reuse repeatable AI workflows.
 
-A skill is not just a prompt.  
+A skill is not just a prompt.\
 It is a reusable workflow that may combine prompts, models, assets, settings, and edit operations.
 
 ### Examples
@@ -772,23 +782,23 @@ It is a reusable workflow that may combine prompts, models, assets, settings, an
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Create skill | Define reusable workflow |
-| P0 | Run skill | Execute skill on selected assets or scenes |
-| P0 | Skill parameters | Accept inputs such as asset, prompt, mood, duration |
-| P0 | Skill versioning | Version skills separately |
-| P0 | Enable/disable skill | Toggle skill availability |
-| P1 | Skill metadata | Name, description, author, version, license |
-| P1 | Skill input schema | Define required and optional inputs |
-| P1 | Skill output schema | Define what the skill produces |
-| P1 | Skill permissions | Declare required permissions |
-| P1 | Skill examples | Include sample input/output |
-| P1 | Skill testing | Test skill against sample data |
-| P1 | Skill import/export | Export skill as portable file |
-| P2 | Skill marketplace | Local or community skill sharing |
-| P2 | Skill sandbox | Run skills in restricted environment |
-| P2 | Skill chaining | Combine multiple skills into a pipeline |
+| Priority | Feature              | Specification                                       |
+| -------- | -------------------- | --------------------------------------------------- |
+| P0       | Create skill         | Define reusable workflow                            |
+| P0       | Run skill            | Execute skill on selected assets or scenes          |
+| P0       | Skill parameters     | Accept inputs such as asset, prompt, mood, duration |
+| P0       | Skill versioning     | Version skills separately                           |
+| P0       | Enable/disable skill | Toggle skill availability                           |
+| P1       | Skill metadata       | Name, description, author, version, license         |
+| P1       | Skill input schema   | Define required and optional inputs                 |
+| P1       | Skill output schema  | Define what the skill produces                      |
+| P1       | Skill permissions    | Declare required permissions                        |
+| P1       | Skill examples       | Include sample input/output                         |
+| P1       | Skill testing        | Test skill against sample data                      |
+| P1       | Skill import/export  | Export skill as portable file                       |
+| P2       | Skill marketplace    | Local or community skill sharing                    |
+| P2       | Skill sandbox        | Run skills in restricted environment                |
+| P2       | Skill chaining       | Combine multiple skills into a pipeline             |
 
 ### Skill specification
 
@@ -834,24 +844,24 @@ The storyboard is part of the movie project.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Create storyboard | Create storyboard per project |
-| P0 | Add storyboard panel | Add panel representing a shot |
-| P0 | Panel prompt | Write prompt for panel |
-| P0 | Panel references | Add `@asset` references |
-| P0 | Panel duration | Define expected duration |
-| P0 | Panel preview | Attach generated image or video preview |
-| P0 | Panel status | Draft, approved, generated, needs revision |
-| P1 | Camera direction | Specify shot size, angle, movement |
-| P1 | Mood / lighting | Specify mood, time of day, lighting |
-| P1 | Dialogue / VO | Attach dialogue or voiceover text |
-| P1 | Music / SFX | Attach audio plan |
-| P1 | Transition | Define transition to next panel |
-| P1 | Notes | Add creative notes |
-| P1 | Panel ordering | Reorder panels |
-| P1 | Storyboard export | Export as PDF, PNG, ZIP, or image sequence |
-| P2 | AI storyboard generation | Generate storyboard from script or description |
+| Priority | Feature                  | Specification                                  |
+| -------- | ------------------------ | ---------------------------------------------- |
+| P0       | Create storyboard        | Create storyboard per project                  |
+| P0       | Add storyboard panel     | Add panel representing a shot                  |
+| P0       | Panel prompt             | Write prompt for panel                         |
+| P0       | Panel references         | Add `@asset` references                        |
+| P0       | Panel duration           | Define expected duration                       |
+| P0       | Panel preview            | Attach generated image or video preview        |
+| P0       | Panel status             | Draft, approved, generated, needs revision     |
+| P1       | Camera direction         | Specify shot size, angle, movement             |
+| P1       | Mood / lighting          | Specify mood, time of day, lighting            |
+| P1       | Dialogue / VO            | Attach dialogue or voiceover text              |
+| P1       | Music / SFX              | Attach audio plan                              |
+| P1       | Transition               | Define transition to next panel                |
+| P1       | Notes                    | Add creative notes                             |
+| P1       | Panel ordering           | Reorder panels                                 |
+| P1       | Storyboard export        | Export as PDF, PNG, ZIP, or image sequence     |
+| P2       | AI storyboard generation | Generate storyboard from script or description |
 
 ### Storyboard panel specification
 
@@ -906,24 +916,24 @@ A scene is part of the movie project.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Create scene | Create scene within project |
-| P0 | Scene prompt | Write prompt using `@asset` references |
-| P0 | Scene references | Resolve and list referenced assets |
-| P0 | Scene generation | Generate media from scene prompt |
-| P0 | Scene status | Draft, generated, editing, approved, rejected |
-| P0 | Scene versioning | Save scene prompt and structure changes |
-| P0 | Scene duration | Define target duration |
-| P1 | Shot list | Break scene into multiple shots |
-| P1 | Shot prompts | Each shot can have its own prompt |
-| P1 | Shot references | Each shot can use specific references |
-| P1 | Shot duration | Define duration per shot |
-| P1 | Shot status | Track shot generation status |
-| P1 | Scene audio plan | Define dialogue, SFX, music for scene |
-| P1 | Scene notes | Add notes to scene |
-| P2 | Scene consistency check | Compare shots in scene for consistency |
-| P2 | Scene re-generation | Regenerate selected shots only |
+| Priority | Feature                 | Specification                                 |
+| -------- | ----------------------- | --------------------------------------------- |
+| P0       | Create scene            | Create scene within project                   |
+| P0       | Scene prompt            | Write prompt using `@asset` references        |
+| P0       | Scene references        | Resolve and list referenced assets            |
+| P0       | Scene generation        | Generate media from scene prompt              |
+| P0       | Scene status            | Draft, generated, editing, approved, rejected |
+| P0       | Scene versioning        | Save scene prompt and structure changes       |
+| P0       | Scene duration          | Define target duration                        |
+| P1       | Shot list               | Break scene into multiple shots               |
+| P1       | Shot prompts            | Each shot can have its own prompt             |
+| P1       | Shot references         | Each shot can use specific references         |
+| P1       | Shot duration           | Define duration per shot                      |
+| P1       | Shot status             | Track shot generation status                  |
+| P1       | Scene audio plan        | Define dialogue, SFX, music for scene         |
+| P1       | Scene notes             | Add notes to scene                            |
+| P2       | Scene consistency check | Compare shots in scene for consistency        |
+| P2       | Scene re-generation     | Regenerate selected shots only                |
 
 ### Scene specification
 
@@ -976,31 +986,31 @@ This is where the movie is actually built.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Timeline view | Show clips on tracks |
-| P0 | Add clip | Add generated or uploaded clip to timeline |
-| P0 | Reorder clips | Drag clips to change order |
-| P0 | Trim clips | Adjust in/out points |
-| P0 | Delete clip | Remove clip from timeline |
-| P0 | Duplicate clip | Duplicate clip item |
-| P0 | Playback | Play selected range or full timeline |
-| P0 | Timeline versioning | Save timeline states |
-| P0 | Undo / redo | Support undo and redo for timeline actions |
-| P1 | Split clip | Split at playhead |
-| P1 | Transitions | Add fade, dissolve, cut, wipe |
-| P1 | Video tracks | Multiple video tracks |
-| P1 | Audio tracks | Dialogue, VO, music, SFX, ambience tracks |
-| P1 | Text overlay | Add titles, credits, lower thirds |
-| P1 | Subtitles | Add or burn subtitles |
-| P1 | Effects | Apply blur, color, grain, glow, etc. |
-| P1 | Color grading | Apply LUTs or grade clips |
-| P1 | Markers | Add markers and notes |
-| P1 | Lock / mute tracks | Lock or mute tracks |
-| P1 | Nest sequences | Group clips into nested sequences |
-| P2 | AI reframe | Automatically reframe for different aspect ratio |
-| P2 | Auto cut | Suggest cuts based on beats or audio |
-| P2 | Multi-cam | Future expansion |
+| Priority | Feature             | Specification                                    |
+| -------- | ------------------- | ------------------------------------------------ |
+| P0       | Timeline view       | Show clips on tracks                             |
+| P0       | Add clip            | Add generated or uploaded clip to timeline       |
+| P0       | Reorder clips       | Drag clips to change order                       |
+| P0       | Trim clips          | Adjust in/out points                             |
+| P0       | Delete clip         | Remove clip from timeline                        |
+| P0       | Duplicate clip      | Duplicate clip item                              |
+| P0       | Playback            | Play selected range or full timeline             |
+| P0       | Timeline versioning | Save timeline states                             |
+| P0       | Undo / redo         | Support undo and redo for timeline actions       |
+| P1       | Split clip          | Split at playhead                                |
+| P1       | Transitions         | Add fade, dissolve, cut, wipe                    |
+| P1       | Video tracks        | Multiple video tracks                            |
+| P1       | Audio tracks        | Dialogue, VO, music, SFX, ambience tracks        |
+| P1       | Text overlay        | Add titles, credits, lower thirds                |
+| P1       | Subtitles           | Add or burn subtitles                            |
+| P1       | Effects             | Apply blur, color, grain, glow, etc.             |
+| P1       | Color grading       | Apply LUTs or grade clips                        |
+| P1       | Markers             | Add markers and notes                            |
+| P1       | Lock / mute tracks  | Lock or mute tracks                              |
+| P1       | Nest sequences      | Group clips into nested sequences                |
+| P2       | AI reframe          | Automatically reframe for different aspect ratio |
+| P2       | Auto cut            | Suggest cuts based on beats or audio             |
+| P2       | Multi-cam           | Future expansion                                 |
 
 ### Timeline specification
 
@@ -1084,26 +1094,26 @@ Music is one part, but the full product should support:
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Import audio | Import WAV, MP3, etc. |
-| P0 | Audio asset versioning | Version audio files |
-| P0 | Add audio to timeline | Place audio on tracks |
-| P0 | Audio trim | Trim audio clips |
-| P0 | Basic volume control | Adjust gain per clip |
-| P1 | Generate music | Generate music from prompt or mood |
-| P1 | Generate SFX | Generate sound effects |
-| P1 | Generate voiceover | Generate voice from text |
-| P1 | Music stems | Separate drums, bass, melody, etc. if supported |
-| P1 | Music mood matching | Generate music based on selected mood |
-| P1 | Audio cleanup | Denoise, normalize, de-ess |
-| P1 | Audio mixing | Basic mixer with tracks |
-| P1 | Ducking | Lower music under dialogue |
-| P1 | Sync audio to video | Align audio with visual actions |
-| P1 | Subtitle generation | Generate subtitles from dialogue |
-| P2 | AI watch-movie music | Analyze assembled cut and generate matching score |
-| P2 | Auto SFX | Suggest or generate SFX from video actions |
-| P2 | Voice cloning | Generate voice from reference, with consent |
+| Priority | Feature                | Specification                                     |
+| -------- | ---------------------- | ------------------------------------------------- |
+| P0       | Import audio           | Import WAV, MP3, etc.                             |
+| P0       | Audio asset versioning | Version audio files                               |
+| P0       | Add audio to timeline  | Place audio on tracks                             |
+| P0       | Audio trim             | Trim audio clips                                  |
+| P0       | Basic volume control   | Adjust gain per clip                              |
+| P1       | Generate music         | Generate music from prompt or mood                |
+| P1       | Generate SFX           | Generate sound effects                            |
+| P1       | Generate voiceover     | Generate voice from text                          |
+| P1       | Music stems            | Separate drums, bass, melody, etc. if supported   |
+| P1       | Music mood matching    | Generate music based on selected mood             |
+| P1       | Audio cleanup          | Denoise, normalize, de-ess                        |
+| P1       | Audio mixing           | Basic mixer with tracks                           |
+| P1       | Ducking                | Lower music under dialogue                        |
+| P1       | Sync audio to video    | Align audio with visual actions                   |
+| P1       | Subtitle generation    | Generate subtitles from dialogue                  |
+| P2       | AI watch-movie music   | Analyze assembled cut and generate matching score |
+| P2       | Auto SFX               | Suggest or generate SFX from video actions        |
+| P2       | Voice cloning          | Generate voice from reference, with consent       |
 
 ### Music specification
 
@@ -1146,26 +1156,26 @@ Expose useful controls for video generation.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Duration | Define clip duration |
-| P0 | Resolution | Define output resolution |
-| P0 | Frame rate | Define output FPS |
-| P0 | Aspect ratio | Define output ratio |
-| P0 | Prompt | Main generation prompt |
-| P0 | References | Attach reference assets |
-| P0 | Model | Select local model |
-| P1 | Seed | Fixed or random seed |
-| P1 | Guidance strength | If supported |
-| P1 | Motion strength | If supported |
-| P1 | Camera movement | Static, dolly, pan, zoom, orbit, handheld |
-| P1 | First frame | Use image as first frame |
-| P1 | Last frame | Use image as last frame if supported |
-| P1 | Style consistency | Attach style references |
-| P1 | Character consistency | Attach character references |
-| P2 | Negative motion | Suppress unwanted motion |
-| P2 | Physics constraints | Basic constraints where supported |
-| P2 | Camera path | Advanced camera path definition |
+| Priority | Feature               | Specification                             |
+| -------- | --------------------- | ----------------------------------------- |
+| P0       | Duration              | Define clip duration                      |
+| P0       | Resolution            | Define output resolution                  |
+| P0       | Frame rate            | Define output FPS                         |
+| P0       | Aspect ratio          | Define output ratio                       |
+| P0       | Prompt                | Main generation prompt                    |
+| P0       | References            | Attach reference assets                   |
+| P0       | Model                 | Select local model                        |
+| P1       | Seed                  | Fixed or random seed                      |
+| P1       | Guidance strength     | If supported                              |
+| P1       | Motion strength       | If supported                              |
+| P1       | Camera movement       | Static, dolly, pan, zoom, orbit, handheld |
+| P1       | First frame           | Use image as first frame                  |
+| P1       | Last frame            | Use image as last frame if supported      |
+| P1       | Style consistency     | Attach style references                   |
+| P1       | Character consistency | Attach character references               |
+| P2       | Negative motion       | Suppress unwanted motion                  |
+| P2       | Physics constraints   | Basic constraints where supported         |
+| P2       | Camera path           | Advanced camera path definition           |
 
 ### Acceptance criteria
 
@@ -1186,19 +1196,19 @@ Allow 3D models to be used as references and generated assets.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Import 3D model | Import GLB, FBX, OBJ, USD/USDZ, etc. |
-| P0 | 3D preview | Rotate, scale, pan in viewport |
-| P0 | 3D asset versioning | Version 3D files |
-| P1 | Export 3D views | Render front, side, top, perspective images |
-| P1 | Use as reference | Use 3D-derived images in prompts |
-| P1 | 3D to video | Generate video from 3D model views |
-| P1 | Format conversion | Convert between supported 3D formats |
-| P2 | 3D generation | Generate 3D from image/text |
-| P2 | 3D animation | Basic transform animation |
-| P2 | 3D lighting | Add simple lighting/environment |
-| P2 | 3D material editing | Basic material tweaks |
+| Priority | Feature             | Specification                               |
+| -------- | ------------------- | ------------------------------------------- |
+| P0       | Import 3D model     | Import GLB, FBX, OBJ, USD/USDZ, etc.        |
+| P0       | 3D preview          | Rotate, scale, pan in viewport              |
+| P0       | 3D asset versioning | Version 3D files                            |
+| P1       | Export 3D views     | Render front, side, top, perspective images |
+| P1       | Use as reference    | Use 3D-derived images in prompts            |
+| P1       | 3D to video         | Generate video from 3D model views          |
+| P1       | Format conversion   | Convert between supported 3D formats        |
+| P2       | 3D generation       | Generate 3D from image/text                 |
+| P2       | 3D animation        | Basic transform animation                   |
+| P2       | 3D lighting         | Add simple lighting/environment             |
+| P2       | 3D material editing | Basic material tweaks                       |
 
 ### Acceptance criteria
 
@@ -1216,24 +1226,24 @@ Allow 3D models to be used as references and generated assets.
 
 Help users select the best AI-generated results.
 
-AI generation will often produce multiple imperfect candidates.  
+AI generation will often produce multiple imperfect candidates.\
 The app should make review simple.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Candidate view | Show generated candidates for a job |
-| P0 | Approve | Mark candidate as approved |
-| P0 | Reject | Mark candidate as rejected |
-| P0 | Use candidate | Place approved candidate into asset library or timeline |
-| P1 | A/B comparison | Compare two candidates side by side |
-| P1 | Before/after | Compare original and edited asset |
-| P1 | Notes | Add review notes |
-| P1 | Shortlist | Mark favorites |
-| P1 | Review board | Review many shots or assets in one view |
-| P2 | Continuity report | Detect inconsistencies across shots |
-| P2 | Quality checklist | Run checklist for artifacts, sync, lighting, etc. |
+| Priority | Feature           | Specification                                           |
+| -------- | ----------------- | ------------------------------------------------------- |
+| P0       | Candidate view    | Show generated candidates for a job                     |
+| P0       | Approve           | Mark candidate as approved                              |
+| P0       | Reject            | Mark candidate as rejected                              |
+| P0       | Use candidate     | Place approved candidate into asset library or timeline |
+| P1       | A/B comparison    | Compare two candidates side by side                     |
+| P1       | Before/after      | Compare original and edited asset                       |
+| P1       | Notes             | Add review notes                                        |
+| P1       | Shortlist         | Mark favorites                                          |
+| P1       | Review board      | Review many shots or assets in one view                 |
+| P2       | Continuity report | Detect inconsistencies across shots                     |
+| P2       | Quality checklist | Run checklist for artifacts, sync, lighting, etc.       |
 
 ### Acceptance criteria
 
@@ -1255,20 +1265,20 @@ Version control should cover more than files.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Asset versioning | Versions for assets |
-| P0 | Prompt versioning | Versions for prompts |
-| P0 | Scene versioning | Versions for scene structure and prompt |
-| P0 | Timeline snapshot | Save timeline state |
-| P0 | Restore version | Restore selected version |
-| P1 | Project snapshot | Snapshot entire project state |
-| P1 | Version comparison | Compare two versions |
-| P1 | Version notes | Explain changes |
-| P1 | Version history view | Visual history of changes |
-| P1 | Export versioning | Version exported files separately |
-| P2 | Branching | Experimental branches for scenes or timelines |
-| P2 | Merge suggestions | Suggest merging branches |
+| Priority | Feature              | Specification                                 |
+| -------- | -------------------- | --------------------------------------------- |
+| P0       | Asset versioning     | Versions for assets                           |
+| P0       | Prompt versioning    | Versions for prompts                          |
+| P0       | Scene versioning     | Versions for scene structure and prompt       |
+| P0       | Timeline snapshot    | Save timeline state                           |
+| P0       | Restore version      | Restore selected version                      |
+| P1       | Project snapshot     | Snapshot entire project state                 |
+| P1       | Version comparison   | Compare two versions                          |
+| P1       | Version notes        | Explain changes                               |
+| P1       | Version history view | Visual history of changes                     |
+| P1       | Export versioning    | Version exported files separately             |
+| P2       | Branching            | Experimental branches for scenes or timelines |
+| P2       | Merge suggestions    | Suggest merging branches                      |
 
 ### Versioned objects
 
@@ -1300,22 +1310,22 @@ Produce final output media.
 
 ### Features
 
-| Priority | Feature | Specification |
-|---|---|---|
-| P0 | Export video | Render timeline to video file |
-| P0 | Export presets | Basic draft and final presets |
-| P0 | Render queue | Queue export jobs |
-| P0 | Render progress | Show progress |
-| P0 | Render log | Show errors and warnings |
-| P1 | Multiple exports | Export same timeline in multiple formats |
-| P1 | Audio export | Export audio separately |
-| P1 | Subtitle export | Export sidecar subtitles |
-| P1 | Storyboard export | Export storyboard as PDF/images |
-| P1 | Project export | Export project bundle |
-| P1 | Render validation | Check for missing media, sync issues, black frames |
-| P2 | HDR export | HDR output where supported |
-| P2 | Archival master | High-quality master export |
-| P2 | Batch export | Export multiple projects |
+| Priority | Feature           | Specification                                      |
+| -------- | ----------------- | -------------------------------------------------- |
+| P0       | Export video      | Render timeline to video file                      |
+| P0       | Export presets    | Basic draft and final presets                      |
+| P0       | Render queue      | Queue export jobs                                  |
+| P0       | Render progress   | Show progress                                      |
+| P0       | Render log        | Show errors and warnings                           |
+| P1       | Multiple exports  | Export same timeline in multiple formats           |
+| P1       | Audio export      | Export audio separately                            |
+| P1       | Subtitle export   | Export sidecar subtitles                           |
+| P1       | Storyboard export | Export storyboard as PDF/images                    |
+| P1       | Project export    | Export project bundle                              |
+| P1       | Render validation | Check for missing media, sync issues, black frames |
+| P2       | HDR export        | HDR output where supported                         |
+| P2       | Archival master   | High-quality master export                         |
+| P2       | Batch export      | Export multiple projects                           |
 
 ### Export preset specification
 
@@ -1694,12 +1704,12 @@ ProjectSnapshot
 
 ### Hardware targets
 
-| Tier | Target | Use case |
-|---|---|---|
-| Baseline | 8–16 GB RAM, CPU only | Basic image/audio generation, editing |
-| Recommended | 16–32 GB RAM, 8–12 GB GPU VRAM | Local image-to-video, audio, music |
-| Advanced | 32+ GB RAM, 24+ GB GPU VRAM | Higher-resolution generation, faster iteration |
-| Cloud-assisted | Local + API | Long or high-quality video when user opts in |
+| Tier           | Target                         | Use case                                       |
+| -------------- | ------------------------------ | ---------------------------------------------- |
+| Baseline       | 8–16 GB RAM, CPU only          | Basic image/audio generation, editing          |
+| Recommended    | 16–32 GB RAM, 8–12 GB GPU VRAM | Local image-to-video, audio, music             |
+| Advanced       | 32+ GB RAM, 24+ GB GPU VRAM    | Higher-resolution generation, faster iteration |
+| Cloud-assisted | Local + API                    | Long or high-quality video when user opts in   |
 
 The app should detect hardware and adjust recommendations.
 
@@ -1809,12 +1819,12 @@ The product should separate:
 
 ### Suggested proxy strategy
 
-| Type | Master | Proxy |
-|---|---|---|
+| Type  | Master                 | Proxy                           |
+| ----- | ---------------------- | ------------------------------- |
 | Video | 1080p/4K, high bitrate | 720p or 1080p low bitrate H.264 |
-| Audio | WAV / FLAC | MP3 or AAC preview |
-| Image | Original PNG/EXR | JPG preview |
-| 3D | Source model | Lightweight preview mesh |
+| Audio | WAV / FLAC             | MP3 or AAC preview              |
+| Image | Original PNG/EXR       | JPG preview                     |
+| 3D    | Source model           | Lightweight preview mesh        |
 
 ### Requirements
 
@@ -1871,17 +1881,17 @@ app_data/
 
 These are proposed targets for the recommended hardware tier.
 
-| Task | Target |
-|---|---|
-| App startup | Under 5 seconds |
-| Project open | Under 2 seconds for medium project |
-| Asset thumbnail generation | Under 1 second per image |
-| Timeline scrubbing | Smooth playback using proxies |
-| Generation job status update | At least every 1 second |
-| Prompt reference resolution | Under 100 ms for normal project size |
-| Search results | Under 500 ms for 10,000 assets |
-| Draft render | Start within 10 seconds |
-| Error reporting | Clear error in under 5 seconds |
+| Task                         | Target                               |
+| ---------------------------- | ------------------------------------ |
+| App startup                  | Under 5 seconds                      |
+| Project open                 | Under 2 seconds for medium project   |
+| Asset thumbnail generation   | Under 1 second per image             |
+| Timeline scrubbing           | Smooth playback using proxies        |
+| Generation job status update | At least every 1 second              |
+| Prompt reference resolution  | Under 100 ms for normal project size |
+| Search results               | Under 500 ms for 10,000 assets       |
+| Draft render                 | Start within 10 seconds              |
+| Error reporting              | Clear error in under 5 seconds       |
 
 ---
 
@@ -2155,7 +2165,7 @@ Contents:
 
 # 14. MVP Roadmap
 
-We should not build everything at once.  
+We should not build everything at once.\
 The recommended approach is phased.
 
 ---
@@ -2433,7 +2443,7 @@ If this flow works reliably, the core product vision is validated.
 
 ## 18.1 Local video generation is slow
 
-**Risk:**  
+**Risk:**\
 Local video models may be too slow for comfortable iteration.
 
 **Mitigation:**
@@ -2448,7 +2458,7 @@ Local video models may be too slow for comfortable iteration.
 
 ## 18.2 Character consistency is hard
 
-**Risk:**  
+**Risk:**\
 AI may not keep characters consistent across shots.
 
 **Mitigation:**
@@ -2465,7 +2475,7 @@ AI may not keep characters consistent across shots.
 
 ## 18.3 Storage grows quickly
 
-**Risk:**  
+**Risk:**\
 Media, proxies, models, and generated versions can fill disk space.
 
 **Mitigation:**
@@ -2481,7 +2491,7 @@ Media, proxies, models, and generated versions can fill disk space.
 
 ## 18.4 Model licensing is complex
 
-**Risk:**  
+**Risk:**\
 Some open-source models have unclear or restrictive licenses.
 
 **Mitigation:**
@@ -2496,7 +2506,7 @@ Some open-source models have unclear or restrictive licenses.
 
 ## 18.5 Hardware variance is high
 
-**Risk:**  
+**Risk:**\
 Users will have very different GPUs and memory.
 
 **Mitigation:**
@@ -2512,7 +2522,7 @@ Users will have very different GPUs and memory.
 
 ## 18.6 Scope creep
 
-**Risk:**  
+**Risk:**\
 The product could become too large too quickly.
 
 **Mitigation:**
@@ -2530,56 +2540,51 @@ The product could become too large too quickly.
 ## 19.1 Hardware minimum
 
 - What is the minimum supported GPU?
-- Is CPU-only mode acceptable for MVP?
-Answer: CPU only is acceptable
+- Is CPU-only mode acceptable for MVP? Answer: CPU only is acceptable
 
 ## 19.2 Video length
 
 - What is the maximum initial clip length?
-- 2 seconds? 4 seconds? 8 seconds?
-Answer: This is model dependent, allow max as allowed by model
+- 2 seconds? 4 seconds? 8 seconds? Answer: This is model dependent, allow max as allowed by model
 
 ## 19.3 Cloud policy
 
 - Should cloud APIs be present in v1?
-- Or only after local workflow is stable?
-Answer: No cloud APIs in v1, just local
+- Or only after local workflow is stable? Answer: No cloud APIs in v1, just local
 
 ## 19.4 Skill format
 
 - Should skills be JSON/YAML workflows first?
-- Or should they support code/plugins immediately?
-Answer: JSON/YAML
+- Or should they support code/plugins immediately? Answer: JSON/YAML
 
 ## 19.5 Collaboration
 
 - Is v1 strictly single-user?
-- Should project sharing be file-based only?
-Answer: Add authorization of assets, projects etc to initial designs, but don't implement sharing yet
+- Should project sharing be file-based only? Answer: Add authorization of assets, projects etc to
+  initial designs, but don't implement sharing yet
 
 ## 19.6 Asset naming scope
 
 - Are `@names` globally unique or project-scoped?
-- Recommended: globally unique with aliases.
-Answer: globally unique with aliases.
+- Recommended: globally unique with aliases. Answer: globally unique with aliases.
 
 ## 19.7 Versioning model
 
 - Do we need branching?
-- Or are linear versions plus snapshots enough for MVP?
-Answer: linear versions plus snapshots is enough for MVP
+- Or are linear versions plus snapshots enough for MVP? Answer: linear versions plus snapshots is
+  enough for MVP
 
 ## 19.8 Music generation depth
 
 - Is v1 music generation prompt-based only?
-- Or should we attempt “watch the movie and generate music” in v1?
-Answer: Start with prompt/mood-based music. Add assembled-cut analysis later.
+- Or should we attempt “watch the movie and generate music” in v1? Answer: Start with
+  prompt/mood-based music. Add assembled-cut analysis later.
 
 ## 19.9 3D depth
 
 - Is v1 3D import/preview only?
-- Or should 3D-to-video be included early?
-Answer:Import, preview, export views, use as reference first.
+- Or should 3D-to-video be included early? Answer:Import, preview, export views, use as reference
+  first.
 
 ---
 
@@ -2628,7 +2633,8 @@ For the first stable version, I recommend defining MVP as:
 
 ## MVP Success Definition
 
-A user can create a short AI-assisted movie locally using generated and uploaded assets, with clear version history and exportable output.
+A user can create a short AI-assisted movie locally using generated and uploaded assets, with clear
+version history and exportable output.
 
 ---
 
@@ -2659,4 +2665,5 @@ If these are done well, the product can support:
 - Story-driven content
 - Local privacy-focused creation
 
-The long-term vision should be a complete local studio where users can go from idea to finished, versioned, exported movie using AI, local models, reusable assets, and repeatable skills.
+The long-term vision should be a complete local studio where users can go from idea to finished,
+versioned, exported movie using AI, local models, reusable assets, and repeatable skills.

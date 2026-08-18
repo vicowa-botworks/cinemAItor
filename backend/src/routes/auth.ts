@@ -1,14 +1,6 @@
 import { Router } from "@oak/oak/router";
-import {
-  type AuthedContext,
-  authMiddleware,
-  generateToken,
-} from "@cinemaItor/middleware/auth.ts";
-import {
-  createUser,
-  getUserByEmail,
-  getUserById,
-} from "@cinemaItor/db/schema.ts";
+import { type AuthedContext, authMiddleware, generateToken } from "@cinemaItor/middleware/auth.ts";
+import { createUser, getUserByEmail, getUserById } from "@cinemaItor/db/schema.ts";
 
 const router = new Router()
   .post("/api/auth/register", async (ctx, _next) => {
