@@ -1,180 +1,161 @@
 import { Router } from "@oak/oak/router";
-import { type AuthedContext, authMiddleware, generateToken } from "@cinemaItor/middleware/auth.ts";
-import { createUser, getUserByEmail, getUserById } from "@cinemaItor/db/schema.ts";
+import type { Context } from "@oak/oak";
+import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
+import { countUsers, createUser, getUserByEmail, getUserById } from "@cinemaItor/db/schema.ts";
+import { hashPassword, verifyPassword } from "@cinemaItor/services/password.ts";
+import { issueSession, revokeSession } from "@cinemaItor/services/sessions.ts";
+import { logAudit } from "@cinemaItor/services/audit.ts";
+import { badRequest, conflict, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
-const router = new Router()
-  .post("/api/auth/register", async (ctx, _next) => {
-    const body = ctx.request.body;
-    if (body.type() !== "json") {
-      ctx.response.status = 400;
-      ctx.response.body = { error: "Request body must be JSON" };
-      return;
-    }
+const MIN_PASSWORD_LENGTH = 8;
 
-    const { email, password, display_name } = await body.json();
-
-    if (!email || !password || !display_name) {
-      ctx.response.status = 400;
-      ctx.response.body = {
-        error: "Email, password, and display_name are required",
-      };
-      return;
-    }
-
-    if (password.length < 8) {
-      ctx.response.status = 400;
-      ctx.response.body = { error: "Password must be at least 8 characters" };
-      return;
-    }
-
-    const existingUser = getUserByEmail(email);
-    if (existingUser) {
-      ctx.response.status = 409;
-      ctx.response.body = { error: "Email already registered" };
-      return;
-    }
-
-    const passwordHash = await hashPassword(password);
-    const userId = createUser(email, passwordHash, display_name);
-    const token = await generateToken(userId);
-
-    ctx.response.status = 201;
-    ctx.response.body = {
-      token,
-      user: { id: userId, email, display_name },
-    };
-  })
-  .post("/api/auth/login", async (ctx, _next) => {
-    const body = ctx.request.body;
-    if (body.type() !== "json") {
-      ctx.response.status = 400;
-      ctx.response.body = { error: "Request body must be JSON" };
-      return;
-    }
-
-    const { email, password } = await body.json();
-
-    if (!email || !password) {
-      ctx.response.status = 400;
-      ctx.response.body = { error: "Email and password are required" };
-      return;
-    }
-
-    const user = getUserByEmail(email);
-    if (!user) {
-      ctx.response.status = 401;
-      ctx.response.body = { error: "Invalid credentials" };
-      return;
-    }
-
-    const valid = await verifyPassword(password, user.password_hash);
-    if (!valid) {
-      ctx.response.status = 401;
-      ctx.response.body = { error: "Invalid credentials" };
-      return;
-    }
-
-    const token = await generateToken(user.id);
-
-    ctx.response.body = {
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        display_name: user.display_name,
-        role: user.role,
-      },
-    };
-  })
-  .get("/api/auth/me", authMiddleware, (ctx, _next) => {
-    const userId = (ctx as unknown as AuthedContext).userId;
-    const user = userId ? getUserById(userId) : null;
-
-    if (!user) {
-      ctx.response.status = 404;
-      ctx.response.body = { error: "User not found" };
-      return;
-    }
-
-    ctx.response.body = {
-      id: user.id,
-      email: user.email,
-      display_name: user.display_name,
-      role: user.role,
-    };
-  });
-
-async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const saltStr = base64urlEncode(salt);
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    key,
-    256,
-  );
-
-  const hash = base64urlEncode(new Uint8Array(derivedBits));
-  return `${saltStr}:${hash}`;
+function userShape(user: {
+  id: number;
+  email: string;
+  display_name: string;
+  role: string;
+}) {
+  return {
+    id: user.id,
+    email: user.email,
+    display_name: user.display_name,
+    role: user.role,
+  };
 }
 
-async function verifyPassword(
-  password: string,
-  hash: string,
-): Promise<boolean> {
-  const [saltStr, hashStr] = hash.split(":");
-  if (!saltStr || !hashStr) return false;
-
-  const salt = base64urlDecode(saltStr);
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    key,
-    256,
-  );
-
-  const derivedHash = base64urlEncode(new Uint8Array(derivedBits));
-  return derivedHash === hashStr;
-}
-
-function base64urlEncode(data: Uint8Array): string {
-  let binary = "";
-  for (const byte of data) {
-    binary += String.fromCharCode(byte);
+async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
+  const body = ctx.request.body;
+  if (body.type() !== "json") {
+    throw badRequest("Request body must be JSON");
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
-    /=+$/,
-    "",
+  return await body.json() as Record<string, unknown>;
+}
+
+function validateCredentials(
+  email: unknown,
+  password: unknown,
+): { email: string; password: string } {
+  if (
+    typeof email !== "string" || !email || typeof password !== "string" ||
+    !password
+  ) {
+    throw badRequest("Email and password are required");
+  }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw badRequest(
+      `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+    );
+  }
+  return { email, password };
+}
+
+async function handleBootstrap(ctx: Context): Promise<void> {
+  const body = await readJsonBody(ctx);
+  if (
+    typeof body.email !== "string" || !body.email ||
+    typeof body.display_name !== "string" || !body.display_name
+  ) {
+    throw badRequest("Email and display_name are required");
+  }
+  const { email, password } = validateCredentials(
+    body.email,
+    body.password,
   );
+  if (countUsers() > 0) {
+    throw conflict(
+      "A user already exists; bootstrap is only available for the first user",
+    );
+  }
+
+  const userId = createUser(
+    email,
+    await hashPassword(password),
+    body.display_name,
+    "admin",
+  );
+  const token = await issueSession(userId);
+  logAudit(userId, "user.bootstrap", "user", String(userId));
+
+  ctx.response.status = 201;
+  ctx.response.body = {
+    token,
+    user: { id: userId, email, display_name: body.display_name, role: "admin" },
+  };
 }
 
-function base64urlDecode(input: string): Uint8Array<ArrayBuffer> {
-  let base64 = input.replace(/-/g, "+").replace(/_/g, "/");
-  while (base64.length % 4 !== 0) {
-    base64 += "=";
+async function handleRegister(ctx: Context): Promise<void> {
+  const body = await readJsonBody(ctx);
+  if (
+    typeof body.email !== "string" || !body.email ||
+    typeof body.display_name !== "string" || !body.display_name
+  ) {
+    throw badRequest("Email, password, and display_name are required");
   }
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+  const { email, password } = validateCredentials(
+    body.email,
+    body.password,
+  );
+  if (getUserByEmail(email)) {
+    throw conflict("Email already registered");
   }
-  return bytes;
+
+  const userId = createUser(
+    email,
+    await hashPassword(password),
+    body.display_name,
+  );
+  const token = await issueSession(userId);
+  logAudit(userId, "user.register", "user", String(userId));
+
+  ctx.response.status = 201;
+  ctx.response.body = {
+    token,
+    user: { id: userId, email, display_name: body.display_name, role: "user" },
+  };
 }
 
-export { router };
+async function handleLogin(ctx: Context): Promise<void> {
+  const body = await readJsonBody(ctx);
+  const { email, password } = validateCredentials(
+    body.email,
+    body.password,
+  );
+
+  const user = getUserByEmail(email);
+  if (!user || !(await verifyPassword(password, user.password_hash))) {
+    throw unauthorized("Invalid credentials");
+  }
+  if (!user.is_active) {
+    throw unauthorized("User is inactive");
+  }
+
+  const token = await issueSession(user.id);
+  logAudit(user.id, "auth.login", "user", String(user.id));
+
+  ctx.response.body = { token, user: userShape(user) };
+}
+
+async function handleLogout(ctx: Context): Promise<void> {
+  const authed = ctx as AuthedContext;
+  if (!authed.token) throw unauthorized();
+  const revoked = await revokeSession(authed.token);
+  if (!revoked) throw unauthorized("Session already revoked");
+  logAudit(authed.userId ?? null, "auth.logout", "user", String(authed.userId));
+  ctx.response.status = 204;
+}
+
+function handleMe(ctx: Context): void {
+  const authed = ctx as AuthedContext;
+  const user = authed.userId ? getUserById(authed.userId) : undefined;
+  if (!user) throw notFound("User not found");
+  ctx.response.body = userShape(user);
+}
+
+export const router = new Router()
+  .post("/api/v1/auth/bootstrap", handleBootstrap)
+  .post("/api/v1/auth/login", handleLogin)
+  .post("/api/v1/auth/logout", authMiddleware, handleLogout)
+  .get("/api/v1/auth/me", authMiddleware, handleMe)
+  .post("/api/auth/register", handleRegister)
+  .post("/api/auth/login", handleLogin)
+  .get("/api/auth/me", authMiddleware, handleMe);

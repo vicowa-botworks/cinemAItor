@@ -28,6 +28,7 @@ describe("migrations", () => {
         "project_permissions",
         "asset_permissions",
         "audit_logs",
+        "sessions",
       ]
     ) {
       assert(tables.includes(expected), `expected table ${expected} to exist`);
@@ -38,16 +39,16 @@ describe("migrations", () => {
     const db = new Database(":memory:");
     try {
       const first = runMigrations(db);
-      assertEquals(first.applied, ["0001_init.sql"]);
+      assertEquals(first.applied, ["0001_init.sql", "0002_sessions.sql"]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
       assertEquals(second.applied, []);
-      assertEquals(second.skipped, ["0001_init.sql"]);
+      assertEquals(second.skipped, ["0001_init.sql", "0002_sessions.sql"]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        1,
+        2,
       );
     } finally {
       db.close();
@@ -58,7 +59,10 @@ describe("migrations", () => {
     const db = getDb(":memory:");
     const rows = db.prepare("SELECT name FROM schema_migrations")
       .all() as unknown as { name: string }[];
-    assertEquals(rows.map((r) => r.name), ["0001_init.sql"]);
+    assertEquals(rows.map((r) => r.name), [
+      "0001_init.sql",
+      "0002_sessions.sql",
+    ]);
   });
 
   it("adds is_active to legacy users tables", () => {
