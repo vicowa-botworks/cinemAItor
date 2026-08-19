@@ -49,6 +49,7 @@ export interface GenerationJob {
   error_text: string | null;
   output_asset_version_id: string | null;
   candidate_count: number | null;
+  candidate_version_ids: string[] | null;
   lease_owner: string | null;
   lease_expires_at: string | null;
   created_by_user_id: number | null;
@@ -126,6 +127,9 @@ export function rowToJob(row: Record<string, unknown>): GenerationJob {
     error_text: asNullableString(row.error_text),
     output_asset_version_id: asNullableString(row.output_asset_version_id),
     candidate_count: row.candidate_count === null ? null : Number(row.candidate_count),
+    candidate_version_ids: row.candidate_version_ids === null
+      ? null
+      : JSON.parse(row.candidate_version_ids as string),
     lease_owner: asNullableString(row.lease_owner),
     lease_expires_at: asNullableString(row.lease_expires_at),
     created_by_user_id: row.created_by_user_id === null ? null : Number(row.created_by_user_id),
@@ -305,6 +309,7 @@ export function finishJob(
     errorText?: string;
     outputAssetVersionId?: string;
     candidateCount?: number;
+    candidateVersionIds?: string[];
     progress?: number;
   } = {},
 ): GenerationJob | undefined {
@@ -322,7 +327,7 @@ export function finishJob(
       `UPDATE generation_jobs
        SET status = ?, progress = ?, error_text = ?, output_asset_version_id = ?,
            candidate_count = ?, finished_at = ?, lease_owner = NULL,
-           lease_expires_at = NULL
+           lease_expires_at = NULL, candidate_version_ids = ?
        WHERE id = ? AND status IN ('queued', 'running', 'cancelling')`,
     ).run(
       status,
@@ -331,6 +336,7 @@ export function finishJob(
       fields.outputAssetVersionId ?? null,
       fields.candidateCount ?? null,
       now,
+      fields.candidateVersionIds ? JSON.stringify(fields.candidateVersionIds) : null,
       id,
     );
   }
@@ -365,9 +371,10 @@ export function retryJob(id: string): GenerationJob | undefined {
     `UPDATE generation_jobs
      SET status = 'queued', progress = 0, error_text = NULL,
          lease_owner = NULL, lease_expires_at = NULL,
-         output_asset_version_id = NULL, candidate_count = NULL,
-         started_at = NULL, finished_at = NULL
-     WHERE id = ?
+          output_asset_version_id = NULL, candidate_count = NULL,
+          candidate_version_ids = NULL,
+          started_at = NULL, finished_at = NULL
+      WHERE id = ?
        AND status IN ('succeeded', 'failed', 'cancelled')`,
   ).run(id);
   const updated = getJob(id);

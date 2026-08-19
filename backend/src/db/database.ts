@@ -43,6 +43,7 @@ const ALL_TABLES = [
   "storyboard_panels",
   "scenes",
   "shots",
+  "review_decisions",
   "prompt_versions",
   "sessions",
   "audit_logs",

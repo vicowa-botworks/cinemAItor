@@ -120,6 +120,9 @@ server.ts (entry point)
  │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; runner
  │   │   links preview/clip outputs back to panels and shots
  │   └── (see docs/storyboards.md)
+ ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
+ │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes
+ │   └── (see docs/review.md)
  └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 

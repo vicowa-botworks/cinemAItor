@@ -42,6 +42,7 @@ describe("migrations", () => {
         "storyboard_panels",
         "scenes",
         "shots",
+        "review_decisions",
       ]
     ) {
       assert(tables.includes(expected), `expected table ${expected} to exist`);
@@ -60,6 +61,7 @@ describe("migrations", () => {
         "0005_models.sql",
         "0006_generation.sql",
         "0007_storyboard.sql",
+        "0008_review.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -72,12 +74,13 @@ describe("migrations", () => {
         "0005_models.sql",
         "0006_generation.sql",
         "0007_storyboard.sql",
+        "0008_review.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        7,
+        8,
       );
     } finally {
       db.close();
@@ -96,6 +99,7 @@ describe("migrations", () => {
       "0005_models.sql",
       "0006_generation.sql",
       "0007_storyboard.sql",
+      "0008_review.sql",
     ]);
   });
 
