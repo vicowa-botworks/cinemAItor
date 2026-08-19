@@ -3,6 +3,8 @@ import { router as authRouter } from "@cinemaItor/routes/auth.ts";
 import { assetRouter } from "@cinemaItor/routes/assets.ts";
 import { movieRouter } from "@cinemaItor/routes/movies.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
+import { promptRouter } from "@cinemaItor/routes/prompts.ts";
+import { referenceRouter } from "@cinemaItor/routes/references.ts";
 import { healthRouter } from "@cinemaItor/routes/health.ts";
 import { type AppConfig, loadConfig } from "@cinemaItor/config.ts";
 import { createLogger } from "@cinemaItor/logger.ts";
@@ -64,11 +66,15 @@ export function createApp(config: AppConfig = loadConfig()): Application {
   app.use(movieRouter.routes());
   app.use(projectRouter.routes());
   app.use(assetRouter.routes());
+  app.use(promptRouter.routes());
+  app.use(referenceRouter.routes());
   app.use(healthRouter.allowedMethods());
   app.use(authRouter.allowedMethods());
   app.use(movieRouter.allowedMethods());
   app.use(projectRouter.allowedMethods());
   app.use(assetRouter.allowedMethods());
+  app.use(promptRouter.allowedMethods());
+  app.use(referenceRouter.allowedMethods());
 
   return app;
 }

@@ -34,6 +34,7 @@ describe("migrations", () => {
         "asset_tags",
         "asset_versions",
         "asset_references",
+        "prompt_versions",
       ]
     ) {
       assert(tables.includes(expected), `expected table ${expected} to exist`);
@@ -48,6 +49,7 @@ describe("migrations", () => {
         "0001_init.sql",
         "0002_sessions.sql",
         "0003_assets.sql",
+        "0004_reference_engine.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -56,12 +58,13 @@ describe("migrations", () => {
         "0001_init.sql",
         "0002_sessions.sql",
         "0003_assets.sql",
+        "0004_reference_engine.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        3,
+        4,
       );
     } finally {
       db.close();
@@ -76,6 +79,7 @@ describe("migrations", () => {
       "0001_init.sql",
       "0002_sessions.sql",
       "0003_assets.sql",
+      "0004_reference_engine.sql",
     ]);
   });
 
