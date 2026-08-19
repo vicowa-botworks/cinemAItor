@@ -364,12 +364,13 @@ describe("jobs api", () => {
         // Cancel while still queued (fast cancel before the runner claims it).
         const cancel = await post(`/api/v1/jobs/${jobId}/cancel`, {}, ownerToken);
         if (cancel.status === 200) {
-          assertEquals(((await cancel.json()) as JobBody).status, "cancelled");
+          // Queued at read time -> cancelled; claimed by then -> graceful
+          // cancelling that the runner finalizes.
+          const status = ((await cancel.json()) as JobBody).status;
+          assert(["cancelled", "cancelling"].includes(status));
         } else {
-          // The runner already picked it up; wait for it to finish, then
-          // cancelling must be rejected.
+          // A terminal job: cancelling must be rejected.
           assertEquals(cancel.status, 400);
-          await waitForJob(ownerToken, jobId, ["succeeded", "failed"]);
         }
 
         const final = await waitForJob(
