@@ -1,24 +1,11 @@
 import { Router } from "@oak/oak/router";
 import type { Context } from "@oak/oak";
-import {
-  type AuthedContext,
-  authMiddleware,
-} from "@cinemaItor/middleware/auth.ts";
-import {
-  countUsers,
-  createUser,
-  getUserByEmail,
-  getUserById,
-} from "@cinemaItor/db/schema.ts";
+import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
+import { countUsers, createUser, getUserByEmail, getUserById } from "@cinemaItor/db/schema.ts";
 import { hashPassword, verifyPassword } from "@cinemaItor/services/password.ts";
 import { issueSession, revokeSession } from "@cinemaItor/services/sessions.ts";
 import { logAudit } from "@cinemaItor/services/audit.ts";
-import {
-  badRequest,
-  conflict,
-  notFound,
-  unauthorized,
-} from "@cinemaItor/errors.ts";
+import { badRequest, conflict, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
 const MIN_PASSWORD_LENGTH = 8;
 

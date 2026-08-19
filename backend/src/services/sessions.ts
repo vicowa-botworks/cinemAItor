@@ -1,9 +1,5 @@
 import { getDb } from "@cinemaItor/db/database.ts";
-import {
-  generateToken,
-  sha256Hex,
-  TOKEN_EXPIRY_MS,
-} from "@cinemaItor/services/jwt.ts";
+import { generateToken, sha256Hex, TOKEN_EXPIRY_MS } from "@cinemaItor/services/jwt.ts";
 
 export interface Session {
   id: string;
