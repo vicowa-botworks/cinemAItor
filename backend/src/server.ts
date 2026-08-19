@@ -6,6 +6,7 @@ import { type AppConfig, loadConfig } from "@cinemaItor/config.ts";
 import { createLogger } from "@cinemaItor/logger.ts";
 import { errorHandler } from "@cinemaItor/errors.ts";
 import { getDb } from "@cinemaItor/db/database.ts";
+import { ensureLayout } from "@cinemaItor/storage/paths.ts";
 
 const CORS_ORIGINS = ["http://localhost:8124"];
 const CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
@@ -50,6 +51,7 @@ function requestLogger(logger: ReturnType<typeof createLogger>): Middleware {
 export function createApp(config: AppConfig = loadConfig()): Application {
   const logger = createLogger(config.logLevel, { component: "http" });
   getDb();
+  ensureLayout(config.appDataDir);
 
   const app = new Application();
   app.use(corsMiddleware());

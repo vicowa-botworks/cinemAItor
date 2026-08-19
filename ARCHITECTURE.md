@@ -105,6 +105,14 @@ server.ts (entry point)
 - `database.ts`: Singleton `Database` instance, schema initialization
 - `schema.ts`: CRUD functions with parameterized queries (SQL injection safe)
 
+### Storage layer:
+
+- `storage/paths.ts`: `app_data` layout and content-addressed paths
+- `storage/checksums.ts`: incremental SHA-256 file hashing
+- `storage/content_store.ts`: atomic, deduplicated media file storage
+
+See `docs/storage.md` for the storage contract.
+
 ### Authentication Flow
 
 ```
