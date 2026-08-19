@@ -29,6 +29,11 @@ describe("migrations", () => {
         "asset_permissions",
         "audit_logs",
         "sessions",
+        "assets",
+        "asset_aliases",
+        "asset_tags",
+        "asset_versions",
+        "asset_references",
       ]
     ) {
       assert(tables.includes(expected), `expected table ${expected} to exist`);
@@ -39,16 +44,24 @@ describe("migrations", () => {
     const db = new Database(":memory:");
     try {
       const first = runMigrations(db);
-      assertEquals(first.applied, ["0001_init.sql", "0002_sessions.sql"]);
+      assertEquals(first.applied, [
+        "0001_init.sql",
+        "0002_sessions.sql",
+        "0003_assets.sql",
+      ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
       assertEquals(second.applied, []);
-      assertEquals(second.skipped, ["0001_init.sql", "0002_sessions.sql"]);
+      assertEquals(second.skipped, [
+        "0001_init.sql",
+        "0002_sessions.sql",
+        "0003_assets.sql",
+      ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        2,
+        3,
       );
     } finally {
       db.close();
@@ -62,6 +75,7 @@ describe("migrations", () => {
     assertEquals(rows.map((r) => r.name), [
       "0001_init.sql",
       "0002_sessions.sql",
+      "0003_assets.sql",
     ]);
   });
 

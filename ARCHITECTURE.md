@@ -85,56 +85,70 @@ app-root (main router)
 server.ts (entry point)
 ├── CORS middleware
 ├── Error handling middleware
-├── Auth routes (/api/auth/*)
-│   ├── POST /register
+├── Health routes (/api/v1/health)
+├── Auth routes (/api/v1/auth/*)
+│   ├── POST /bootstrap (first user, becomes admin)
 │   ├── POST /login
+│   ├── POST /logout
 │   └── GET /me
-├── Movie routes (/api/movies/*)
-│   ├── GET / (list)
-│   ├── GET /:id
+├── Project routes (/api/v1/projects/*, auth middleware)
+│   ├── GET / (list accessible)
 │   ├── POST / (create)
-│   ├── PUT /:id (update)
-│   ├── DELETE /:id
-│   ├── GET /:id/scenes
-│   └── POST /:id/scenes
-└── Auth middleware (protects movie routes)
+│   ├── GET /:id
+│   ├── PATCH /:id
+│   └── DELETE /:id (soft delete)
+├── Asset routes (/api/v1/assets/*, auth middleware)
+│   ├── CRUD + upload + versions + restore + aliases + tags + preview
+│   └── (see docs/assets.md)
+└── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 
 **Database layer:**
 
 - `database.ts`: Singleton `Database` instance, schema initialization
-- `schema.ts`: CRUD functions with parameterized queries (SQL injection safe)
+- `migrations/`: Ordered, idempotent SQL migrations tracked in `schema_migrations`
+- `schema.ts`: Legacy CRUD functions with parameterized queries (SQL injection safe)
+- `projects.ts`: Project repository + project permission checks
+- `assets.ts`: Asset/alias/tag/version repository + asset permission checks
 
 ### Storage layer:
 
 - `storage/paths.ts`: `app_data` layout and content-addressed paths
 - `storage/checksums.ts`: incremental SHA-256 file hashing
 - `storage/content_store.ts`: atomic, deduplicated media file storage
+- `storage/media_types.ts`: extension → MIME/type inference
 
-See `docs/storage.md` for the storage contract.
+See `docs/storage.md` and `docs/assets.md` for the storage and asset contracts.
+
+### Authorization
+
+- `admin` role users bypass all checks.
+- Creators hold implicit `admin` over their projects and assets.
+- Otherwise the highest permission rank wins: `project_permissions` (inherited by project-scoped
+  assets) and `asset_permissions` rows (`read` < `write` < `admin`).
 
 ### Authentication Flow
 
 ```
-Registration:
+Bootstrap (once):
   1. Client sends email + password + display_name
   2. Server hashes password with PBKDF2 (salt + 100k iterations)
-  3. User stored in database
-  4. JWT generated (HS256, 7-day expiry)
-  5. Token returned to client
+  3. First user is created with role 'admin'
+  4. Session row + JWT generated; token returned to client
 
 Login:
   1. Client sends email + password
-  2. Server retrieves user by email
-  3. Server verifies password with PBKDF2
-  4. JWT generated and returned
+  2. Server verifies password with PBKDF2
+  3. Session row + fresh JWT issued
+
+Logout:
+  1. Session row is revoked (jti)
 
 Authenticated Request:
   1. Client sends Bearer token in Authorization header
   2. Auth middleware verifies JWT signature and expiry
-  3. User ID extracted from token payload
-  4. User fetched from database
-  5. Request proceeds with user context
+  3. Session looked up by jti; revoked/expired sessions are rejected
+  4. Request proceeds with user context
 ```
 
 ### Data Models

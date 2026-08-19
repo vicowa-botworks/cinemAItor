@@ -1,5 +1,6 @@
 import { Application, type Middleware } from "@oak/oak";
 import { router as authRouter } from "@cinemaItor/routes/auth.ts";
+import { assetRouter } from "@cinemaItor/routes/assets.ts";
 import { movieRouter } from "@cinemaItor/routes/movies.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
 import { healthRouter } from "@cinemaItor/routes/health.ts";
@@ -62,10 +63,12 @@ export function createApp(config: AppConfig = loadConfig()): Application {
   app.use(authRouter.routes());
   app.use(movieRouter.routes());
   app.use(projectRouter.routes());
+  app.use(assetRouter.routes());
   app.use(healthRouter.allowedMethods());
   app.use(authRouter.allowedMethods());
   app.use(movieRouter.allowedMethods());
   app.use(projectRouter.allowedMethods());
+  app.use(assetRouter.allowedMethods());
 
   return app;
 }

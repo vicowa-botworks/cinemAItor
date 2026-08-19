@@ -1,7 +1,18 @@
 import { join } from "@std/path";
 import { badRequest } from "@cinemaItor/errors.ts";
+import { loadConfig } from "@cinemaItor/config.ts";
 import { sha256File } from "./checksums.ts";
 import { contentAddressedPath, ensureLayout, type StorageLayout } from "./paths.ts";
+
+let sharedStore: ContentStore | undefined;
+
+/** Process-wide store rooted at the configured app data directory. */
+export function getContentStore(): ContentStore {
+  if (!sharedStore) {
+    sharedStore = new ContentStore(loadConfig().appDataDir);
+  }
+  return sharedStore;
+}
 
 export interface StoredFile {
   hash: string;
