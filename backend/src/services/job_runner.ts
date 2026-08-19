@@ -11,6 +11,8 @@ import {
 } from "../db/jobs.ts";
 import { getModel, touchModelLastUsed } from "../db/models.ts";
 import { createAsset, createAssetVersion, getAssetById } from "../db/assets.ts";
+import { setPanelPreview } from "../db/storyboards.ts";
+import { setShotGenerated } from "../db/scenes.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import { CancelledError, getAdapter, randomSeed } from "./adapters.ts";
 
@@ -189,6 +191,22 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
           asset_id: targetAssetId,
           version_id: versionId,
         });
+      }
+
+      // Link the first output back to the creative object that requested it.
+      if (versionIds.length > 0) {
+        if (job.storyboard_panel_id) {
+          setPanelPreview(job.storyboard_panel_id, versionIds[0]);
+          addJobEvent(jobId, "panel.linked", "Panel preview linked", {
+            version_id: versionIds[0],
+          });
+        }
+        if (job.shot_id) {
+          setShotGenerated(job.shot_id, versionIds[0]);
+          addJobEvent(jobId, "shot.linked", "Shot output linked", {
+            version_id: versionIds[0],
+          });
+        }
       }
 
       finishJob(jobId, "succeeded", {

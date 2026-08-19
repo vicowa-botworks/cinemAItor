@@ -196,7 +196,7 @@ export function createScene(
 ): number {
   const db = getDb();
   const stmt = db.prepare(
-    `INSERT INTO scenes (movie_id, scene_number, description, dialogue, visual_description, duration_seconds, user_id)
+    `INSERT INTO legacy_scenes (movie_id, scene_number, description, dialogue, visual_description, duration_seconds, user_id)
      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   );
   const row = stmt.get<{ id: number }>(
@@ -215,7 +215,7 @@ export function createScene(
 export function getScenesByMovieId(movieId: number, userId: number): Scene[] {
   const db = getDb();
   const stmt = db.prepare(
-    `SELECT s.* FROM scenes s
+    `SELECT s.* FROM legacy_scenes s
      JOIN movies m ON s.movie_id = m.id
      WHERE m.id = ? AND m.user_id = ?
      ORDER BY s.scene_number`,
