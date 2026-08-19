@@ -403,6 +403,34 @@ describe("reference engine api", () => {
     });
   });
 
+  it("returns a single reference by id", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const res = await post(
+          `/api/v1/references/parse`,
+          {
+            text: `@${heroSlug} and @ghost`,
+            persist: { scope_type: "prompt", scope_id: "get-one" },
+          },
+          ownerToken,
+        );
+        const body = (await res.json()) as { tokens: (ReferenceOut & { id: string })[] };
+        const ghost = body.tokens.find((t) => t.slug === "ghost");
+        assert(ghost);
+
+        const idRes = await get(`/api/v1/references/${ghost.id}`, ownerToken);
+        assertEquals(idRes.status, 200);
+        const row = (await idRes.json()) as { raw_text: string; status: string };
+        assertEquals(row.raw_text, "@ghost");
+        assertEquals(row.status, "missing");
+
+        const missingRes = await get(`/api/v1/references/does-not-exist`, ownerToken);
+        assertEquals(missingRes.status, 404);
+      })();
+    });
+  });
+
   it("validates request bodies", async () => {
     await withServer((base) => {
       baseUrl = base;

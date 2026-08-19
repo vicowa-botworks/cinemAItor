@@ -218,8 +218,8 @@ describe("reference engine", () => {
     );
     const ghostRow = rows[0];
 
-    const byId = replaceReference(ownerId, ghostRow.id, { slug: room.id });
-    assertEquals(byId?.asset_version_id, roomAfterVersion.active_version_id);
+    const bySlug = replaceReference(ownerId, ghostRow.id, { slug: roomSlug });
+    assertEquals(bySlug?.asset_version_id, roomAfterVersion.active_version_id);
 
     const byV1 = replaceReference(ownerId, ghostRow.id, { slug: roomSlug, version: 1 });
     assertEquals(byV1?.status, "resolved");

@@ -33,16 +33,17 @@ match.
 
 ## Endpoints
 
-| Method | Endpoint                                       | Description                                                   |
-| ------ | ---------------------------------------------- | ------------------------------------------------------------- |
-| POST   | `/api/v1/references/parse`                     | Parse + resolve text; optionally persist rows                 |
-| GET    | `/api/v1/references/audit`                     | Audit list (filter: source_type, source_id, asset_id, status) |
-| POST   | `/api/v1/references/:id/replace`               | Remap a reference (e.g. a broken one) to an asset             |
-| POST   | `/api/v1/prompts`                              | Save a prompt version (201, or 200 + duplicate)               |
-| GET    | `/api/v1/prompts/:scope_type/:scope_id`        | Version history (newest first)                                |
-| GET    | `/api/v1/prompts/:scope_type/:scope_id/latest` | Latest version + its references                               |
-| GET    | `/api/v1/prompts/:id`                          | One version + its persisted references                        |
-| POST   | `/api/v1/prompts/:id/restore`                  | Append an older version as the new latest                     |
+| Method | Endpoint                                       | Description                                                                       |
+| ------ | ---------------------------------------------- | --------------------------------------------------------------------------------- |
+| POST   | `/api/v1/references/parse`                     | Parse + resolve text; optionally persist rows                                     |
+| GET    | `/api/v1/references/audit`                     | Audit list, grouped per source (filter: source_type, source_id, asset_id, status) |
+| GET    | `/api/v1/references/:id`                       | One persisted reference row                                                       |
+| POST   | `/api/v1/references/:id/replace`               | Remap a reference (e.g. a broken one) to an asset                                 |
+| POST   | `/api/v1/prompts`                              | Save a prompt version (201, or 200 + duplicate)                                   |
+| GET    | `/api/v1/prompts/:scope_type/:scope_id`        | Version history (newest first)                                                    |
+| GET    | `/api/v1/prompts/:scope_type/:scope_id/latest` | Latest version + its references                                                   |
+| GET    | `/api/v1/prompts/:id`                          | One version + its persisted references                                            |
+| POST   | `/api/v1/prompts/:id/restore`                  | Append an older version as the new latest                                         |
 
 `POST /api/v1/references/parse` body:
 

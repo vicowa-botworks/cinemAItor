@@ -147,6 +147,12 @@ export const referenceRouter = new Router()
     });
     ctx.response.body = entries;
   })
+  .get("/api/v1/references/:id", authMiddleware, (ctx, _next) => {
+    requireUserId(ctx);
+    const reference = getReference(requireIdParam(ctx));
+    if (!reference) throw notFound("Reference not found");
+    ctx.response.body = reference;
+  })
   .post("/api/v1/references/:id/replace", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
     const referenceId = requireIdParam(ctx);

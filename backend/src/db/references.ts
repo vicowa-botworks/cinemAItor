@@ -2,7 +2,6 @@ import { getDb } from "./database.ts";
 import {
   type Asset,
   type AssetVersion,
-  getAssetById,
   getAssetBySlug,
   getAssetVersion,
   getAssetVersionByNumber,
@@ -306,7 +305,7 @@ export function auditReferences(
        FROM asset_references r
        LEFT JOIN assets a ON a.id = r.asset_id
        ${where}
-       ORDER BY r.created_at DESC, r.start_index`,
+       ORDER BY r.created_at DESC, r.source_type, r.source_id, r.start_index`,
     ).all as (...values: unknown[]) => unknown[]
   )(...params) as Record<string, unknown>[];
 
@@ -341,7 +340,7 @@ export function replaceReference(
   const reference = getReference(referenceId);
   if (!reference) return undefined;
 
-  const asset = getAssetById(input.slug) ?? getAssetBySlug(input.slug);
+  const asset = getAssetBySlug(input.slug);
   if (!asset || asset.status === "deleted") {
     throw badRequest("Replacement asset does not exist", input.slug);
   }
