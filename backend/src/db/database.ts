@@ -36,6 +36,7 @@ const ALL_TABLES = [
   "asset_aliases",
   "asset_references",
   "assets",
+  "models",
   "prompt_versions",
   "sessions",
   "audit_logs",
