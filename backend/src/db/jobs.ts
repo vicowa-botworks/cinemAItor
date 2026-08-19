@@ -369,7 +369,7 @@ export function retryJob(id: string): GenerationJob | undefined {
          started_at = NULL, finished_at = NULL
      WHERE id = ?
        AND status IN ('succeeded', 'failed', 'cancelled')`,
-   ).run(id);
+  ).run(id);
   const updated = getJob(id);
   if (updated && updated.status === "queued") {
     addJobEvent(id, "retried", "Job re-queued for retry");
