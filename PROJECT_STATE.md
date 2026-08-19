@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 5 in progress (Timeline Editor core complete)
+## Current Status: Milestone 6 in progress (Audio import + versioning complete)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -37,6 +37,12 @@ removed.
 - [x] Timeline editor core (Milestone 5): project-scoped timelines, typed tracks (swap reorder,
       lock/mute), items placed on asset versions (move/trim/speed/transform/fades/effects), item
       duplicate, duration recompute, markers, full-state snapshots with restore
+- [x] Audio import + versioning (Milestone 6 part 1): audio asset upload (wav/mp3/flac/ogg/
+      m4a/aac), version by upload or stored hash, ffprobe/ffmpeg analysis (duration, sample rate,
+      channels, 200-bucket waveform) with graceful no-ffmpeg fallback, non-destructive trim/gain
+      adjustments applied at render time, waveform endpoint (503 when unanalyzable). Also: logger
+      stdio writes are now failure-safe (a logging failure can no longer turn a 5xx into a
+      plain 500)
 
 ### In Progress
 
@@ -44,6 +50,9 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
+- [ ] Workstream 11 follow-ups: audio trim/gain rendering, waveforms in the timeline, basic mixer
+- [ ] Workstream 12: Render / Export (presets, render queue, MP4/audio export, logs, export
+      provenance)
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
@@ -62,3 +71,4 @@ removed.
 - Storyboards, scenes & shots: Wed Aug 19 2026
 - Review workflow: Wed Aug 19 2026
 - Timeline editor core: Wed Aug 19 2026
+- Audio import + versioning: Wed Aug 19 2026

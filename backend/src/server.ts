@@ -1,6 +1,7 @@
 import { Application, type Middleware } from "@oak/oak";
 import { router as authRouter } from "@cinemaItor/routes/auth.ts";
 import { assetRouter } from "@cinemaItor/routes/assets.ts";
+import { audioRouter } from "@cinemaItor/routes/audio.ts";
 import { jobRouter } from "@cinemaItor/routes/jobs.ts";
 import { reviewRouter } from "@cinemaItor/routes/review.ts";
 import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
@@ -81,6 +82,7 @@ export function createApp(
   app.use(movieRouter.routes());
   app.use(projectRouter.routes());
   app.use(assetRouter.routes());
+  app.use(audioRouter.routes());
   app.use(modelRouter.routes());
   app.use(jobRouter.routes());
   app.use(reviewRouter.routes());
@@ -94,6 +96,7 @@ export function createApp(
   app.use(movieRouter.allowedMethods());
   app.use(projectRouter.allowedMethods());
   app.use(assetRouter.allowedMethods());
+  app.use(audioRouter.allowedMethods());
   app.use(modelRouter.allowedMethods());
   app.use(jobRouter.allowedMethods());
   app.use(reviewRouter.allowedMethods());
