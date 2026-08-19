@@ -75,6 +75,13 @@ export function conflict(message: string, details?: string): AppError {
   return new AppError(ERROR_CODES.CONFLICT, message, { status: 409, details });
 }
 
+export function serviceUnavailable(message: string, details?: string): AppError {
+  return new AppError(ERROR_CODES.STORAGE_ERROR, message, {
+    status: 503,
+    details,
+  });
+}
+
 export function toApiError(
   err: unknown,
 ): { status: number; body: ApiErrorBody } {

@@ -41,8 +41,16 @@ function makeLogger(
       ...extra,
     };
     const line = JSON.stringify(entry);
-    const write = toStderr ? Deno.stderr.writeSync : Deno.stdout.writeSync;
-    write(new TextEncoder().encode(line + "\n"));
+    const bytes = new TextEncoder().encode(line + "\n");
+    try {
+      if (toStderr) {
+        Deno.stderr.writeSync(bytes);
+      } else {
+        Deno.stdout.writeSync(bytes);
+      }
+    } catch {
+      // Logging must never break a request (e.g. captured stdio in tests).
+    }
   }
 
   return {

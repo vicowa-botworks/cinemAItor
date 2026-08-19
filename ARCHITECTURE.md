@@ -123,6 +123,12 @@ server.ts (entry point)
  ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
  │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes
  │   └── (see docs/review.md)
+ ├── Audio routes (/api/v1/audio/*, auth middleware, asset write permission)
+ │   ├── Upload + versioning for audio assets (wav/mp3/flac/ogg/m4a/aac)
+ │   ├── Optional ffprobe/ffmpeg analysis: duration, sample rate, channels,
+ │   │   200-bucket waveform (no-ffmpeg fallback keeps uploads working)
+ │   ├── Non-destructive trim/gain adjustments (applied at render time); waveform endpoint
+ │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
  │   ├── Timelines + typed tracks (swap reorder, lock/mute) + placed items (move/trim/
  │   │   speed/transform/fades/effects), item duplicate, duration recompute, markers
