@@ -313,15 +313,17 @@ export function finishJob(
   if (status === "cancelling") {
     db.prepare(
       `UPDATE generation_jobs SET status = 'cancelling' WHERE id = ?
-       AND status IN ('running')`,
+       AND status = 'running'`,
     ).run(id);
   } else {
+    // Guarded so a late cancel/finish cannot clobber a terminal state (and
+    // vice versa); the event below only fires if the transition happened.
     db.prepare(
       `UPDATE generation_jobs
        SET status = ?, progress = ?, error_text = ?, output_asset_version_id = ?,
            candidate_count = ?, finished_at = ?, lease_owner = NULL,
            lease_expires_at = NULL
-       WHERE id = ?`,
+       WHERE id = ? AND status IN ('queued', 'running', 'cancelling')`,
     ).run(
       status,
       status === "succeeded" ? 100 : (fields.progress ?? 0),
@@ -333,7 +335,7 @@ export function finishJob(
     );
   }
   const job = getJob(id);
-  if (job) {
+  if (job && job.status === status) {
     addJobEvent(
       id,
       status,
@@ -365,10 +367,14 @@ export function retryJob(id: string): GenerationJob | undefined {
          lease_owner = NULL, lease_expires_at = NULL,
          output_asset_version_id = NULL, candidate_count = NULL,
          started_at = NULL, finished_at = NULL
-     WHERE id = ?`,
-  ).run(id);
-  addJobEvent(id, "retried", "Job re-queued for retry");
-  return getJob(id);
+     WHERE id = ?
+       AND status IN ('succeeded', 'failed', 'cancelled')`,
+   ).run(id);
+  const updated = getJob(id);
+  if (updated && updated.status === "queued") {
+    addJobEvent(id, "retried", "Job re-queued for retry");
+  }
+  return updated;
 }
 
 export function countRunningJobs(): { gpu: number; cpu: number } {
