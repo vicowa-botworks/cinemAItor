@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 4 part 1 (Storyboard + Scene + Shot) complete
+## Current Status: Milestone 4 complete (Storyboard, Scenes, Review)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -31,6 +31,9 @@ removed.
 - [x] Storyboards, scenes & shots (Milestone 4 part 1): ordered panels/scenes/shots, prompt
       versioning + reference resolution on creative objects, panel generate-preview (t2i) and scene
       generate (i2v from linked panel preview / t2v), runner links outputs back to panels/shots
+- [x] Review workflow (Milestone 4 part 2): candidate comparison per job, approve (promotes to
+      active version) / reject / shortlist (toggle) with per-candidate notes, asset write-permission
+      gated, audited
 
 ### In Progress
 
@@ -38,9 +41,8 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 9: Review (candidate comparison, approve/reject, promote to active version) —
-      completes Milestone 4
-- [ ] Workstream 10: Timeline editing (tracks, items, snapping, transitions, markers)
+- [ ] Workstream 10: Timeline editing (tracks, items, reorder/trim/duplicate/delete, playback,
+      undo/redo, snapshots, basic audio track)
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
@@ -56,3 +58,4 @@ removed.
 
 - Generation pipeline: Wed Aug 19 2026
 - Storyboards, scenes & shots: Wed Aug 19 2026
+- Review workflow: Wed Aug 19 2026

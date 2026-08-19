@@ -212,6 +212,7 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
       finishJob(jobId, "succeeded", {
         outputAssetVersionId: versionIds[0] ?? undefined,
         candidateCount: versionIds.length,
+        candidateVersionIds: versionIds,
         progress: 100,
       });
     } catch (err) {
