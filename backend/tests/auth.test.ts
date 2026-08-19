@@ -2,6 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { generateToken, verifyToken } from "../src/middleware/auth.ts";
 
+// Set JWT_SECRET for tests (required by jwt.ts and config.ts)
+if (!Deno.env.get("JWT_SECRET")) {
+  Deno.env.set("JWT_SECRET", "test-jwt-secret-for-ci-only");
+}
+
 describe("JWT Auth", () => {
   it("should generate a valid token", async () => {
     const token = await generateToken(1);

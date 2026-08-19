@@ -8,14 +8,23 @@ function envWith(vars: Record<string, string>) {
 
 describe("loadConfig", () => {
   it("applies defaults when no env is set", () => {
-    const config = loadConfig(envWith({}));
+    const config = loadConfig(envWith({ JWT_SECRET: "test-secret" }));
     assertEquals(config.port, 8123);
     assertEquals(config.dbPath, "./cinemaItor.db");
     assertEquals(config.appDataDir, "./app_data");
+    assertEquals(config.jwtSecret, "test-secret");
     assertEquals(config.logLevel, "info");
     assertEquals(config.jobConcurrencyGpu, 1);
     assertEquals(config.jobConcurrencyCpu, 2);
     assertEquals(config.uploadMaxBytes > 0, true);
+  });
+
+  it("requires JWT_SECRET", () => {
+    assertThrows(
+      () => loadConfig(envWith({ PORT: "9000" })),
+      Error,
+      "JWT_SECRET",
+    );
   });
 
   it("reads values from env", () => {
