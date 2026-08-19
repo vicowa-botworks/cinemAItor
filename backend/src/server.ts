@@ -4,6 +4,7 @@ import { assetRouter } from "@cinemaItor/routes/assets.ts";
 import { audioRouter } from "@cinemaItor/routes/audio.ts";
 import { jobRouter } from "@cinemaItor/routes/jobs.ts";
 import { reviewRouter } from "@cinemaItor/routes/review.ts";
+import { renderRouter } from "@cinemaItor/routes/renders.ts";
 import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
@@ -19,6 +20,7 @@ import { errorHandler } from "@cinemaItor/errors.ts";
 import { getDb } from "@cinemaItor/db/database.ts";
 import { ensureLayout } from "@cinemaItor/storage/paths.ts";
 import { type JobRunner, startJobRunner } from "@cinemaItor/services/job_runner.ts";
+import { type RenderRunner, startRenderRunner } from "@cinemaItor/services/render_runner.ts";
 
 const CORS_ORIGINS = ["http://localhost:8124"];
 const CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
@@ -71,9 +73,14 @@ export function createApp(
     gpuConcurrency: config.jobConcurrencyGpu,
     cpuConcurrency: config.jobConcurrencyCpu,
   });
+  const renderRunner = startRenderRunner();
 
-  const app = new Application() as Application & { jobRunner?: JobRunner };
+  const app = new Application() as Application & {
+    jobRunner?: JobRunner;
+    renderRunner?: RenderRunner;
+  };
   app.jobRunner = jobRunner;
+  app.renderRunner = renderRunner;
   app.use(corsMiddleware());
   app.use(requestLogger(logger));
   app.use(errorHandler(logger));
@@ -86,6 +93,7 @@ export function createApp(
   app.use(modelRouter.routes());
   app.use(jobRouter.routes());
   app.use(reviewRouter.routes());
+  app.use(renderRouter.routes());
   app.use(timelineRouter.routes());
   app.use(storyboardRouter.routes());
   app.use(sceneRouter.routes());
@@ -100,6 +108,7 @@ export function createApp(
   app.use(modelRouter.allowedMethods());
   app.use(jobRouter.allowedMethods());
   app.use(reviewRouter.allowedMethods());
+  app.use(renderRouter.allowedMethods());
   app.use(timelineRouter.allowedMethods());
   app.use(storyboardRouter.allowedMethods());
   app.use(sceneRouter.allowedMethods());

@@ -132,9 +132,16 @@ server.ts (entry point)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
  │   ├── Timelines + typed tracks (swap reorder, lock/mute) + placed items (move/trim/
  │   │   speed/transform/fades/effects), item duplicate, duration recompute, markers
- │   ├── Full-state snapshots with restore
- │   └── (see docs/timelines.md)
- └── Legacy demo routes (/api/auth/*, /api/movies/*)
+  │   ├── Full-state snapshots with restore
+  │   └── (see docs/timelines.md)
+  ├── Render routes (/api/v1/render-presets, /api/v1/renders/*, /api/v1/exports,
+  │   auth middleware, project-permission gated; preset writes admin-only)
+  │   ├── Durable render queue (leases, stale recovery) + in-process render runner
+  │   ├── Engines: ffmpeg concat (`-c copy`) or deterministic mock (auto by availability,
+  │   │   `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running); structured logs
+  │   ├── Output validation report; exports with provenance as asset + immutable version
+  │   └── (see docs/renders.md)
+  └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 
 **Database layer:**
