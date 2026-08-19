@@ -14,6 +14,11 @@ export function getContentStore(): ContentStore {
   return sharedStore;
 }
 
+/** Tests only: drop the shared store so the next use picks up new config. */
+export function resetContentStore(): void {
+  sharedStore = undefined;
+}
+
 export interface StoredFile {
   hash: string;
   path: string;

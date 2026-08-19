@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestones 1-2 complete, Milestone 3 in progress
+## Current Status: Milestone 3 (Model Manager + Generation Pipeline) complete
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -24,6 +24,10 @@ removed.
 - [x] Model manager: model registry + metadata, local/URL install with SHA-256 verify, remove,
       enable/disable, backend health checks (mock/cli/http), task mapping, hardware detection,
       requirement warnings, model presets, license metadata
+- [x] Generation pipeline: job queue (durable, leased), in-process runner with concurrency, adapter
+      interface + mock adapter (deterministic, seeded), progress/ events, cancel + retry, job
+      recovery, candidates -> asset versions with full provenance
+      (prompt/model/seed/settings/inputs)
 
 ### In Progress
 
@@ -31,8 +35,11 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 7: Generation pipeline (job queue, adapter interface, mock adapter, candidates,
-      cancel/retry, provenance)
+- [ ] Workstream 8: Storyboard, scenes, shots (panels, panel/scene prompts + references, generate
+      from panel/scene)
+- [ ] Workstream 9: Review (candidate comparison, approve/reject, promote to active version)
+- [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
+      (ComfyUI/local CLI)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
 - [ ] E2E tests, Docker packaging, production hardening
 
@@ -44,4 +51,4 @@ removed.
 
 ### Version
 
-- Model manager: Wed Aug 19 2026
+- Generation pipeline: Wed Aug 19 2026

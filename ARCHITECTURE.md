@@ -110,6 +110,10 @@ server.ts (entry point)
 │   ├── Registry, install/verify (SHA-256), remove, enable/disable, /:id/health-check
 │   ├── Hardware detection + requirement warnings (/hardware)
 │   └── (see docs/models.md)
+├── Job routes (/api/v1/jobs/*, auth middleware)
+│   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
+│   ├── Adapters: mock (deterministic); provenance on produced asset versions
+│   └── (see docs/jobs.md)
 └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 

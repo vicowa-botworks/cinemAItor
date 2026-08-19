@@ -1,6 +1,7 @@
 import { Application, type Middleware } from "@oak/oak";
 import { router as authRouter } from "@cinemaItor/routes/auth.ts";
 import { assetRouter } from "@cinemaItor/routes/assets.ts";
+import { jobRouter } from "@cinemaItor/routes/jobs.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { movieRouter } from "@cinemaItor/routes/movies.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
@@ -12,6 +13,7 @@ import { createLogger } from "@cinemaItor/logger.ts";
 import { errorHandler } from "@cinemaItor/errors.ts";
 import { getDb } from "@cinemaItor/db/database.ts";
 import { ensureLayout } from "@cinemaItor/storage/paths.ts";
+import { type JobRunner, startJobRunner } from "@cinemaItor/services/job_runner.ts";
 
 const CORS_ORIGINS = ["http://localhost:8124"];
 const CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
@@ -53,12 +55,20 @@ function requestLogger(logger: ReturnType<typeof createLogger>): Middleware {
   };
 }
 
-export function createApp(config: AppConfig = loadConfig()): Application {
+export function createApp(
+  config: AppConfig = loadConfig(),
+): Application & { jobRunner?: JobRunner } {
   const logger = createLogger(config.logLevel, { component: "http" });
   getDb();
   ensureLayout(config.appDataDir);
 
-  const app = new Application();
+  const jobRunner = startJobRunner({
+    gpuConcurrency: config.jobConcurrencyGpu,
+    cpuConcurrency: config.jobConcurrencyCpu,
+  });
+
+  const app = new Application() as Application & { jobRunner?: JobRunner };
+  app.jobRunner = jobRunner;
   app.use(corsMiddleware());
   app.use(requestLogger(logger));
   app.use(errorHandler(logger));
@@ -68,6 +78,7 @@ export function createApp(config: AppConfig = loadConfig()): Application {
   app.use(projectRouter.routes());
   app.use(assetRouter.routes());
   app.use(modelRouter.routes());
+  app.use(jobRouter.routes());
   app.use(promptRouter.routes());
   app.use(referenceRouter.routes());
   app.use(healthRouter.allowedMethods());
@@ -76,6 +87,7 @@ export function createApp(config: AppConfig = loadConfig()): Application {
   app.use(projectRouter.allowedMethods());
   app.use(assetRouter.allowedMethods());
   app.use(modelRouter.allowedMethods());
+  app.use(jobRouter.allowedMethods());
   app.use(promptRouter.allowedMethods());
   app.use(referenceRouter.allowedMethods());
 
