@@ -187,28 +187,34 @@ export function getProjectById(id: string): Project | undefined {
   return row ? rowToProject(row) : undefined;
 }
 
+/** Rank (0 = none) of the user's direct or inherited permission on a project. */
+export function projectPermissionRank(
+  userId: number,
+  projectId: string,
+): number {
+  const db = getDb();
+  const project = db.prepare(
+    "SELECT created_by_user_id FROM projects WHERE id = ?",
+  ).get(projectId) as { created_by_user_id: number | null } | undefined;
+  if (!project) return 0;
+  if (project.created_by_user_id === userId) return PERMISSION_RANK.admin;
+
+  const rows = db.prepare(
+    "SELECT permission FROM project_permissions WHERE project_id = ? AND user_id = ?",
+  ).all(projectId, userId) as unknown as { permission: string }[];
+  let best = 0;
+  for (const row of rows) {
+    best = Math.max(best, PERMISSION_RANK[row.permission as ProjectPermission] ?? 0);
+  }
+  return best;
+}
+
 export function hasProjectPermission(
   userId: number,
   projectId: string,
   required: ProjectPermission = "read",
 ): boolean {
-  const db = getDb();
-  const project = db.prepare(
-    "SELECT created_by_user_id FROM projects WHERE id = ?",
-  ).get(projectId) as { created_by_user_id: number | null } | undefined;
-  if (!project) return false;
-  if (project.created_by_user_id === userId) return true;
-
-  const permission = db.prepare(
-    "SELECT permission FROM project_permissions WHERE project_id = ? AND user_id = ?",
-  ).get(projectId, userId) as { permission: string } | undefined;
-  if (!permission) return false;
-
-  const requiredRank = PERMISSION_RANK[required];
-  const actualRank = PERMISSION_RANK[
-    permission.permission as ProjectPermission
-  ];
-  return actualRank !== undefined && actualRank >= requiredRank;
+  return projectPermissionRank(userId, projectId) >= PERMISSION_RANK[required];
 }
 
 export function getProjectAccessible(

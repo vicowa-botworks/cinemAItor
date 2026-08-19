@@ -1,53 +1,42 @@
 # Project State - CinemaItor
 
-## Current Status: Initial Setup Complete
+## Current Status: Milestone 1 (Storage, Auth, Projects, Assets) - complete
+
+The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
+removed.
 
 ### Completed
 
-- [x] Project initialization (Deno 2.x workspace)
-- [x] Backend structure with Oak web framework
-- [x] SQLite database with schema (users, movies, scenes, prompts)
-- [x] Authentication system (JWT + PBKDF2 password hashing)
-- [x] REST API for movies and scenes (CRUD + ownership enforcement)
-- [x] Frontend structure with Lit web components
-- [x] Shadow DOM components: app-root, app-header, login-form, movie-list, movie-card, movie-detail
-- [x] Hash-based client-side routing
-- [x] API client with token management
-- [x] Linting configured (Deno lint for backend, ESLint for frontend)
-- [x] Formatting configured (Deno fmt)
-- [x] Backend test suite (schema operations)
-- [x] Frontend test suite (API client)
-- [x] GitHub Actions CI pipeline (lint, type check, format, test)
-- [x] Documentation: README.md, ARCHITECTURE.md
+- [x] Foundations: Deno + Oak backend, SQLite migrations, config, logging, errors, CI
+- [x] Storage base: `app_data` layout, SHA-256 checksums, content-addressed store, atomic writes,
+      dedupe
+- [x] Auth v1: bootstrap (first user = admin), login/logout, session revocation, JWT sessions
+- [x] Projects: CRUD, defaults, settings, ownership + `project_permissions`, soft delete, audit
+- [x] Asset library: CRUD with global/project scope, unique `@name` slugs, aliases, tags, immutable
+      versions, active/preview pointers, restore, upload pipeline, stored-hash version registration,
+      preview streaming, search/filters, soft delete with broken-reference warnings, audit log
+- [x] Authorization model: admin role bypass, creator ownership, project-permission inheritance,
+      explicit `asset_permissions` (highest rank wins)
 
 ### In Progress
 
-- [ ] Create movie form component
-- [ ] Edit movie functionality
-- [ ] Scene management UI
-- [ ] AI prompt interface
+- [ ] Frontend: wire the asset library and project views to the `/api/v1` endpoints
 
-### Planned
+### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] User roles (admin, user) with authorization middleware
-- [ ] OAuth providers (Google, GitHub)
-- [ ] File upload for posters/backdrops
-- [ ] Image storage (local or cloud)
-- [ ] AI integration (scene generation, dialogue writing)
-- [ ] E2E tests (Playwright/Cypress)
-- [ ] Docker configuration
-- [ ] Production deployment setup
-- [ ] PostgreSQL migration path
-- [ ] Real-time collaboration
-- [ ] Movie sharing (public/private)
-- [ ] Rating and review system
+- [ ] Workstream 5: Reference engine (`@asset` parsing/resolution, roles, audit, repair) and prompt
+      versioning
+- [ ] Workstream 6: Model manager (registry, install, health checks)
+- [ ] Workstream 7: Generation pipeline (job queue, adapters, mock first)
+- [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
+- [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues
 
-- [ ] Frontend uses Lit via CDN; consider bundling for production
+- [ ] Upload bodies are buffered by the runtime parser (no chunked streaming yet)
 - [ ] No rate limiting on auth endpoints
-- [ ] JWT secret defaults to dev value (enforced via .env.example)
+- [ ] Frontend still uses the legacy `movies` API surface for the demo views
 
 ### Version
 
-- Initial setup: Mon Aug 17 2026
+- Asset library: Tue Aug 18 2026
