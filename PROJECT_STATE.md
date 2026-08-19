@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 6 in progress (Audio import + versioning complete)
+## Current Status: Milestone 6 in progress (Render/Export + audio import + versioning complete)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -43,6 +43,12 @@ removed.
       adjustments applied at render time, waveform endpoint (503 when unanalyzable). Also: logger
       stdio writes are now failure-safe (a logging failure can no longer turn a 5xx into a
       plain 500)
+- [ ] Render / Export (Milestone 6 part 2): render presets (seeded draft/final/audio defaults,
+      admin-manageable), durable render queue with leases + stale recovery, in-process render
+      runner, pluggable engines (ffmpeg concat `-c copy` when available, deterministic mock engine
+      otherwise; `RENDER_ENGINE=auto|ffmpeg|mock`), cancellation (queued or running), structured log
+      endpoint, output validation report, exports table with full provenance (render job, timeline,
+      preset, engine, media hash) as asset + immutable asset version
 
 ### In Progress
 
@@ -51,8 +57,8 @@ removed.
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 11 follow-ups: audio trim/gain rendering, waveforms in the timeline, basic mixer
-- [ ] Workstream 12: Render / Export (presets, render queue, MP4/audio export, logs, export
-      provenance)
+- [ ] Workstream 12 follow-ups: per-item effects/trim in the ffmpeg engine, frame-accurate cuts,
+      render farm / multiple render runners, progress from ffmpeg stats
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
@@ -72,3 +78,4 @@ removed.
 - Review workflow: Wed Aug 19 2026
 - Timeline editor core: Wed Aug 19 2026
 - Audio import + versioning: Wed Aug 19 2026
+- Render / Export: Wed Aug 19 2026

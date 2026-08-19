@@ -48,6 +48,10 @@ describe("migrations", () => {
         "timeline_items",
         "timeline_markers",
         "timeline_snapshots",
+        "render_presets",
+        "render_jobs",
+        "render_events",
+        "exports",
       ]
     ) {
       assert(tables.includes(expected), `expected table ${expected} to exist`);
@@ -68,6 +72,7 @@ describe("migrations", () => {
         "0007_storyboard.sql",
         "0008_review.sql",
         "0009_timeline.sql",
+        "0010_render.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -82,12 +87,13 @@ describe("migrations", () => {
         "0007_storyboard.sql",
         "0008_review.sql",
         "0009_timeline.sql",
+        "0010_render.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        9,
+        10,
       );
     } finally {
       db.close();
@@ -108,6 +114,7 @@ describe("migrations", () => {
       "0007_storyboard.sql",
       "0008_review.sql",
       "0009_timeline.sql",
+      "0010_render.sql",
     ]);
   });
 
