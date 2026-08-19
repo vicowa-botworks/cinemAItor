@@ -3,6 +3,7 @@ import { router as authRouter } from "@cinemaItor/routes/auth.ts";
 import { assetRouter } from "@cinemaItor/routes/assets.ts";
 import { jobRouter } from "@cinemaItor/routes/jobs.ts";
 import { reviewRouter } from "@cinemaItor/routes/review.ts";
+import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
@@ -83,6 +84,7 @@ export function createApp(
   app.use(modelRouter.routes());
   app.use(jobRouter.routes());
   app.use(reviewRouter.routes());
+  app.use(timelineRouter.routes());
   app.use(storyboardRouter.routes());
   app.use(sceneRouter.routes());
   app.use(promptRouter.routes());
@@ -95,6 +97,7 @@ export function createApp(
   app.use(modelRouter.allowedMethods());
   app.use(jobRouter.allowedMethods());
   app.use(reviewRouter.allowedMethods());
+  app.use(timelineRouter.allowedMethods());
   app.use(storyboardRouter.allowedMethods());
   app.use(sceneRouter.allowedMethods());
   app.use(promptRouter.allowedMethods());

@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 4 complete (Storyboard, Scenes, Review)
+## Current Status: Milestone 5 in progress (Timeline Editor core complete)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -34,6 +34,9 @@ removed.
 - [x] Review workflow (Milestone 4 part 2): candidate comparison per job, approve (promotes to
       active version) / reject / shortlist (toggle) with per-candidate notes, asset write-permission
       gated, audited
+- [x] Timeline editor core (Milestone 5): project-scoped timelines, typed tracks (swap reorder,
+      lock/mute), items placed on asset versions (move/trim/speed/transform/fades/effects), item
+      duplicate, duration recompute, markers, full-state snapshots with restore
 
 ### In Progress
 
@@ -41,8 +44,7 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 10: Timeline editing (tracks, items, reorder/trim/duplicate/delete, playback,
-      undo/redo, snapshots, basic audio track)
+- [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
@@ -59,3 +61,4 @@ removed.
 - Generation pipeline: Wed Aug 19 2026
 - Storyboards, scenes & shots: Wed Aug 19 2026
 - Review workflow: Wed Aug 19 2026
+- Timeline editor core: Wed Aug 19 2026

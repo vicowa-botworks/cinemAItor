@@ -123,6 +123,11 @@ server.ts (entry point)
  ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
  │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes
  │   └── (see docs/review.md)
+ ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
+ │   ├── Timelines + typed tracks (swap reorder, lock/mute) + placed items (move/trim/
+ │   │   speed/transform/fades/effects), item duplicate, duration recompute, markers
+ │   ├── Full-state snapshots with restore
+ │   └── (see docs/timelines.md)
  └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 
