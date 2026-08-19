@@ -1,6 +1,7 @@
 import { Application, type Middleware } from "@oak/oak";
 import { router as authRouter } from "@cinemaItor/routes/auth.ts";
 import { assetRouter } from "@cinemaItor/routes/assets.ts";
+import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { movieRouter } from "@cinemaItor/routes/movies.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
 import { promptRouter } from "@cinemaItor/routes/prompts.ts";
@@ -66,6 +67,7 @@ export function createApp(config: AppConfig = loadConfig()): Application {
   app.use(movieRouter.routes());
   app.use(projectRouter.routes());
   app.use(assetRouter.routes());
+  app.use(modelRouter.routes());
   app.use(promptRouter.routes());
   app.use(referenceRouter.routes());
   app.use(healthRouter.allowedMethods());
@@ -73,6 +75,7 @@ export function createApp(config: AppConfig = loadConfig()): Application {
   app.use(movieRouter.allowedMethods());
   app.use(projectRouter.allowedMethods());
   app.use(assetRouter.allowedMethods());
+  app.use(modelRouter.allowedMethods());
   app.use(promptRouter.allowedMethods());
   app.use(referenceRouter.allowedMethods());
 

@@ -104,8 +104,12 @@ server.ts (entry point)
 │   ├── Versioned prompt history per scope + restore
 │   └── (see docs/references.md)
 ├── Reference routes (/api/v1/references/*, auth middleware)
-│   ├── POST /parse (resolve @tokens), GET /audit, POST /:id/replace
+│   ├── POST /parse (resolve @tokens), GET /audit, GET /:id, POST /:id/replace
 │   └── (see docs/references.md)
+├── Model routes (/api/v1/models/*, auth middleware, admin for mutations)
+│   ├── Registry, install/verify (SHA-256), remove, enable/disable, /:id/health-check
+│   ├── Hardware detection + requirement warnings (/hardware)
+│   └── (see docs/models.md)
 └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 

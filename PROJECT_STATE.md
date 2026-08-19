@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 1 complete, Milestone 2 in progress
+## Current Status: Milestones 1-2 complete, Milestone 3 in progress
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -21,6 +21,9 @@ removed.
       persisted references per source, audit with broken flags, reference replacement
 - [x] Prompt versioning: versioned prompt history per scope, SHA-256 duplicate detection, parent
       links, restore, per-version reference persistence
+- [x] Model manager: model registry + metadata, local/URL install with SHA-256 verify, remove,
+      enable/disable, backend health checks (mock/cli/http), task mapping, hardware detection,
+      requirement warnings, model presets, license metadata
 
 ### In Progress
 
@@ -28,8 +31,8 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 6: Model manager (registry, install, health checks)
-- [ ] Workstream 7: Generation pipeline (job queue, adapters, mock first)
+- [ ] Workstream 7: Generation pipeline (job queue, adapter interface, mock adapter, candidates,
+      cancel/retry, provenance)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
 - [ ] E2E tests, Docker packaging, production hardening
 
@@ -41,4 +44,4 @@ removed.
 
 ### Version
 
-- Reference engine + prompt versioning: Wed Aug 19 2026
+- Model manager: Wed Aug 19 2026
