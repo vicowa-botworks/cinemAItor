@@ -419,7 +419,7 @@ describe("assets", () => {
 
     const rows = getDb()
       .prepare(
-        "SELECT action FROM audit_logs WHERE entity_type = 'asset' AND entity_id = ? ORDER BY created_at",
+        "SELECT action FROM audit_logs WHERE entity_type = 'asset' AND entity_id = ? ORDER BY rowid",
       )
       .all(asset.id) as unknown as { action: string }[];
     assertEquals(rows.map((r) => r.action), [

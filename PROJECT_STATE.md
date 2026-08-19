@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 1 (Storage, Auth, Projects, Assets) - complete
+## Current Status: Milestone 1 complete, Milestone 2 in progress
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -17,6 +17,10 @@ removed.
       preview streaming, search/filters, soft delete with broken-reference warnings, audit log
 - [x] Authorization model: admin role bypass, creator ownership, project-permission inheritance,
       explicit `asset_permissions` (highest rank wins)
+- [x] Reference engine: `@slug` / `@slug:vN` parsing, resolution against live assets, roles,
+      persisted references per source, audit with broken flags, reference replacement
+- [x] Prompt versioning: versioned prompt history per scope, SHA-256 duplicate detection, parent
+      links, restore, per-version reference persistence
 
 ### In Progress
 
@@ -24,8 +28,6 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 5: Reference engine (`@asset` parsing/resolution, roles, audit, repair) and prompt
-      versioning
 - [ ] Workstream 6: Model manager (registry, install, health checks)
 - [ ] Workstream 7: Generation pipeline (job queue, adapters, mock first)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
@@ -39,4 +41,4 @@ removed.
 
 ### Version
 
-- Asset library: Tue Aug 18 2026
+- Reference engine + prompt versioning: Wed Aug 19 2026

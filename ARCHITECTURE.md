@@ -100,6 +100,12 @@ server.ts (entry point)
 ├── Asset routes (/api/v1/assets/*, auth middleware)
 │   ├── CRUD + upload + versions + restore + aliases + tags + preview
 │   └── (see docs/assets.md)
+├── Prompt routes (/api/v1/prompts/*, auth middleware)
+│   ├── Versioned prompt history per scope + restore
+│   └── (see docs/references.md)
+├── Reference routes (/api/v1/references/*, auth middleware)
+│   ├── POST /parse (resolve @tokens), GET /audit, POST /:id/replace
+│   └── (see docs/references.md)
 └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 
