@@ -2,6 +2,11 @@ import { closeDb, getDb } from "../../src/db/database.ts";
 import { createApp } from "../../src/server.ts";
 import { loadConfig } from "../../src/config.ts";
 
+// Ensure JWT_SECRET is set for tests (config.ts requires it at load time)
+if (!Deno.env.get("JWT_SECRET")) {
+  Deno.env.set("JWT_SECRET", "test-jwt-secret-for-ci-only");
+}
+
 export function freshMemoryDb(): void {
   closeDb();
   getDb(":memory:");

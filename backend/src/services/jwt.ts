@@ -1,5 +1,12 @@
-const SECRET_KEY = Deno.env.get("JWT_SECRET") ||
-  "dev-secret-key-change-in-production";
+function getSecretKey(): string {
+  const key = Deno.env.get("JWT_SECRET");
+  if (!key) {
+    throw new Error(
+      "JWT_SECRET environment variable is required. Set it before starting the server.",
+    );
+  }
+  return key;
+}
 export const TOKEN_EXPIRY_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
 export interface TokenPayload {
@@ -54,7 +61,7 @@ export async function generateToken(
 async function signHMAC(payload: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(SECRET_KEY),
+    new TextEncoder().encode(getSecretKey()),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
@@ -74,7 +81,7 @@ async function verifyHMAC(
   try {
     const key = await crypto.subtle.importKey(
       "raw",
-      new TextEncoder().encode(SECRET_KEY),
+      new TextEncoder().encode(getSecretKey()),
       { name: "HMAC", hash: "SHA-256" },
       false,
       ["verify"],

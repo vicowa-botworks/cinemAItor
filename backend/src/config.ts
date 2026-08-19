@@ -37,8 +37,8 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
   const jobConcurrencyCpu = intEnv(env, "JOB_CONCURRENCY_CPU", 2, 1);
   const jwtSecret = env.get("JWT_SECRET") ?? "";
   if (!jwtSecret) {
-    console.warn(
-      "JWT_SECRET is not set. Using an insecure development secret. Set JWT_SECRET for production.",
+    throw new Error(
+      "JWT_SECRET environment variable is required. Set it before starting the server.",
     );
   }
 
@@ -46,7 +46,7 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
     port,
     dbPath: env.get("DB_PATH") ?? "./cinemaItor.db",
     appDataDir: env.get("APP_DATA_DIR") ?? "./app_data",
-    jwtSecret: jwtSecret || "dev-secret-key-change-in-production",
+    jwtSecret,
     logLevel: logLevel ?? "info",
     ffmpegPath: env.get("FFMPEG_PATH") ?? "ffmpeg",
     uploadMaxBytes,

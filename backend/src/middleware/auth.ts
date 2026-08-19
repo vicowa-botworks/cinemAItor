@@ -7,6 +7,7 @@ export interface AuthedContext extends Context {
   userId?: number;
   userRole?: string;
   token?: string;
+  sessionId?: string;
 }
 
 export async function authMiddleware(
@@ -38,7 +39,14 @@ export async function authMiddleware(
     return;
   }
 
-  const sessionValid = await isSessionValid(token);
+  // Look up session by jti (session ID embedded in the JWT payload)
+  // This avoids hashing the full token on every request - indexed DB lookup instead
+  if (!payload.jti) {
+    ctx.response.status = 401;
+    ctx.response.body = { error: "Missing session identifier" };
+    return;
+  }
+  const sessionValid = isSessionValid(payload.jti);
   if (!sessionValid) {
     ctx.response.status = 401;
     ctx.response.body = { error: "Session revoked or expired" };
@@ -48,6 +56,7 @@ export async function authMiddleware(
   ctx.userId = user.id;
   ctx.userRole = user.role;
   ctx.token = token;
+  ctx.sessionId = payload.jti;
   await next();
 }
 

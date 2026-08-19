@@ -4,7 +4,9 @@ import { getDb, resetDb } from "../src/db/database.ts";
 import * as schema from "../src/db/schema.ts";
 
 function uniqueEmail(prefix: string): string {
-  return `${prefix}.${Date.now()}.${Math.random().toString(36).slice(2)}@example.com`;
+  return `${prefix}.${Date.now()}.${
+    Math.random().toString(36).slice(2)
+  }@example.com`;
 }
 
 describe("Database", () => {

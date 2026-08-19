@@ -113,7 +113,9 @@ export function errorHandler(logger: Logger): Middleware {
           traceId: body.error.traceId,
           method: ctx.request.method,
           path: ctx.request.url.pathname,
-          cause: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+          cause: err instanceof Error
+            ? `${err.name}: ${err.message}`
+            : String(err),
         });
       }
       ctx.response.status = status;

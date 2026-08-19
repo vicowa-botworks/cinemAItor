@@ -1,5 +1,8 @@
 import { Router } from "@oak/oak/router";
-import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
+import {
+  type AuthedContext,
+  authMiddleware,
+} from "@cinemaItor/middleware/auth.ts";
 import * as schema from "@cinemaItor/db/schema.ts";
 
 const movieRouter = new Router()
