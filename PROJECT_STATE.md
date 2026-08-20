@@ -56,8 +56,8 @@ removed.
       redacted diagnostics export (no `*_secret` config keys); DIA-006 project backup (JSON bundle
       under `backups/` + `backups` table record, media manifest with presence/size); DIA-007 restore
       (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/timelines/tracks/
-      items/markers, per-file missing-media report); DIA-008 crash recovery (already covered by
-      the lease + stale-recovery of the job/render runners, tested)
+      items/markers, per-file missing-media report); DIA-008 crash recovery (already covered by the
+      lease + stale-recovery of the job/render runners, tested)
 
 ### In Progress
 
@@ -90,5 +90,5 @@ removed.
 - Timeline editor core: Wed Aug 19 2026
 - Audio import + versioning: Wed Aug 19 2026
 - Render / Export: Wed Aug 19 2026
-- Diagnostics / Ops (hardware, model health, storage, logs, export, project backup/restore):
-  Thu Aug 20 2026
+- Diagnostics / Ops (hardware, model health, storage, logs, export, project backup/restore): Thu Aug
+  20 2026
