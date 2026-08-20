@@ -271,7 +271,7 @@ export class FfmpegRenderEngine implements RenderEngine {
     return { output_path: plan.output_path, file_size: stat.size, ticks: 3 };
   }
 
-  async render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
+  render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
     checkCancelled(hooks);
     hooks.onProgress(5);
     return planHasFx(plan.items) ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);

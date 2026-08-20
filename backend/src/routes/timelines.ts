@@ -154,13 +154,6 @@ function optionalNullableJsonArray(
   return value;
 }
 
-function optionalJsonArray(body: Record<string, unknown>, key: string): unknown[] | undefined {
-  const value = body[key];
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw badRequest(`${key} must be a JSON array`);
-  return value;
-}
-
 function itemInputFrom(body: Record<string, unknown>, partial = false): Partial<ItemInput> {
   return {
     track_id: partial ? optionalString(body, "track_id") : (body.track_id as string),
