@@ -144,18 +144,34 @@ async function buildPlan(
     .filter((t) => (t.track_type === "video" || t.track_type === "overlay") && !t.locked)
     .map((t) => t.id);
 
-  const planItems = items
+  const useProxy = preset?.kind === "draft";
+  const pendingPlanItems = items
     .filter((i) => i.status !== "archived" && renderableTrackIds.includes(i.track_id))
     .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
-    .map((i) => {
+    .map(async (i) => {
       const version = i.asset_version_id ? getAssetVersion(i.asset_version_id) : undefined;
-      if (!version?.file_path) {
+      // Draft renders prefer the version's playback proxy (when stored and
+      // still on disk); final renders always use the master. A final render
+      // with a missing master fails the job instead of silently downgrading.
+      let file_path: string | null = version?.file_path ?? null;
+      let source: "proxy" | "master" = "master";
+      if (useProxy && version?.proxy_path) {
+        try {
+          await Deno.stat(version.proxy_path);
+          file_path = version.proxy_path;
+          source = "proxy";
+        } catch {
+          // Proxy evicted: fall back to the master below.
+        }
+      }
+      if (!file_path) {
         throw new RenderFailedError(
           `No file for asset version ${i.asset_version_id}`,
         );
       }
       return {
-        file_path: version.file_path,
+        file_path,
+        source,
         start_time: i.start_time,
         end_time: i.end_time,
         duration: Math.max(0.01, i.end_time - i.start_time),
@@ -166,6 +182,7 @@ async function buildPlan(
         color_grade: i.color_grade as Record<string, number> | null,
       };
     });
+  const planItems = await Promise.all(pendingPlanItems);
   if (planItems.length === 0) {
     throw new RenderFailedError("Timeline has no renderable video items");
   }
@@ -225,6 +242,10 @@ function validateOutput(
     format: plan.format,
     items: plan.items.length,
     file_size: stat.size,
+    sources: {
+      proxy: plan.items.filter((i) => i.source === "proxy").length,
+      master: plan.items.filter((i) => i.source !== "proxy").length,
+    },
     checks,
   };
   return report;

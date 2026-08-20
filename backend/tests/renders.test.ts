@@ -298,6 +298,14 @@ describe("renders", () => {
     Deno.removeSync("/tmp/fx-out.mp4");
     assertNotEquals(withFx, withOverlay);
 
+    // Draft/final source selection is part of the mock seed: the same items
+    // rendered from proxies produce different bytes than from the masters.
+    const itemsProxy = planFx.items.map((i) => ({ ...i, source: "proxy" as const }));
+    await engine.render(planFor(itemsProxy), noopHooks);
+    const fromProxy = await Deno.readFile("/tmp/fx-out.mp4");
+    Deno.removeSync("/tmp/fx-out.mp4");
+    assertNotEquals(withFx, fromProxy);
+
     // ffmpeg fx command draws text overlays in a final drawtext stage.
     const overlayArgs = buildFxArgs(planFx.items, [overlay], "/tmp/out.mp4");
     const fc3 = overlayArgs[overlayArgs.indexOf("-filter_complex") + 1];

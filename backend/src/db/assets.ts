@@ -61,6 +61,7 @@ export interface AssetVersion {
   status: string;
   content_hash: string | null;
   file_path: string | null;
+  proxy_path: string | null;
   format: string | null;
   mime_type: string | null;
   file_size: number | null;
@@ -149,6 +150,7 @@ function rowToAssetVersion(row: Record<string, unknown>): AssetVersion {
     status: row.status as string,
     content_hash: asNullableString(row.content_hash),
     file_path: asNullableString(row.file_path),
+    proxy_path: asNullableString(row.proxy_path),
     format: asNullableString(row.format),
     mime_type: asNullableString(row.mime_type),
     file_size: asNullableNumber(row.file_size),
@@ -563,6 +565,18 @@ export function listAssetVersions(assetId: string): AssetVersion[] {
     "SELECT * FROM asset_versions WHERE asset_id = ? ORDER BY version_number DESC",
   ).all(assetId) as Record<string, unknown>[];
   return rows.map(rowToAssetVersion);
+}
+
+/** Store (or clear with `null`) the proxy media path for a version. */
+export function setVersionProxy(
+  versionId: string,
+  proxyPath: string | null,
+): AssetVersion | undefined {
+  const db = getDb();
+  db.prepare(
+    "UPDATE asset_versions SET proxy_path = ? WHERE id = ?",
+  ).run(proxyPath, versionId);
+  return getAssetVersion(versionId);
 }
 
 /** Point the active/preview version pointers back at an older version. */

@@ -22,6 +22,7 @@ import {
   buildAudioMetadata,
   validateAdjustments,
 } from "@cinemaItor/services/audio_info.ts";
+import { queueProxyGeneration } from "@cinemaItor/services/job_runner.ts";
 import {
   AUDIO_GENERATION_KINDS,
   type AudioGenerationKind,
@@ -244,6 +245,7 @@ export const audioRouter = new Router()
           notes: typeof notesField === "string" && notesField ? notesField : null,
           make_active: true,
         });
+        queueProxyGeneration(asset.id, version, userId, asset.project_id);
         ctx.response.status = 201;
         ctx.response.body = { version, audio: getAudioVersion(version.id)?.audio ?? null };
       } finally {
@@ -279,6 +281,7 @@ export const audioRouter = new Router()
       notes,
       make_active: true,
     });
+    queueProxyGeneration(asset.id, version, userId, asset.project_id);
     ctx.response.status = 201;
     ctx.response.body = { version, audio: getAudioVersion(version.id)?.audio ?? null };
   })

@@ -35,7 +35,7 @@ export interface GenerationJob {
   shot_id: string | null;
   storyboard_panel_id: string | null;
   job_type: string;
-  model_id: string;
+  model_id: string | null;
   model_version: string | null;
   prompt_version_id: string | null;
   prompt_text: string | null;
@@ -67,6 +67,9 @@ export interface JobEvent {
   created_at: string;
 }
 
+/** Job type for queued proxy/media processing (no model involved). */
+export const PROXY_JOB_TYPE = "proxy";
+
 export interface CreateJobInput {
   project_id?: string;
   asset_id?: string;
@@ -74,7 +77,7 @@ export interface CreateJobInput {
   shot_id?: string;
   storyboard_panel_id?: string;
   job_type: string;
-  model_id: string;
+  model_id?: string;
   model_version?: string;
   prompt_version_id?: string;
   prompt_text?: string;
@@ -89,6 +92,7 @@ export interface ListJobsFilter {
   status?: JobStatus;
   project_id?: string;
   model_id?: string;
+  job_type?: string;
   limit?: number;
 }
 
@@ -109,7 +113,7 @@ export function rowToJob(row: Record<string, unknown>): GenerationJob {
     shot_id: asNullableString(row.shot_id),
     storyboard_panel_id: asNullableString(row.storyboard_panel_id),
     job_type: row.job_type as string,
-    model_id: row.model_id as string,
+    model_id: asNullableString(row.model_id),
     model_version: asNullableString(row.model_version),
     prompt_version_id: asNullableString(row.prompt_version_id),
     prompt_text: asNullableString(row.prompt_text),
@@ -162,6 +166,10 @@ export function listJobs(filter: ListJobsFilter = {}): GenerationJob[] {
     clauses.push("model_id = ?");
     params.push(filter.model_id);
   }
+  if (filter.job_type) {
+    clauses.push("job_type = ?");
+    params.push(filter.job_type);
+  }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
   const rows = (
@@ -209,12 +217,20 @@ export function listJobEvents(jobId: string): JobEvent[] {
 }
 
 export function createJob(userId: number, input: CreateJobInput): GenerationJob {
-  if (!MODEL_TASK_TYPES.includes(input.job_type as (typeof MODEL_TASK_TYPES)[number])) {
-    throw badRequest(
-      `job_type must be one of: ${MODEL_TASK_TYPES.join(", ")}`,
-    );
+  if (input.job_type === PROXY_JOB_TYPE) {
+    // Proxy jobs run the ffmpeg media engine directly; no model involved.
+  } else {
+    if (
+      !MODEL_TASK_TYPES.includes(
+        input.job_type as (typeof MODEL_TASK_TYPES)[number],
+      )
+    ) {
+      throw badRequest(
+        `job_type must be one of: ${MODEL_TASK_TYPES.join(", ")} or ${PROXY_JOB_TYPE}`,
+      );
+    }
+    if (!input.model_id) throw badRequest("model_id is required");
   }
-  if (!input.model_id) throw badRequest("model_id is required");
 
   const db = getDb();
   const id = crypto.randomUUID();
@@ -238,7 +254,7 @@ export function createJob(userId: number, input: CreateJobInput): GenerationJob 
     input.shot_id ?? null,
     input.storyboard_panel_id ?? null,
     input.job_type,
-    input.model_id,
+    input.model_id ?? null,
     input.model_version ?? null,
     input.prompt_version_id ?? null,
     input.prompt_text ?? null,
@@ -386,9 +402,10 @@ export function retryJob(id: string): GenerationJob | undefined {
 
 export function countRunningJobs(): { gpu: number; cpu: number } {
   const db = getDb();
+  // Proxy jobs have no model; they run on the CPU lane (ffmpeg transcode).
   const rows = db.prepare(
-    `SELECT m.backend FROM generation_jobs j
-       JOIN models m ON m.id = j.model_id
+    `SELECT COALESCE(m.backend, 'mock') AS backend FROM generation_jobs j
+       LEFT JOIN models m ON m.id = j.model_id
        WHERE j.status IN ('running', 'cancelling')`,
   ).all() as unknown as { backend: string }[];
   return {
