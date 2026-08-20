@@ -307,6 +307,134 @@ describe("timeline editor", () => {
     );
   });
 
+  it("text overlays: text/subtitle tracks only, style validation, null-clear, duplicate", () => {
+    const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
+    const subTrack = createTrack(ownerId, tl.id, { track_type: "subtitle", name: "SUB" });
+    const videoTrack = createTrack(ownerId, tl.id, { track_type: "video", name: "V" });
+
+    // Text item with no asset version, on a subtitle track.
+    const sub = createItem(ownerId, tl.id, {
+      track_id: subTrack.id,
+      asset_version_id: null,
+      text: "Welcome to CinemaItor",
+      text_style: { font_size: 32, position: "top", margin: 10 },
+      start_time: 0,
+      end_time: 2,
+    });
+    assertEquals(sub.asset_version_id, null);
+    assertEquals(sub.item_text, "Welcome to CinemaItor");
+    assertEquals(sub.text_style?.font_size, 32);
+
+    // Text on a media track is rejected.
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: videoTrack.id,
+          asset_version_id: versionId,
+          text: "nope",
+          start_time: 0,
+          end_time: 1,
+        }),
+      Error,
+      "text or subtitle tracks",
+    );
+    // No version and no text: allowed on a text track (inert placeholder).
+    const inert = createItem(ownerId, tl.id, {
+      track_id: subTrack.id,
+      asset_version_id: null,
+      start_time: 0,
+      end_time: 1,
+    });
+    assertEquals(inert.asset_version_id, null);
+    assertEquals(inert.item_text, null);
+    // ...but rejected on media tracks.
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: videoTrack.id,
+          asset_version_id: null,
+          start_time: 0,
+          end_time: 1,
+        }),
+      Error,
+      "asset_version_id is required",
+    );
+    // Style validation.
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: subTrack.id,
+          asset_version_id: null,
+          text: "x",
+          text_style: { font_size: 300 },
+          start_time: 2,
+          end_time: 3,
+        }),
+      Error,
+      "font_size",
+    );
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: subTrack.id,
+          asset_version_id: null,
+          text: "x",
+          text_style: { position: "left" },
+          start_time: 2,
+          end_time: 3,
+        }),
+      Error,
+      "position",
+    );
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: subTrack.id,
+          asset_version_id: null,
+          text: "y".repeat(513),
+          start_time: 2,
+          end_time: 3,
+        }),
+      Error,
+      "too long",
+    );
+
+    // Update text + style, then clear with null.
+    const updated = updateItem(ownerId, tl.id, sub.id, {
+      text: "Second line",
+      text_style: { position: "middle" },
+    });
+    assert(updated);
+    assertEquals(updated.item_text, "Second line");
+    assertEquals(updated.text_style?.position, "middle");
+    const cleared = updateItem(ownerId, tl.id, sub.id, {
+      text: null,
+      text_style: null,
+    });
+    assert(cleared);
+    assertEquals(cleared.item_text, null);
+    assertEquals(cleared.text_style, null);
+    // Clearing the version of an already-versionless item stays inert.
+    const inert2 = updateItem(ownerId, tl.id, sub.id, { asset_version_id: null });
+    assert(inert2);
+    assertEquals(inert2.item_text, null);
+    const restored = updateItem(ownerId, tl.id, sub.id, { text: "Third line" });
+    assert(restored);
+    assertEquals(restored.item_text, "Third line");
+
+    // Moving a text item to a media track is rejected.
+    assertThrows(
+      () => updateItem(ownerId, tl.id, sub.id, { track_id: videoTrack.id }),
+      Error,
+      "text or subtitle tracks",
+    );
+
+    // Duplicate carries the text payload.
+    const dup = duplicateItem(ownerId, tl.id, sub.id, 10);
+    assertEquals(dup.item_text, "Third line");
+    assertEquals(dup.track_id, subTrack.id);
+  });
+
   it("creates and deletes markers", () => {
     const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
     const m1 = createMarker(ownerId, tl.id, { time: 1.5, label: "cut" });

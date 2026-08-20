@@ -76,6 +76,13 @@ removed.
       (xfade/eq/colortemperature/fade, H.264 re-encode, video-only fx pass) when any item has fx and
       keeps the lossless concat path otherwise; mock engine fingerprints fx into its deterministic
       output
+- [x] Subtitles + text overlays (Milestone 7 part 4): `text`/`subtitle` track items can carry an
+      inline `text` payload (max 512 chars) with an optional `text_style` (`font_size`,
+      `font_color`, `position` top/middle/bottom, `margin`) — strict validation, 400 on media
+      tracks, `null` clears on updates, versionless items allowed on text tracks (media tracks still
+      require a version); render plans carry the overlays — the ffmpeg engine draws them in a final
+      `drawtext` stage (`enable=between(t, start, end)`, quoted/escaped text, per-overlay position)
+      and the mock engine fingerprints them into its deterministic output
 
 ### In Progress
 
@@ -93,10 +100,10 @@ removed.
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: subtitles, text
-      overlays, proxy workflow polish, skills (JSON/YAML v1), project templates, advanced storage
-      management, ducking, audio cleanup, subtitle generation from dialogue/voiceover, A/B + version
-      comparison improvements, model benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: proxy workflow polish,
+      skills (JSON/YAML v1), project templates, advanced storage management, ducking, audio cleanup,
+      subtitle generation from dialogue/voiceover, A/B + version comparison improvements, model
+      benchmark
 - [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues

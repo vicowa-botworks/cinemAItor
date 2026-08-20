@@ -152,6 +152,80 @@ describe("timelines api", () => {
         );
         assertEquals(badVersion.status, 400);
 
+        // Text overlays: subtitle track, text + style, clear via null.
+        const subTrackRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/tracks`,
+          { track_type: "subtitle", name: "SUB" },
+          ownerToken,
+        );
+        assertEquals(subTrackRes.status, 201);
+        const subTrackId = (subTrackRes.json as { id: string }).id;
+
+        const subItemRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/items`,
+          {
+            track_id: subTrackId,
+            asset_version_id: null,
+            text: "Main title",
+            text_style: { font_size: 32, position: "bottom" },
+            start_time: 0,
+            end_time: 3,
+          },
+          ownerToken,
+        );
+        assertEquals(subItemRes.status, 201);
+        const subItem = subItemRes.json as {
+          id: string;
+          item_text: string | null;
+          text_style: Record<string, unknown> | null;
+          asset_version_id: string | null;
+        };
+        assertEquals(subItem.item_text, "Main title");
+        assertEquals(subItem.asset_version_id, null);
+        assertEquals(subItem.text_style?.font_size, 32);
+
+        const textOnMediaTrack = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/items`,
+          {
+            track_id: trackId,
+            asset_version_id: versionId,
+            text: "nope",
+            start_time: 0,
+            end_time: 1,
+          },
+          ownerToken,
+        );
+        assertEquals(textOnMediaTrack.status, 400);
+
+        const subTextPatch = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${subItem.id}`,
+          { text: "Second title", text_style: { position: "top" } },
+          ownerToken,
+        );
+        assertEquals(subTextPatch.status, 200);
+        assertEquals((subTextPatch.json as { item_text: string }).item_text, "Second title");
+
+        const subTextCleared = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${subItem.id}`,
+          { text: null, text_style: null },
+          ownerToken,
+        );
+        assertEquals(subTextCleared.status, 200);
+        assertEquals((subTextCleared.json as { item_text: string | null }).item_text, null);
+
+        const nullVersionOnMediaTrack = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${item1.id}`,
+          { asset_version_id: null },
+          ownerToken,
+        );
+        assertEquals(nullVersionOnMediaTrack.status, 400);
+
         // Trim/move.
         const patched = await req(
           "PATCH",

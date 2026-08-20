@@ -110,6 +110,18 @@ describe("renders api", () => {
         start_time: 0,
         end_time: 2,
       });
+      const subTrack = createTrack(ownerId, timelineId, {
+        track_type: "subtitle",
+        name: "SUB",
+      });
+      createItem(ownerId, timelineId, {
+        track_id: subTrack.id,
+        asset_version_id: null,
+        text: "Main title: Test Film",
+        text_style: { position: "bottom" },
+        start_time: 0,
+        end_time: 2,
+      });
     });
   });
 
