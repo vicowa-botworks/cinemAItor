@@ -28,6 +28,10 @@ cp backend/.env.example backend/.env
 # Edit backend/.env and set a secure JWT_SECRET
 ```
 
+`deno task dev`, `dev:backend`, and `start` auto-load `backend/.env` when starting the backend. Real
+environment variables take precedence over values in the file, and a missing file only produces a
+warning.
+
 ### Running Locally
 
 Start both servers with a single command:

@@ -1,5 +1,5 @@
 const backend = new Deno.Command(Deno.execPath(), {
-  args: ["run", "--watch", "-A", "src/server.ts"],
+  args: ["run", "--watch", "-A", "--env-file=.env", "src/server.ts"],
   cwd: new URL("backend", import.meta.url),
   stdout: "inherit",
   stderr: "inherit",
