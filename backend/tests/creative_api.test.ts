@@ -331,6 +331,135 @@ describe("storyboards and scenes api", () => {
     });
   });
 
+  it("batch-generates all shots of a scene (skip shots without prompts)", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const scene = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Harbor", prompt: "scene fallback prompt" },
+          ownerToken,
+        );
+        assertEquals(scene.status, 201);
+        const sceneId = (scene.json as { id: string }).id;
+
+        const s1 = await req(
+          "POST",
+          `/api/v1/scenes/${sceneId}/shots`,
+          { shot_order: 1, name: "Wide", prompt: "wide shot from the harbor" },
+          ownerToken,
+        );
+        assertEquals(s1.status, 201);
+        const shot1 = (s1.json as { id: string }).id;
+
+        const s2 = await req(
+          "POST",
+          `/api/v1/scenes/${sceneId}/shots`,
+          { shot_order: 2, name: "Close" },
+          ownerToken,
+        );
+        assertEquals(s2.status, 201);
+        const shot2 = (s2.json as { id: string }).id;
+
+        // Without a linked panel preview, batch generation uses the scene's
+        // t2v path when a text_to_video model is available.
+        const t2vModelId = registerModel(ownerId, {
+          name: "api-mock-t2v",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["text_to_video"],
+          enabled: true,
+        }).id;
+
+        const res = await req(
+          "POST",
+          `/api/v1/scenes/${sceneId}/batch-generate`,
+          { model_id: t2vModelId },
+          ownerToken,
+        );
+        assertEquals(res.status, 202);
+        const batch = res.json as {
+          job_type: string;
+          jobs: { shot_id: string; job_id: string; asset_id: string }[];
+          skipped: { shot_id: string; reason: string }[];
+        };
+        assertEquals(batch.job_type, "text_to_video");
+        assertEquals(batch.jobs.length, 2, "both shots fall back to the scene prompt");
+        assertEquals(batch.skipped.length, 0);
+        assertEquals(batch.jobs[0].shot_id, shot1);
+        assertEquals(batch.jobs[1].shot_id, shot2);
+
+        for (const j of batch.jobs) {
+          const done = await waitForJob(ownerToken, j.job_id, ["succeeded", "failed"]);
+          assertEquals(done.status, "succeeded");
+        }
+
+        // Runner linked outputs back: both shots are generated.
+        const shots = await req(
+          "GET",
+          `/api/v1/scenes/${sceneId}/shots`,
+          undefined,
+          ownerToken,
+        );
+        const list = shots.json as {
+          id: string;
+          status: string;
+          generated_asset_version_id: string | null;
+        }[];
+        for (const id of [shot1, shot2]) {
+          const found = list.find((s) => s.id === id);
+          assert(found);
+          assertEquals(found.status, "generated");
+          assertEquals(found.generated_asset_version_id !== null, true);
+        }
+
+        // A scene whose shots have no prompts at all: 400.
+        const empty = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Silent" },
+          ownerToken,
+        );
+        const emptyId = (empty.json as { id: string }).id;
+        await req(
+          "POST",
+          `/api/v1/scenes/${emptyId}/shots`,
+          { shot_order: 1, name: "No prompt" },
+          ownerToken,
+        );
+        const fail = await req(
+          "POST",
+          `/api/v1/scenes/${emptyId}/batch-generate`,
+          {},
+          ownerToken,
+        );
+        assertEquals(fail.status, 400);
+        assert(
+          String(
+            (fail.json as { error: { message: string } }).error.message,
+          ).includes("No shot in this scene has a prompt"),
+        );
+
+        // A scene with no shots: 400.
+        const bare = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Bare" },
+          ownerToken,
+        );
+        const bareId = (bare.json as { id: string }).id;
+        const bareFail = await req(
+          "POST",
+          `/api/v1/scenes/${bareId}/batch-generate`,
+          {},
+          ownerToken,
+        );
+        assertEquals(bareFail.status, 400);
+      })();
+    });
+  });
+
   it("manages shots under scenes", async () => {
     await withServer((base) => {
       baseUrl = base;

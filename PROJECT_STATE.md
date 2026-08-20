@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 in progress (audio generation part 1 complete)
+## Current Status: Milestone 7 in progress (audio generation + batch shot generation)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -63,6 +63,11 @@ removed.
       (kind → task type `music` / `voice` / `audio`), each call targeting a fresh `audio` asset;
       candidates are stored as asset versions with full provenance and picked in the review
       workflow; scoped by `scene_id` (scene write) or `project_id` (project write)
+- [x] Batch shot generation (Milestone 7 part 2): `POST /api/v1/scenes/:id/batch-generate` queues
+      one generation job per shot (shared scene input: i2v from a linked panel preview, else t2v);
+      each shot uses its own prompt when present, otherwise the scene prompt; shots without any
+      prompt are skipped with a reason; on success the runner links each shot's
+      `generated_asset_version_id` + status
 
 ### In Progress
 
@@ -80,9 +85,9 @@ removed.
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: transitions, color
-      grading, subtitles, text overlays, batch generation, proxy workflow polish, skills (JSON/YAML
-      v1), project templates, advanced storage management, ducking, audio cleanup, subtitle
-      generation from dialogue/voiceover, A/B + version comparison improvements, model benchmark
+      grading, subtitles, text overlays, proxy workflow polish, skills (JSON/YAML v1), project
+      templates, advanced storage management, ducking, audio cleanup, subtitle generation from
+      dialogue/voiceover, A/B + version comparison improvements, model benchmark
 - [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues
@@ -102,3 +107,4 @@ removed.
 - Diagnostics / Ops (hardware, model health, storage, logs, export, project backup/restore): Thu Aug
   20 2026
 - Audio generation (music / voiceover / SFX): Thu Aug 20 2026
+- Batch shot generation: Thu Aug 20 2026

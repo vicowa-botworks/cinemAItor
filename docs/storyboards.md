@@ -43,6 +43,7 @@ shot prompts use the same prompt-versioning engine (scopes `scene` / `shot`).
 | GET/POST     | `/api/v1/scenes/:id/shots`                                 | List/create shots (`shot_order` unique)       |
 | PATCH/DELETE | `/api/v1/scenes/:id/shots/:shotId`                         | Update / delete shot                          |
 | POST         | `/api/v1/scenes/:id/generate`                              | Scene generation job                          |
+| POST         | `/api/v1/scenes/:id/batch-generate`                        | One generation job per shot of the scene      |
 
 All endpoints require authentication; write access follows project permissions.
 
@@ -54,6 +55,11 @@ All endpoints require authentication; write access follows project permissions.
 - **Scene** → `image_to_video` when a linked panel already has a preview (the panel's image is the
   video input), otherwise `text_to_video`. With no image input and no enabled `text_to_video` model
   the request is rejected with a clear message. Output lands on a per-scene `scene_*` asset.
+- **Batch** (`batch-generate`) → one job per shot, all sharing the scene's input (i2v when a linked
+  panel has a preview, otherwise t2v). Each shot uses its own prompt when present, otherwise the
+  scene prompt; shots without any prompt are skipped with a reason. On success the runner links each
+  shot's `generated_asset_version_id` and status. 202 returns
+  `{job_type, model_id, jobs: [{shot_id, job_id, asset_id}], skipped: [{shot_id, reason}]}`.
 - Model selection: explicit `model_id` must be enabled and support the task; otherwise the first
   enabled model for the task is used. A 202 response returns the job id for polling (jobs API).
 

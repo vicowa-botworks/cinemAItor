@@ -16,7 +16,7 @@ import {
   updateScene,
   updateShot,
 } from "@cinemaItor/db/scenes.ts";
-import { generateScene } from "@cinemaItor/services/creative_generation.ts";
+import { batchGenerateScene, generateScene } from "@cinemaItor/services/creative_generation.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
 function requireUserId(ctx: Context): number {
@@ -207,6 +207,17 @@ export const sceneRouter = new Router()
     const userId = requireUserId(ctx);
     const body = await readOptionalBody(ctx);
     const result = generateScene(userId, idParam(ctx, "id"), {
+      model_id: optionalString(body, "model_id"),
+      seed: optionalString(body, "seed"),
+      settings: optionalJsonObject(body, "settings"),
+    });
+    ctx.response.status = 202;
+    ctx.response.body = result;
+  })
+  .post("/api/v1/scenes/:id/batch-generate", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const body = await readOptionalBody(ctx);
+    const result = batchGenerateScene(userId, idParam(ctx, "id"), {
       model_id: optionalString(body, "model_id"),
       seed: optionalString(body, "seed"),
       settings: optionalJsonObject(body, "settings"),

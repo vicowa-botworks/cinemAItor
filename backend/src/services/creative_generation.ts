@@ -212,6 +212,117 @@ export function generateScene(
 }
 
 // ---------------------------------------------------------------------------
+// Batch generation: queue one generation job per shot of a scene
+// ---------------------------------------------------------------------------
+
+export interface BatchGenerateResult {
+  scene_id: string;
+  job_type: "image_to_video" | "text_to_video";
+  model_id: string;
+  jobs: { shot_id: string; job_id: string; asset_id: string }[];
+  skipped: { shot_id: string; reason: string }[];
+  warnings: string[];
+}
+
+/**
+ * Create one generation job per shot of a scene (Milestone 7: "batch generate
+ * multiple shots"). Each shot uses its own prompt when present, falling back
+ * to the scene prompt. Shots without any prompt are skipped with a reason.
+ */
+export function batchGenerateScene(
+  userId: number,
+  sceneId: string,
+  options: GenerateOptions = {},
+): BatchGenerateResult {
+  const scene = getScene(sceneId, userId, "write");
+  if (!scene) throw notFound("Scene not found");
+
+  const db = getDb();
+  const rows = db.prepare(
+    "SELECT * FROM shots WHERE scene_id = ? ORDER BY shot_order",
+  ).all(sceneId) as Record<string, unknown>[];
+  if (rows.length === 0) throw badRequest("Scene has no shots");
+
+  // Panel preview input (i2v) is shared by every shot of the scene.
+  const inputRow = db.prepare(
+    `SELECT av.asset_id, av.version_number
+       FROM storyboard_panels p
+       JOIN asset_versions av ON av.id = p.preview_asset_version_id
+       WHERE p.linked_scene_id = ?
+         AND p.preview_asset_version_id IS NOT NULL
+       ORDER BY p.panel_order DESC
+       LIMIT 1`,
+  ).get(sceneId) as { asset_id: string; version_number: number } | undefined;
+
+  const jobType: "image_to_video" | "text_to_video" = inputRow ? "image_to_video" : "text_to_video";
+  const model = pickModel(jobType, options.model_id);
+  const inputs = inputRow ? [inputRow] : [];
+  const scenePrompt = creativePromptFor("scene", sceneId, userId);
+
+  const now = new Date().toISOString();
+  const jobs: { shot_id: string; job_id: string; asset_id: string }[] = [];
+  const skipped: { shot_id: string; reason: string }[] = [];
+  const warnings: string[] = [];
+
+  for (const row of rows) {
+    const shotId = row.id as string;
+    const prompt = creativePromptFor("shot", shotId, userId) ?? scenePrompt;
+    if (!prompt) {
+      skipped.push({ shot_id: shotId, reason: "no prompt" });
+      continue;
+    }
+    warnings.push(...prompt.warnings);
+
+    const slug = `shot_${shotId.slice(0, 8)}`;
+    let asset = getAssetBySlug(slug);
+    if (!asset || asset.status === "deleted") {
+      asset = createAsset(
+        {
+          unique_slug: slug,
+          display_name: `Shot ${shotId.slice(0, 8)}`,
+          asset_type: "video",
+          library_scope: "global",
+        },
+        userId,
+      );
+    }
+
+    const job = createJob(userId, {
+      job_type: jobType,
+      model_id: model.id,
+      asset_id: asset.id,
+      project_id: scene.project_id,
+      scene_id: sceneId,
+      shot_id: shotId,
+      prompt_text: prompt.content,
+      prompt_version_id: prompt.version_id,
+      seed: options.seed,
+      settings: (options.settings ?? {}) as Record<string, unknown>,
+      input_asset_versions: inputs,
+    });
+
+    (db.prepare(
+      "UPDATE shots SET status = 'queued', updated_at = ? WHERE id = ?",
+    ).run as (...params: unknown[]) => unknown)(now, shotId);
+
+    jobs.push({ shot_id: shotId, job_id: job.id, asset_id: asset.id });
+  }
+
+  if (jobs.length === 0) {
+    throw badRequest("No shot in this scene has a prompt; nothing to generate");
+  }
+
+  return {
+    scene_id: sceneId,
+    job_type: jobType,
+    model_id: model.id,
+    jobs,
+    skipped,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Audio generation (AUD-009 music, AUD-010 voiceover, AUD-011 sfx)
 // ---------------------------------------------------------------------------
 
