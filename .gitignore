@@ -32,3 +32,4 @@ logs/
 # Build output
 dist/
 build/
+.cortexkit/
