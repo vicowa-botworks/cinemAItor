@@ -45,6 +45,20 @@ export class ContentStore {
   }
 
   /**
+   * Like resolve(), but also verifies the file is actually on disk. Returns
+   * the stored path, or undefined when the content is missing.
+   */
+  resolveExisting(hash: string): string | undefined {
+    const path = this.resolve(hash);
+    if (!path) return undefined;
+    try {
+      return Deno.statSync(path).isFile ? path : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Store a file by content. The file is streamed to a temp location within
    * the media root, hashed, then atomically renamed into the content tree.
    * If the content is already stored, the existing file is reused.

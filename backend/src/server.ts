@@ -5,6 +5,7 @@ import { audioRouter } from "@cinemaItor/routes/audio.ts";
 import { jobRouter } from "@cinemaItor/routes/jobs.ts";
 import { reviewRouter } from "@cinemaItor/routes/review.ts";
 import { renderRouter } from "@cinemaItor/routes/renders.ts";
+import { diagnosticsRouter } from "@cinemaItor/routes/diagnostics.ts";
 import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
@@ -16,6 +17,7 @@ import { referenceRouter } from "@cinemaItor/routes/references.ts";
 import { healthRouter } from "@cinemaItor/routes/health.ts";
 import { type AppConfig, loadConfig } from "@cinemaItor/config.ts";
 import { createLogger } from "@cinemaItor/logger.ts";
+import { createDiagnosticLogSink } from "@cinemaItor/db/diagnostics.ts";
 import { errorHandler } from "@cinemaItor/errors.ts";
 import { getDb } from "@cinemaItor/db/database.ts";
 import { ensureLayout } from "@cinemaItor/storage/paths.ts";
@@ -65,7 +67,8 @@ function requestLogger(logger: ReturnType<typeof createLogger>): Middleware {
 export function createApp(
   config: AppConfig = loadConfig(),
 ): Application & { jobRunner?: JobRunner } {
-  const logger = createLogger(config.logLevel, { component: "http" });
+  const diagnosticSink = createDiagnosticLogSink();
+  const logger = createLogger(config.logLevel, { component: "http" }, diagnosticSink);
   getDb();
   ensureLayout(config.appDataDir);
 
@@ -94,6 +97,7 @@ export function createApp(
   app.use(jobRouter.routes());
   app.use(reviewRouter.routes());
   app.use(renderRouter.routes());
+  app.use(diagnosticsRouter.routes());
   app.use(timelineRouter.routes());
   app.use(storyboardRouter.routes());
   app.use(sceneRouter.routes());
@@ -109,6 +113,7 @@ export function createApp(
   app.use(jobRouter.allowedMethods());
   app.use(reviewRouter.allowedMethods());
   app.use(renderRouter.allowedMethods());
+  app.use(diagnosticsRouter.allowedMethods());
   app.use(timelineRouter.allowedMethods());
   app.use(storyboardRouter.allowedMethods());
   app.use(sceneRouter.allowedMethods());
@@ -120,8 +125,12 @@ export function createApp(
 
 if (import.meta.main) {
   const config = loadConfig();
-  const logger = createLogger(config.logLevel, { component: "server" });
+  const serverLogger = createLogger(
+    config.logLevel,
+    { component: "server" },
+    createDiagnosticLogSink(),
+  );
   const app = createApp(config);
-  logger.info("server listening", { port: config.port });
+  serverLogger.info("server listening", { port: config.port });
   await app.listen({ port: config.port });
 }

@@ -54,6 +54,8 @@ const ALL_TABLES = [
   "render_events",
   "exports",
   "prompt_versions",
+  "diagnostics",
+  "backups",
   "sessions",
   "audit_logs",
   "projects",

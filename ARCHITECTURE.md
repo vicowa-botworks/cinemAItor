@@ -141,6 +141,13 @@ server.ts (entry point)
   │   │   `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running); structured logs
   │   ├── Output validation report; exports with provenance as asset + immutable version
   │   └── (see docs/renders.md)
+  ├── Diagnostics routes (/api/v1/diagnostics/*, auth middleware)
+  │   ├── GET /hardware (CPU/RAM/GPU/OS), GET /models (health batch), GET /storage
+  │   ├── GET /logs (filtered `diagnostics` rows), POST /export (admin; redacted JSON on disk)
+  │   ├── Project backup/restore (DIA-006/007): POST /backups, GET /backups,
+  │   │   POST /backups/:id/restore, DELETE /backups/:id
+  │   ├── Logger sink mirrors warn/error into the durable `diagnostics` table (DIA-003)
+  │   └── (see docs/diagnostics.md)
   └── Legacy demo routes (/api/auth/*, /api/movies/*)
 ```
 

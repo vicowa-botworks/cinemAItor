@@ -9,6 +9,7 @@ export interface StorageLayout {
   models: string;
   renders: string;
   logs: string;
+  backups: string;
   cache: string;
 }
 
@@ -22,6 +23,7 @@ export function storageLayout(root: string): StorageLayout {
     models: join(root, "models"),
     renders: join(root, "renders"),
     logs: join(root, "logs"),
+    backups: join(root, "backups"),
     cache: join(root, "cache"),
   };
 }
@@ -38,6 +40,7 @@ export function ensureLayout(root: string): StorageLayout {
       layout.models,
       layout.renders,
       layout.logs,
+      layout.backups,
       layout.cache,
     ]
   ) {
