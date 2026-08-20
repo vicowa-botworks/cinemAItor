@@ -26,14 +26,20 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
       from the item's `text_style`). Re-encodes to H.264. The fx pass is video-only (`-an`):
       per-track audio placement is a separate render concern not yet modelled in the plan.
   - `MockRenderEngine` — deterministic placeholder output (seeded from `output_path` + duration +
-    per-item fx and text-overlay fingerprint, valid minimal WAV for the `wav` format) so rendering
-    works on machines without ffmpeg.
+    per-item source/fx and text-overlay fingerprint, valid minimal WAV for the `wav` format) so
+    rendering works on machines without ffmpeg.
   - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
     `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
   resolved to its asset version's stored file; plus the active text overlays from unlocked
   `text`/`subtitle` tracks (text items sorted by start time). The plan is passed to the engine with
   progress and `isCancelled` hooks.
+- **Source selection (draft/final)**: each plan item resolves to a `source` — `proxy` or `master`
+  (the asset version's stored file). `draft`-kind presets prefer the version's proxy and fall back
+  to the master if none exists; `final`-kind presets always use the master and fail the render
+  (`No file for asset version ...`) if its proxy-only state has no master file. Per-item `source` is
+  part of the mock engine's fingerprint and of the `validation_report.sources` (`{proxy, master}`)
+  tally.
 - **Validation**: after rendering, the output must exist, be non-empty and match the preset's
   extension; the outcome (including `file_size` and per-check booleans) is stored as
   `validation_report_json` on the job. Failures fail the job.

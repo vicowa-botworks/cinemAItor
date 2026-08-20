@@ -4,6 +4,8 @@ import type { RenderPreset } from "../db/renders.ts";
 
 export interface RenderInputItem {
   file_path: string;
+  /** Whether this item renders from its proxy (draft) or master (final) media. */
+  source?: "proxy" | "master";
   start_time: number;
   end_time: number;
   duration: number;
@@ -359,7 +361,9 @@ export function fxFingerprint(
 ): string {
   const itemPart = items
     .map((i) =>
-      `${i.transition}:${i.transition_duration}:${i.fade_in}:${i.fade_out}:${
+      `${
+        i.source ?? "master"
+      }:${i.transition}:${i.transition_duration}:${i.fade_in}:${i.fade_out}:${
         JSON.stringify(i.color_grade ?? null)
       }`
     )

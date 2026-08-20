@@ -79,6 +79,7 @@ describe("migrations", () => {
         "0012_backups.sql",
         "0013_timeline_fx.sql",
         "0014_text_overlays.sql",
+        "0015_proxy_workflow.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -98,12 +99,13 @@ describe("migrations", () => {
         "0012_backups.sql",
         "0013_timeline_fx.sql",
         "0014_text_overlays.sql",
+        "0015_proxy_workflow.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        14,
+        15,
       );
     } finally {
       db.close();
@@ -129,6 +131,7 @@ describe("migrations", () => {
       "0012_backups.sql",
       "0013_timeline_fx.sql",
       "0014_text_overlays.sql",
+      "0015_proxy_workflow.sql",
     ]);
   });
 

@@ -1,8 +1,8 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 in progress (audio generation, batch shot generation, transitions +
+## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow shipped;
 
-color grading)
+remaining: skills, templates, advanced storage, audio polish, model benchmark)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -83,6 +83,16 @@ removed.
       require a version); render plans carry the overlays — the ffmpeg engine draws them in a final
       `drawtext` stage (`enable=between(t, start, end)`, quoted/escaped text, per-overlay position)
       and the mock engine fingerprints them into its deterministic output
+- [x] Proxy workflow polish (Milestone 7 part 5): every video/image/audio asset version can carry a
+      `proxy` (a small fast-transcoded copy, `asset_versions.proxy_path`) — uploads and version
+      registration queue a model-less `proxy` job through the normal job runner (ffmpeg when
+      available: 720p H.264/AAC, 320px JPEG, 128 kbps MP3; deterministic mock proxy otherwise);
+      `GET/POST /api/v1/assets/:id/versions/:versionId/proxy` serve/regenerate; jobs are listable
+      via `?job_type=proxy`
+- [x] Render draft/final source selection: `draft` presets render proxies (falling back to the
+      master if no proxy exists), `final` presets render masters only and fail on missing media;
+      per-item `source` is part of the mock engine fingerprint and the validation report carries a
+      `sources` tally (`{proxy, master}`)
 
 ### In Progress
 
@@ -97,13 +107,13 @@ removed.
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
-- [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
+- [ ] Thumbnails/waveforms in the timeline view via FFmpeg (STO-007..009) — asset proxies now ship
+      with the proxy workflow above
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: proxy workflow polish,
-      skills (JSON/YAML v1), project templates, advanced storage management, ducking, audio cleanup,
-      subtitle generation from dialogue/voiceover, A/B + version comparison improvements, model
-      benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
+      project templates, advanced storage management, ducking, audio cleanup, subtitle generation
+      from dialogue/voiceover, A/B + version comparison improvements, model benchmark
 - [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues

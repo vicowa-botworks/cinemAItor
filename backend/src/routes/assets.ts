@@ -28,6 +28,7 @@ import {
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
 import { mediaTypeFor } from "@cinemaItor/storage/media_types.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
+import { queueProxyGeneration } from "@cinemaItor/services/job_runner.ts";
 import {
   AppError,
   badRequest,
@@ -284,6 +285,7 @@ export const assetRouter = new Router()
         file_size: stored.size,
         notes,
       });
+      queueProxyGeneration(asset.id, version, userId, asset.project_id);
       ctx.response.status = 201;
       ctx.response.body = {
         asset: assetDetail(getAssetById(asset.id) as Asset),
@@ -339,6 +341,7 @@ export const assetRouter = new Router()
       notes: typeof body.notes === "string" ? body.notes : null,
       make_active: body.make_active !== false,
     });
+    queueProxyGeneration(asset.id, version, userId, asset.project_id);
     ctx.response.status = 201;
     ctx.response.body = version;
   })
@@ -452,4 +455,44 @@ export const assetRouter = new Router()
     );
     ctx.response.headers.set("content-length", String(stat.size));
     ctx.response.body = file.readable;
+  })
+  .get("/api/v1/assets/:id/versions/:versionId/proxy", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const asset = getAssetAccessible(ctx.params.id, userId);
+    if (!asset) throw notFound("Asset not found");
+
+    const version = getAssetVersion(ctx.params.versionId);
+    if (!version || version.asset_id !== asset.id) {
+      throw notFound("Version not found");
+    }
+    if (!version.proxy_path) throw notFound("Proxy is not available");
+    const file = await Deno.open(version.proxy_path).catch(() => {
+      throw new AppError(
+        ERROR_CODES.MISSING_FILE,
+        "Proxy file is missing from storage",
+        { status: 404 },
+      );
+    });
+    const stat = await file.stat();
+    ctx.response.status = 200;
+    ctx.response.headers.set(
+      "content-type",
+      mediaTypeFor(version.proxy_path).mime ?? "application/octet-stream",
+    );
+    ctx.response.headers.set("content-length", String(stat.size));
+    ctx.response.body = file.readable;
+  })
+  .post("/api/v1/assets/:id/versions/:versionId/proxy", authMiddleware, (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const asset = requireAsset(ctx);
+    if (!hasAssetPermission(userId, asset.id, "write")) throw forbidden();
+
+    const version = getAssetVersion(ctx.params.versionId);
+    if (!version || version.asset_id !== asset.id) {
+      throw notFound("Version not found");
+    }
+    const job = queueProxyGeneration(asset.id, version, userId, asset.project_id);
+    if (!job) throw badRequest("Version is not proxyable");
+    ctx.response.status = 202;
+    ctx.response.body = { message: "Proxy regeneration queued", job };
   });

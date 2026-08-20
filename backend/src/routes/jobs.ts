@@ -136,6 +136,7 @@ export const jobRouter = new Router()
       status: status as JobStatus | undefined,
       project_id: params.get("project_id") ?? undefined,
       model_id: params.get("model_id") ?? undefined,
+      job_type: params.get("job_type") ?? undefined,
       limit: limitRaw ? Number(limitRaw) : undefined,
     });
     ctx.response.body = jobs;

@@ -99,6 +99,7 @@ server.ts (entry point)
 │   └── DELETE /:id (soft delete)
 ├── Asset routes (/api/v1/assets/*, auth middleware)
 │   ├── CRUD + upload + versions + restore + aliases + tags + preview
+│   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)
 │   ├── Versioned prompt history per scope + restore
@@ -110,10 +111,12 @@ server.ts (entry point)
 │   ├── Registry, install/verify (SHA-256), remove, enable/disable, /:id/health-check
 │   ├── Hardware detection + requirement warnings (/hardware)
 │   └── (see docs/models.md)
- ├── Job routes (/api/v1/jobs/*, auth middleware)
- │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
- │   ├── Adapters: mock (deterministic); provenance on produced asset versions
- │   └── (see docs/jobs.md)
+  ├── Job routes (/api/v1/jobs/*, auth middleware)
+  │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
+  │   ├── Adapters: mock (deterministic); provenance on produced asset versions
+  │   ├── Model-less `proxy` jobs (ffmpeg or mock transcode of media proxies); list filter
+  │   │   `?job_type=`
+  │   └── (see docs/jobs.md)
  ├── Storyboard/scene/shot routes (auth middleware, project-permission gated)
  │   ├── Storyboards + ordered panels; scenes + ordered shots
  │   ├── Prompt versioning + reference resolution on creative objects
@@ -143,8 +146,10 @@ server.ts (entry point)
  │   ├── Engines: ffmpeg concat (`-c copy`), ffmpeg fx pass (transitions/fades/grade/
  │   │   `drawtext` text overlays) or deterministic mock (auto by availability,
  │   │   `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running); structured logs
-  │   ├── Output validation report; exports with provenance as asset + immutable version
-  │   └── (see docs/renders.md)
+   │   ├── Draft/final source selection: draft presets render proxies (master fallback),
+   │   │   final presets render masters only; per-source tally in the validation report
+   │   ├── Output validation report; exports with provenance as asset + immutable version
+   │   └── (see docs/renders.md)
   ├── Diagnostics routes (/api/v1/diagnostics/*, auth middleware)
   │   ├── GET /hardware (CPU/RAM/GPU/OS), GET /models (health batch), GET /storage
   │   ├── GET /logs (filtered `diagnostics` rows), POST /export (admin; redacted JSON on disk)
