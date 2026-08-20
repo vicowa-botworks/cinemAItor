@@ -54,6 +54,7 @@ export interface TimelineItem {
   fade_in: number | null;
   fade_out: number | null;
   transition: string | null;
+  transition_duration: number;
   effect_chain: unknown[] | null;
   color_grade: Record<string, unknown> | null;
   audio_settings: Record<string, unknown> | null;
@@ -136,6 +137,7 @@ export function rowToItem(row: Record<string, unknown>): TimelineItem {
     fade_in: asNum(row.fade_in),
     fade_out: asNum(row.fade_out),
     transition: (row.transition as string | null) ?? null,
+    transition_duration: asNum(row.transition_duration) ?? 0.5,
     effect_chain: parseJson<unknown[] | null>(row.effect_chain_json, null),
     color_grade: parseJson<Record<string, unknown> | null>(row.color_grade_json, null),
     audio_settings: parseJson<Record<string, unknown> | null>(
@@ -505,6 +507,91 @@ function validatePlacement(
   if (p.speed <= 0) throw badRequest("speed must be > 0");
 }
 
+// ---------------------------------------------------------------------------
+// Item fx: transitions + color grading (applied at render time)
+// ---------------------------------------------------------------------------
+
+/** Blend types between an item and the one that precedes it (xfade names). */
+export const TRANSITION_TYPES = [
+  "cut",
+  "fade",
+  "dissolve",
+  "wipeleft",
+  "wiperight",
+  "slideleft",
+  "slideright",
+] as const;
+export type TransitionType = (typeof TRANSITION_TYPES)[number];
+
+export const DEFAULT_TRANSITION_DURATION = 0.5;
+export const MAX_TRANSITION_DURATION = 3;
+
+/** Allowed color grade parameters and their ranges. */
+export const COLOR_GRADE_LIMITS = {
+  brightness: { min: -1, max: 1 },
+  contrast: { min: 0.25, max: 4 },
+  saturation: { min: 0, max: 2 },
+  temperature: { min: -1, max: 1 },
+} as const;
+
+export function validateItemFx(
+  fx: {
+    transition?: string | null;
+    transition_duration?: number | null;
+    fade_in?: number | null;
+    fade_out?: number | null;
+    color_grade?: Record<string, unknown> | null;
+  },
+  duration: number,
+): void {
+  if (
+    fx.transition !== undefined && fx.transition !== null &&
+    !(TRANSITION_TYPES as readonly string[]).includes(fx.transition)
+  ) {
+    throw badRequest(`transition must be one of: ${TRANSITION_TYPES.join(", ")}`);
+  }
+  if (fx.transition_duration !== undefined && fx.transition_duration !== null) {
+    const d = fx.transition_duration;
+    if (typeof d !== "number" || !Number.isFinite(d) || d <= 0 || d > MAX_TRANSITION_DURATION) {
+      throw badRequest(`transition_duration must be > 0 and <= ${MAX_TRANSITION_DURATION}`);
+    }
+  }
+  for (const key of ["fade_in", "fade_out"] as const) {
+    const value = fx[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw badRequest(`${key} must be a finite number >= 0`);
+    }
+    if (value >= duration) {
+      throw badRequest(`${key} must be shorter than the item duration`);
+    }
+  }
+  if (fx.color_grade !== undefined && fx.color_grade !== null) {
+    const grade = fx.color_grade;
+    if (typeof grade !== "object" || Array.isArray(grade)) {
+      throw badRequest("color_grade must be a JSON object");
+    }
+    for (const [key, value] of Object.entries(grade)) {
+      const limit = (COLOR_GRADE_LIMITS as Record<string, { min: number; max: number }>)[key];
+      if (!limit) {
+        throw badRequest(
+          `unknown color_grade parameter: ${key} (allowed: ${
+            Object.keys(COLOR_GRADE_LIMITS).join(", ")
+          })`,
+        );
+      }
+      if (
+        typeof value !== "number" || !Number.isFinite(value) ||
+        value < limit.min || value > limit.max
+      ) {
+        throw badRequest(
+          `color_grade.${key} must be a number between ${limit.min} and ${limit.max}`,
+        );
+      }
+    }
+  }
+}
+
 export interface ItemInput {
   track_id: string;
   asset_version_id: string;
@@ -512,14 +599,20 @@ export interface ItemInput {
   end_time: number;
   source_offset?: number;
   speed?: number;
-  transform?: Record<string, unknown>;
-  fade_in?: number;
-  fade_out?: number;
-  transition?: string;
-  effect_chain?: unknown[];
-  color_grade?: Record<string, unknown>;
-  audio_settings?: Record<string, unknown>;
-  notes?: string;
+  transform?: Record<string, unknown> | null;
+  fade_in?: number | null;
+  fade_out?: number | null;
+  transition?: string | null;
+  transition_duration?: number | null;
+  effect_chain?: unknown[] | null;
+  color_grade?: Record<string, unknown> | null;
+  audio_settings?: Record<string, unknown> | null;
+  notes?: string | null;
+}
+
+/** Serialize an optional JSON column value (`null`/`undefined` -> SQL NULL). */
+function jsonOrNull(value: unknown): string | null {
+  return value === null || value === undefined ? null : JSON.stringify(value);
 }
 
 export function createItem(
@@ -547,6 +640,7 @@ export function createItem(
     source_offset: input.source_offset ?? 0,
     speed: input.speed ?? 1,
   });
+  validateItemFx(input, input.end_time - input.start_time);
 
   const id = crypto.randomUUID();
   const now = nowIso();
@@ -554,9 +648,10 @@ export function createItem(
     `INSERT INTO timeline_items (
       id, timeline_id, track_id, asset_version_id, start_time, end_time,
       source_offset, speed, transform_json, fade_in, fade_out, transition,
+      transition_duration,
       effect_chain_json, color_grade_json, audio_settings_json, notes, status,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
   ).run as (...params: unknown[]) => unknown)(
     id,
     timelineId,
@@ -566,13 +661,14 @@ export function createItem(
     input.end_time,
     input.source_offset ?? 0,
     input.speed ?? 1,
-    input.transform ? JSON.stringify(input.transform) : null,
+    jsonOrNull(input.transform),
     input.fade_in ?? null,
     input.fade_out ?? null,
     input.transition ?? null,
-    input.effect_chain ? JSON.stringify(input.effect_chain) : null,
-    input.color_grade ? JSON.stringify(input.color_grade) : null,
-    input.audio_settings ? JSON.stringify(input.audio_settings) : null,
+    input.transition_duration ?? DEFAULT_TRANSITION_DURATION,
+    jsonOrNull(input.effect_chain),
+    jsonOrNull(input.color_grade),
+    jsonOrNull(input.audio_settings),
     input.notes ?? null,
     now,
     now,
@@ -604,6 +700,18 @@ export function updateItem(
     speed: patch.speed ?? item.speed,
   };
   validatePlacement(next);
+  validateItemFx(
+    {
+      transition: patch.transition !== undefined ? patch.transition : item.transition,
+      transition_duration: patch.transition_duration !== undefined
+        ? patch.transition_duration
+        : item.transition_duration,
+      fade_in: patch.fade_in !== undefined ? patch.fade_in : item.fade_in,
+      fade_out: patch.fade_out !== undefined ? patch.fade_out : item.fade_out,
+      color_grade: patch.color_grade !== undefined ? patch.color_grade : item.color_grade,
+    },
+    next.end_time - next.start_time,
+  );
   if (patch.asset_version_id !== undefined) {
     const version = getAssetVersion(patch.asset_version_id);
     if (!version) throw badRequest("asset_version_id does not reference a version");
@@ -613,7 +721,8 @@ export function updateItem(
     `UPDATE timeline_items SET
        track_id = ?, asset_version_id = ?, start_time = ?, end_time = ?,
        source_offset = ?, speed = ?, transform_json = ?, fade_in = ?, fade_out = ?,
-       transition = ?, effect_chain_json = ?, color_grade_json = ?,
+       transition = ?, transition_duration = ?, effect_chain_json = ?,
+       color_grade_json = ?,
        audio_settings_json = ?, notes = ?, status = ?, updated_at = ?
      WHERE id = ?`,
   ).run as (...params: unknown[]) => unknown)(
@@ -623,13 +732,14 @@ export function updateItem(
     next.end_time,
     next.source_offset,
     next.speed,
-    JSON.stringify(patch.transform ?? item.transform),
+    jsonOrNull(patch.transform === undefined ? item.transform : patch.transform),
     patch.fade_in !== undefined ? patch.fade_in : item.fade_in,
     patch.fade_out !== undefined ? patch.fade_out : item.fade_out,
     patch.transition !== undefined ? patch.transition : item.transition,
-    JSON.stringify(patch.effect_chain ?? item.effect_chain),
-    JSON.stringify(patch.color_grade ?? item.color_grade),
-    JSON.stringify(patch.audio_settings ?? item.audio_settings),
+    patch.transition_duration !== undefined ? patch.transition_duration : item.transition_duration,
+    jsonOrNull(patch.effect_chain === undefined ? item.effect_chain : patch.effect_chain),
+    jsonOrNull(patch.color_grade === undefined ? item.color_grade : patch.color_grade),
+    jsonOrNull(patch.audio_settings === undefined ? item.audio_settings : patch.audio_settings),
     patch.notes !== undefined ? patch.notes : item.notes,
     patch.status ?? item.status,
     nowIso(),
@@ -667,6 +777,7 @@ export function duplicateItem(
     fade_in: item.fade_in ?? undefined,
     fade_out: item.fade_out ?? undefined,
     transition: item.transition ?? undefined,
+    transition_duration: item.transition_duration,
     effect_chain: item.effect_chain ?? undefined,
     color_grade: item.color_grade ?? undefined,
     audio_settings: item.audio_settings ?? undefined,
@@ -876,9 +987,10 @@ export function restoreSnapshot(
       `INSERT OR IGNORE INTO timeline_items (
         id, timeline_id, track_id, asset_version_id, start_time, end_time,
         source_offset, speed, transform_json, fade_in, fade_out, transition,
+        transition_duration,
         effect_chain_json, color_grade_json, audio_settings_json, notes, status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run as (...params: unknown[]) => unknown)(
       item.id,
       timelineId,
@@ -892,6 +1004,7 @@ export function restoreSnapshot(
       item.fade_in,
       item.fade_out,
       item.transition,
+      item.transition_duration ?? DEFAULT_TRANSITION_DURATION,
       item.effect_chain ? JSON.stringify(item.effect_chain) : null,
       item.color_grade ? JSON.stringify(item.color_grade) : null,
       item.audio_settings ? JSON.stringify(item.audio_settings) : null,

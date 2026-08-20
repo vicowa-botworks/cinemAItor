@@ -71,6 +71,32 @@ function optionalString(body: Record<string, unknown>, key: string): string | un
   return value;
 }
 
+/** Like optionalString but `null` is accepted (clears the field on updates). */
+function optionalNullableString(
+  body: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") throw badRequest(`${key} must be a string`);
+  return value;
+}
+
+/** Like optionalNumber but `null` is accepted (clears the field on updates). */
+function optionalNullableNumber(
+  body: Record<string, unknown>,
+  key: string,
+): number | null | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw badRequest(`${key} must be a number`);
+  }
+  return value;
+}
+
 function optionalNumber(body: Record<string, unknown>, key: string): number | undefined {
   const value = body[key];
   if (value === undefined) return undefined;
@@ -100,17 +126,30 @@ function optionalJsonObject(
   body: Record<string, unknown>,
   key: string,
 ): Record<string, unknown> | undefined {
+  const value = optionalNullableJsonObject(body, key);
+  return value === null ? undefined : value;
+}
+
+function optionalNullableJsonObject(
+  body: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null | undefined {
   const value = body[key];
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
     throw badRequest(`${key} must be a JSON object`);
   }
   return value as Record<string, unknown>;
 }
 
-function optionalJsonArray(body: Record<string, unknown>, key: string): unknown[] | undefined {
+function optionalNullableJsonArray(
+  body: Record<string, unknown>,
+  key: string,
+): unknown[] | null | undefined {
   const value = body[key];
   if (value === undefined) return undefined;
+  if (value === null) return null;
   if (!Array.isArray(value)) throw badRequest(`${key} must be a JSON array`);
   return value;
 }
@@ -126,11 +165,12 @@ function itemInputFrom(body: Record<string, unknown>, partial = false): Partial<
     source_offset: optionalNumber(body, "source_offset"),
     speed: optionalNumber(body, "speed"),
     transform: optionalJsonObject(body, "transform"),
-    fade_in: optionalNumber(body, "fade_in"),
-    fade_out: optionalNumber(body, "fade_out"),
-    transition: optionalString(body, "transition"),
-    effect_chain: optionalJsonArray(body, "effect_chain"),
-    color_grade: optionalJsonObject(body, "color_grade"),
+    fade_in: optionalNullableNumber(body, "fade_in"),
+    fade_out: optionalNullableNumber(body, "fade_out"),
+    transition: optionalNullableString(body, "transition"),
+    transition_duration: optionalNullableNumber(body, "transition_duration"),
+    effect_chain: optionalNullableJsonArray(body, "effect_chain"),
+    color_grade: optionalNullableJsonObject(body, "color_grade"),
     audio_settings: optionalJsonObject(body, "audio_settings"),
     notes: optionalString(body, "notes"),
   };

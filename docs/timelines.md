@@ -20,6 +20,20 @@ snapshots (Workstream 10, Milestone 5).
   Restore replaces the timeline's tracks/items/markers with the snapshot contents (original row ids
   preserved). Max 32 tracks / 1024 items enforced on creation.
 
+## Item fx (applied at render time)
+
+- **Transition** (`transition`): blend between an item and the one preceding it —
+  `cut | fade | dissolve | wipeleft | wiperight | slideleft | slideright` (default `cut` = hard
+  cut). `transition_duration` (seconds, default 0.5, max 3) sets the blend length.
+- **Fades** (`fade_in` / `fade_out`): fade lengths in seconds; each must be shorter than the item
+  duration.
+- **Color grade** (`color_grade`): JSON object with optional `brightness` (-1..1), `contrast`
+  (0.25..4), `saturation` (0..2), `temperature` (-1..1). Unknown keys or out-of-range values are
+  rejected with 400.
+
+Sending `null` for any item field in a PATCH clears it (back to the plain setting); omitting the
+field keeps the stored value.
+
 All endpoints require authentication and follow project permissions (read for fetches, write for
 mutations).
 

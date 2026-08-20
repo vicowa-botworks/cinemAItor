@@ -162,6 +162,59 @@ describe("timelines api", () => {
         assertEquals(patched.status, 200);
         assertEquals((patched.json as { end_time: number }).end_time, 6);
 
+        // Per-item fx: create, reject invalid, clear via null.
+        const fxPatch = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${item1.id}`,
+          {
+            transition: "dissolve",
+            transition_duration: 0.75,
+            fade_in: 0.2,
+            color_grade: { brightness: 0.1 },
+          },
+          ownerToken,
+        );
+        assertEquals(fxPatch.status, 200);
+        const fxItem = fxPatch.json as {
+          transition: string | null;
+          transition_duration: number;
+          color_grade: Record<string, unknown> | null;
+        };
+        assertEquals(fxItem.transition, "dissolve");
+        assertEquals(fxItem.transition_duration, 0.75);
+        assertEquals(fxItem.color_grade?.brightness, 0.1);
+
+        const badTransition = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${item1.id}`,
+          { transition: "crossfade" },
+          ownerToken,
+        );
+        assertEquals(badTransition.status, 400);
+        const badGrade = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${item1.id}`,
+          { color_grade: { gamma: 2 } },
+          ownerToken,
+        );
+        assertEquals(badGrade.status, 400);
+
+        const cleared = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/items/${item1.id}`,
+          { transition: null, fade_in: null, color_grade: null },
+          ownerToken,
+        );
+        assertEquals(cleared.status, 200);
+        const clearedItem = cleared.json as {
+          transition: string | null;
+          fade_in: number | null;
+          color_grade: Record<string, unknown> | null;
+        };
+        assertEquals(clearedItem.transition, null);
+        assertEquals(clearedItem.fade_in, null);
+        assertEquals(clearedItem.color_grade, null);
+
         // Duplicate at a given time.
         const dup = await req(
           "POST",

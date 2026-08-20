@@ -16,10 +16,17 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   `queued` by `recoverStaleRenderJobs`. The in-process render runner polls every 250 ms, claims one
   job per poll, and executes it.
 - **Engines** implement `RenderEngine.render(plan, hooks)` in `services/render_engine.ts`:
-  - `FfmpegRenderEngine` — concatenates the timeline's video/overlay items with
-    `ffmpeg -f concat -c copy` (fast, stream copy; per-item effects are not applied yet).
-  - `MockRenderEngine` — deterministic placeholder output (seeded from `output_path` + duration,
-    valid minimal WAV for the `wav` format) so rendering works on machines without ffmpeg.
+  - `FfmpegRenderEngine` — two paths, chosen per plan:
+    - **No fx** (all items hard-cut, no fades, no grade): lossless concat demuxer
+      (`ffmpeg -f concat -c copy`), stream copy.
+    - **With fx**: one input per item plus a filter graph — per-item `eq` (brightness/contrast/
+      saturation), `colortemperature` (grade temperature → Kelvin), `fade` in/out — chained with
+      `xfade` for real transitions and the `concat` filter for hard cuts, re-encoded to H.264. The
+      fx pass is video-only (`-an`): per-track audio placement is a separate render concern not yet
+      modelled in the plan.
+  - `MockRenderEngine` — deterministic placeholder output (seeded from `output_path` + duration +
+    per-item fx fingerprint, valid minimal WAV for the `wav` format) so rendering works on machines
+    without ffmpeg.
   - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
     `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
