@@ -157,9 +157,9 @@ function optionalNullableJsonArray(
 function itemInputFrom(body: Record<string, unknown>, partial = false): Partial<ItemInput> {
   return {
     track_id: partial ? optionalString(body, "track_id") : (body.track_id as string),
-    asset_version_id: partial
-      ? optionalString(body, "asset_version_id")
-      : (body.asset_version_id as string),
+    asset_version_id: optionalNullableString(body, "asset_version_id"),
+    text: optionalNullableString(body, "text"),
+    text_style: optionalNullableJsonObject(body, "text_style"),
     start_time: optionalNumber(body, "start_time"),
     end_time: optionalNumber(body, "end_time"),
     source_offset: optionalNumber(body, "source_offset"),

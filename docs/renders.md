@@ -17,21 +17,23 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   job per poll, and executes it.
 - **Engines** implement `RenderEngine.render(plan, hooks)` in `services/render_engine.ts`:
   - `FfmpegRenderEngine` — two paths, chosen per plan:
-    - **No fx** (all items hard-cut, no fades, no grade): lossless concat demuxer
+    - **No fx** (all items hard-cut, no fades, no grade, no text overlays): lossless concat demuxer
       (`ffmpeg -f concat -c copy`), stream copy.
     - **With fx**: one input per item plus a filter graph — per-item `eq` (brightness/contrast/
       saturation), `colortemperature` (grade temperature → Kelvin), `fade` in/out — chained with
-      `xfade` for real transitions and the `concat` filter for hard cuts, re-encoded to H.264. The
-      fx pass is video-only (`-an`): per-track audio placement is a separate render concern not yet
-      modelled in the plan.
+      `xfade` for real transitions and the `concat` filter for hard cuts; text overlays are drawn in
+      a final `drawtext` stage (per-overlay `enable=between(t, start, end)`, position/size/color
+      from the item's `text_style`). Re-encodes to H.264. The fx pass is video-only (`-an`):
+      per-track audio placement is a separate render concern not yet modelled in the plan.
   - `MockRenderEngine` — deterministic placeholder output (seeded from `output_path` + duration +
-    per-item fx fingerprint, valid minimal WAV for the `wav` format) so rendering works on machines
-    without ffmpeg.
+    per-item fx and text-overlay fingerprint, valid minimal WAV for the `wav` format) so rendering
+    works on machines without ffmpeg.
   - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
     `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
-  resolved to its asset version's stored file. The plan is passed to the engine with progress and
-  `isCancelled` hooks.
+  resolved to its asset version's stored file; plus the active text overlays from unlocked
+  `text`/`subtitle` tracks (text items sorted by start time). The plan is passed to the engine with
+  progress and `isCancelled` hooks.
 - **Validation**: after rendering, the output must exist, be non-empty and match the preset's
   extension; the outcome (including `file_size` and per-check booleans) is stored as
   `validation_report_json` on the job. Failures fail the job.

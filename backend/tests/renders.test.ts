@@ -25,10 +25,12 @@ import {
 } from "../src/db/renders.ts";
 import { type RenderRunner, startRenderRunner } from "../src/services/render_runner.ts";
 import {
+  buildDrawTextFilter,
   buildFxArgs,
   MockRenderEngine,
   type RenderInputItem,
   type RenderPlan,
+  type RenderTextOverlay,
   setRenderEngine,
 } from "../src/services/render_engine.ts";
 import { getContentStore, resetContentStore } from "../src/storage/content_store.ts";
@@ -228,12 +230,16 @@ describe("renders", () => {
       fade_out: 0,
       color_grade: null as Record<string, number> | null,
     };
-    const planFor = (items: RenderInputItem[]): RenderPlan => ({
+    const planFor = (
+      items: RenderInputItem[],
+      text_overlays: RenderTextOverlay[] = [],
+    ): RenderPlan => ({
       output_path: "/tmp/fx-out.mp4",
       filename: "fx-out.mp4",
       format: "mp4",
       preset: null,
       items,
+      text_overlays,
       total_duration: items.reduce((s, i) => s + i.duration, 0),
     });
     const engine = new MockRenderEngine();
@@ -268,16 +274,66 @@ describe("renders", () => {
     Deno.removeSync("/tmp/fx-out.mp4");
 
     // ffmpeg fx command: xfade for transitions, eq/fade chain for the grade.
-    const fxArgs = buildFxArgs(planFx.items, "/tmp/out.mp4");
+    const fxArgs = buildFxArgs(planFx.items, [], "/tmp/out.mp4");
     const fc = fxArgs[fxArgs.indexOf("-filter_complex") + 1];
     assert(fc.includes("xfade=transition=dissolve"));
     assert(fc.includes("eq=brightness=0.1"));
     assert(fc.includes("colortemperature=temperature=7250"));
     assert(fc.includes("fade=t=out:st=1.75:d=0.25"));
-    const concatArgs = buildFxArgs(planNoFx.items, "/tmp/out.mp4");
+    const concatArgs = buildFxArgs(planNoFx.items, [], "/tmp/out.mp4");
     const fc2 = concatArgs[concatArgs.indexOf("-filter_complex") + 1];
     assert(fc2.includes("concat=n=2:v=1:a=0"));
     assert(!fc2.includes("xfade"));
+
+    // Text overlays: deterministic output changes with them (mock engine).
+    const overlay: RenderTextOverlay = {
+      start_time: 0.5,
+      end_time: 1.5,
+      duration: 1,
+      text: "Hello, world",
+      style: { position: "bottom", font_size: 32 },
+    };
+    await engine.render(planFor(planFx.items, [overlay]), noopHooks);
+    const withOverlay = await Deno.readFile("/tmp/fx-out.mp4");
+    Deno.removeSync("/tmp/fx-out.mp4");
+    assertNotEquals(withFx, withOverlay);
+
+    // ffmpeg fx command draws text overlays in a final drawtext stage.
+    const overlayArgs = buildFxArgs(planFx.items, [overlay], "/tmp/out.mp4");
+    const fc3 = overlayArgs[overlayArgs.indexOf("-filter_complex") + 1];
+    assert(fc3.includes("drawtext=text='Hello, world'"));
+    assert(fc3.includes("enable='between(t,0.5,1.5)'"));
+    assert(fc3.includes("fontsize=32"));
+    assert(overlayArgs[overlayArgs.indexOf("-map") + 1] === "[out]");
+
+    // drawtext details: quoting, defaults, positions.
+    const quoted = buildDrawTextFilter({
+      start_time: 0,
+      end_time: 1,
+      duration: 1,
+      text: "it's a test",
+      style: null,
+    });
+    assert(quoted.includes("text='it''s a test'"));
+    assert(quoted.includes("fontsize=24"));
+    assert(quoted.includes("fontcolor=white"));
+    assert(quoted.includes("y=h-text_h-h*0.05"));
+    const top = buildDrawTextFilter({
+      start_time: 0,
+      end_time: 1,
+      duration: 1,
+      text: "x",
+      style: { position: "top", margin: 10 },
+    });
+    assert(top.includes("y=h*0.1"));
+    const middle = buildDrawTextFilter({
+      start_time: 0,
+      end_time: 1,
+      duration: 1,
+      text: "x",
+      style: { position: "middle" },
+    });
+    assert(middle.includes("y=(h-text_h)/2"));
   });
 
   it("renders timelines with fx items end to end", async () => {

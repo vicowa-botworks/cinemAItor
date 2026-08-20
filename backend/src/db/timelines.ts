@@ -45,7 +45,10 @@ export interface TimelineItem {
   id: string;
   timeline_id: string;
   track_id: string;
-  asset_version_id: string;
+  asset_version_id: string | null;
+  /** Inline text payload for items on text/subtitle tracks (rendered as overlay). */
+  item_text: string | null;
+  text_style: Record<string, unknown> | null;
   start_time: number;
   end_time: number;
   source_offset: number;
@@ -128,7 +131,9 @@ export function rowToItem(row: Record<string, unknown>): TimelineItem {
     id: row.id as string,
     timeline_id: row.timeline_id as string,
     track_id: row.track_id as string,
-    asset_version_id: row.asset_version_id as string,
+    asset_version_id: (row.asset_version_id as string | null) ?? null,
+    item_text: (row.item_text as string | null) ?? null,
+    text_style: parseJson<Record<string, unknown> | null>(row.text_style_json, null),
     start_time: asNum(row.start_time) ?? 0,
     end_time: asNum(row.end_time) ?? 0,
     source_offset: asNum(row.source_offset) ?? 0,
@@ -594,7 +599,8 @@ export function validateItemFx(
 
 export interface ItemInput {
   track_id: string;
-  asset_version_id: string;
+  /** Required for media items; optional (nullable) for text/subtitle overlays. */
+  asset_version_id: string | null;
   start_time: number;
   end_time: number;
   source_offset?: number;
@@ -608,6 +614,100 @@ export interface ItemInput {
   color_grade?: Record<string, unknown> | null;
   audio_settings?: Record<string, unknown> | null;
   notes?: string | null;
+  /** Inline text overlay; only allowed on text/subtitle tracks. */
+  text?: string | null;
+  text_style?: Record<string, unknown> | null;
+}
+
+export const TEXT_TRACK_TYPES = ["text", "subtitle"] as const;
+
+const MAX_TEXT_LENGTH = 512;
+const TEXT_POSITIONS = ["top", "middle", "bottom"] as const;
+const TEXT_COLORS = new Set([
+  "white",
+  "black",
+  "red",
+  "green",
+  "blue",
+  "yellow",
+  "cyan",
+  "magenta",
+]);
+
+function validateTextOverlay(
+  track: Track,
+  input: { text?: string | null; text_style?: Record<string, unknown> | null },
+): void {
+  const isTextTrack = (TEXT_TRACK_TYPES as readonly string[]).includes(track.track_type);
+  const text = input.text;
+  if (text === undefined) return;
+  if (text === null) {
+    if (!isTextTrack) throw badRequest("text can only be set on text or subtitle tracks");
+    return;
+  }
+  if (!isTextTrack) {
+    throw badRequest("text overlays are only allowed on text or subtitle tracks");
+  }
+  if (typeof text !== "string") throw badRequest("text must be a string");
+  if (text.length === 0) throw badRequest("text must not be empty");
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw badRequest(`text is too long (max ${MAX_TEXT_LENGTH} characters)`);
+  }
+  const style = input.text_style;
+  if (style !== undefined && style !== null) {
+    if (typeof style !== "object" || Array.isArray(style)) {
+      throw badRequest("text_style must be a JSON object");
+    }
+    if (
+      style.font_size !== undefined &&
+      (typeof style.font_size !== "number" || !Number.isInteger(style.font_size) ||
+        style.font_size < 1 || style.font_size > 200)
+    ) {
+      throw badRequest("text_style.font_size must be an integer between 1 and 200");
+    }
+    if (style.font_color !== undefined) {
+      const c = style.font_color;
+      const ok = typeof c === "string" &&
+        (TEXT_COLORS.has(c.toLowerCase()) || /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c));
+      if (!ok) {
+        throw badRequest(
+          "text_style.font_color must be a name or a #RGB/#RRGGBB hex value",
+        );
+      }
+    }
+    if (
+      style.position !== undefined &&
+      !(TEXT_POSITIONS as readonly string[]).includes(style.position as string)
+    ) {
+      throw badRequest(`text_style.position must be one of: ${TEXT_POSITIONS.join(", ")}`);
+    }
+    if (
+      style.margin !== undefined &&
+      (typeof style.margin !== "number" || style.margin < 0 || style.margin > 100)
+    ) {
+      throw badRequest("text_style.margin must be a number between 0 and 100");
+    }
+    const known = new Set(["font_size", "font_color", "position", "margin"]);
+    for (const key of Object.keys(style)) {
+      if (!known.has(key)) throw badRequest(`unknown text_style parameter: ${key}`);
+    }
+  }
+}
+
+function requireVersionForItem(
+  track: Track,
+  input: { asset_version_id: string | null; text?: string | null },
+): string | null {
+  if (input.asset_version_id) {
+    const version = getAssetVersion(input.asset_version_id);
+    if (!version) throw badRequest("asset_version_id does not reference a version");
+    return version.id;
+  }
+  // Text items may be versionless; media tracks require a version.
+  if (!(TEXT_TRACK_TYPES as readonly string[]).includes(track.track_type)) {
+    throw badRequest("asset_version_id is required for items on media tracks");
+  }
+  return null;
 }
 
 /** Serialize an optional JSON column value (`null`/`undefined` -> SQL NULL). */
@@ -631,8 +731,7 @@ export function createItem(
     );
   }
   const track = requireWritableTrack(timelineId, input.track_id, userId);
-  const version = getAssetVersion(input.asset_version_id);
-  if (!version) throw badRequest("asset_version_id does not reference a version");
+  const versionId = requireVersionForItem(track, input);
 
   validatePlacement({
     start_time: input.start_time,
@@ -641,22 +740,26 @@ export function createItem(
     speed: input.speed ?? 1,
   });
   validateItemFx(input, input.end_time - input.start_time);
+  validateTextOverlay(track, input);
 
   const id = crypto.randomUUID();
   const now = nowIso();
   (db.prepare(
     `INSERT INTO timeline_items (
-      id, timeline_id, track_id, asset_version_id, start_time, end_time,
+      id, timeline_id, track_id, asset_version_id, item_text, text_style_json,
+      start_time, end_time,
       source_offset, speed, transform_json, fade_in, fade_out, transition,
       transition_duration,
       effect_chain_json, color_grade_json, audio_settings_json, notes, status,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
   ).run as (...params: unknown[]) => unknown)(
     id,
     timelineId,
     track.id,
-    version.id,
+    versionId,
+    input.text ?? null,
+    jsonOrNull(input.text_style),
     input.start_time,
     input.end_time,
     input.source_offset ?? 0,
@@ -712,22 +815,37 @@ export function updateItem(
     },
     next.end_time - next.start_time,
   );
-  if (patch.asset_version_id !== undefined) {
-    const version = getAssetVersion(patch.asset_version_id);
+  const nextVersionId = patch.asset_version_id !== undefined
+    ? patch.asset_version_id
+    : item.asset_version_id;
+  if (nextVersionId) {
+    const version = getAssetVersion(nextVersionId);
     if (!version) throw badRequest("asset_version_id does not reference a version");
+  }
+  const isTextTrack = (TEXT_TRACK_TYPES as readonly string[]).includes(nextTrack.track_type);
+  const nextText = patch.text !== undefined ? patch.text : item.item_text;
+  validateTextOverlay(nextTrack, {
+    text: patch.text !== undefined ? patch.text : item.item_text ?? undefined,
+    text_style: patch.text_style !== undefined ? patch.text_style : item.text_style,
+  });
+  if (!isTextTrack && !nextVersionId) {
+    throw badRequest("asset_version_id is required for items on media tracks");
   }
 
   (getDb().prepare(
     `UPDATE timeline_items SET
-       track_id = ?, asset_version_id = ?, start_time = ?, end_time = ?,
+       track_id = ?, asset_version_id = ?, item_text = ?, text_style_json = ?,
+       start_time = ?, end_time = ?,
        source_offset = ?, speed = ?, transform_json = ?, fade_in = ?, fade_out = ?,
        transition = ?, transition_duration = ?, effect_chain_json = ?,
        color_grade_json = ?,
        audio_settings_json = ?, notes = ?, status = ?, updated_at = ?
-     WHERE id = ?`,
+      WHERE id = ?`,
   ).run as (...params: unknown[]) => unknown)(
     nextTrack.id,
-    patch.asset_version_id ?? item.asset_version_id,
+    nextVersionId,
+    nextText,
+    jsonOrNull(patch.text_style === undefined ? item.text_style : patch.text_style),
     next.start_time,
     next.end_time,
     next.source_offset,
@@ -782,6 +900,8 @@ export function duplicateItem(
     color_grade: item.color_grade ?? undefined,
     audio_settings: item.audio_settings ?? undefined,
     notes: item.notes ?? undefined,
+    text: item.item_text ?? undefined,
+    text_style: item.text_style ?? undefined,
   });
 }
 

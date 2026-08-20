@@ -15,6 +15,15 @@ export interface RenderInputItem {
   color_grade: Record<string, number> | null;
 }
 
+/** Text/subtitle overlay drawn on top of the video during the fx pass. */
+export interface RenderTextOverlay {
+  start_time: number;
+  end_time: number;
+  duration: number;
+  text: string;
+  style: Record<string, unknown> | null;
+}
+
 /** True when any item carries per-item fx that force a re-encoding render. */
 export function planHasFx(items: RenderInputItem[]): boolean {
   return items.some(
@@ -32,6 +41,7 @@ export interface RenderPlan {
   format: string;
   preset: RenderPreset | null;
   items: RenderInputItem[];
+  text_overlays: RenderTextOverlay[];
   total_duration: number;
 }
 
@@ -91,16 +101,45 @@ function round2(x: number): number {
   return Math.round(x * 100) / 100;
 }
 
+/** Escape text for use inside a single-quoted ffmpeg filter argument. */
+function escapeFilterText(text: string): string {
+  return text.replace(/'/g, "''");
+}
+
+/** One `drawtext` filter stage for a text overlay (defaults: 24, white, bottom). */
+export function buildDrawTextFilter(overlay: RenderTextOverlay): string {
+  const style = overlay.style ?? {};
+  const size = typeof style.font_size === "number" ? style.font_size : 24;
+  const color = typeof style.font_color === "string" ? style.font_color : "white";
+  const margin = typeof style.margin === "number" ? style.margin / 100 : 0.05;
+  const position: string = style.position === "top" || style.position === "middle"
+    ? style.position
+    : "bottom";
+  const y = position === "top"
+    ? `h*${margin}`
+    : position === "middle"
+    ? "(h-text_h)/2"
+    : `h-text_h-h*${margin}`;
+  return `drawtext=text='${escapeFilterText(overlay.text)}':fontsize=${size}` +
+    `:fontcolor=${color}:x=(w-text_w)/2:y=${y}` +
+    `:enable='between(t,${round2(overlay.start_time)},${round2(overlay.end_time)})'`;
+}
+
 /**
  * Build the ffmpeg command for a plan whose items carry per-item fx
- * (transitions, fades, color grade): one input per item, a filter graph that
- * grades and fades each video input, and pairwise `xfade` (real transitions)
- * or `concat` (hard cuts) between consecutive items. Re-encodes to H.264.
+ * (transitions, fades, color grade) or text overlays: one input per item, a
+ * filter graph that grades and fades each video input, pairwise `xfade` (real
+ * transitions) or `concat` (hard cuts) between consecutive items, and a final
+ * `drawtext` stage per text overlay. Re-encodes to H.264.
  *
  * The fx pass is video-only (`-an`): per-track audio placement is a separate
  * render concern not yet modelled in the plan.
  */
-export function buildFxArgs(items: RenderInputItem[], outputPath: string): string[] {
+export function buildFxArgs(
+  items: RenderInputItem[],
+  textOverlays: RenderTextOverlay[],
+  outputPath: string,
+): string[] {
   const args: string[] = ["-v", "error", "-y"];
   for (const item of items) args.push("-i", item.file_path);
 
@@ -154,8 +193,15 @@ export function buildFxArgs(items: RenderInputItem[], outputPath: string): strin
     prev = `[x${i}]`;
   }
 
+  let finalLabel = prev;
+  if (textOverlays.length > 0) {
+    const textFilters = textOverlays.map((o) => buildDrawTextFilter(o));
+    filters.push(`${prev}${textFilters.join(",")}[out]`);
+    finalLabel = "[out]";
+  }
+
   args.push("-filter_complex", filters.join(";"));
-  args.push("-map", prev);
+  args.push("-map", finalLabel);
   args.push("-an");
   args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p");
   args.push(outputPath);
@@ -245,7 +291,7 @@ export class FfmpegRenderEngine implements RenderEngine {
     checkCancelled(hooks);
     hooks.onProgress(10);
     const child = new Deno.Command(this.binary, {
-      args: buildFxArgs(plan.items, plan.output_path),
+      args: buildFxArgs(plan.items, plan.text_overlays, plan.output_path),
       stdout: "null",
       stderr: "piped",
     }).spawn();
@@ -274,7 +320,8 @@ export class FfmpegRenderEngine implements RenderEngine {
   render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
     checkCancelled(hooks);
     hooks.onProgress(5);
-    return planHasFx(plan.items) ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);
+    const needsFxPass = planHasFx(plan.items) || plan.text_overlays.length > 0;
+    return needsFxPass ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);
   }
 }
 
@@ -306,14 +353,21 @@ function seedFromText(text: string): number {
  * Stable serialization of the per-item fx carried on a plan; mixed into the
  * mock engine's seed so different fx produce different output bytes.
  */
-export function fxFingerprint(items: RenderInputItem[]): string {
-  return items
+export function fxFingerprint(
+  items: RenderInputItem[],
+  textOverlays: RenderTextOverlay[] = [],
+): string {
+  const itemPart = items
     .map((i) =>
       `${i.transition}:${i.transition_duration}:${i.fade_in}:${i.fade_out}:${
         JSON.stringify(i.color_grade ?? null)
       }`
     )
     .join("|");
+  const overlayPart = textOverlays
+    .map((o) => `${o.start_time}-${o.end_time}:${o.text}:${JSON.stringify(o.style ?? null)}`)
+    .join("|");
+  return overlayPart === "" ? itemPart : `${itemPart}##${overlayPart}`;
 }
 
 /**
@@ -327,7 +381,10 @@ export class MockRenderEngine implements RenderEngine {
 
   async render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
     const rand = xorshift(
-      seedFromText(plan.output_path + plan.total_duration + fxFingerprint(plan.items)),
+      seedFromText(
+        plan.output_path + plan.total_duration +
+          fxFingerprint(plan.items, plan.text_overlays),
+      ),
     );
     const chunks: number[] = [];
     const targetBytes = Math.max(4096, Math.min(1 << 20, Math.ceil(plan.total_duration * 8000)));

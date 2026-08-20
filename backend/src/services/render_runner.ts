@@ -14,7 +14,7 @@ import {
   type RenderPreset,
   updateRenderProgress,
 } from "../db/renders.ts";
-import { listItems, listTracks } from "../db/timelines.ts";
+import { listItems, listTracks, TEXT_TRACK_TYPES } from "../db/timelines.ts";
 import { createAsset, createAssetVersion, getAssetBySlug, getAssetVersion } from "../db/assets.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import {
@@ -148,7 +148,7 @@ async function buildPlan(
     .filter((i) => i.status !== "archived" && renderableTrackIds.includes(i.track_id))
     .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
     .map((i) => {
-      const version = getAssetVersion(i.asset_version_id);
+      const version = i.asset_version_id ? getAssetVersion(i.asset_version_id) : undefined;
       if (!version?.file_path) {
         throw new RenderFailedError(
           `No file for asset version ${i.asset_version_id}`,
@@ -170,6 +170,22 @@ async function buildPlan(
     throw new RenderFailedError("Timeline has no renderable video items");
   }
 
+  const textTrackIds = tracks
+    .filter((t) => (TEXT_TRACK_TYPES as readonly string[]).includes(t.track_type) && !t.locked)
+    .map((t) => t.id);
+  const textOverlays = items
+    .filter(
+      (i) => i.status === "active" && i.item_text !== null && textTrackIds.includes(i.track_id),
+    )
+    .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
+    .map((i) => ({
+      start_time: i.start_time,
+      end_time: i.end_time,
+      duration: Math.max(0.01, i.end_time - i.start_time),
+      text: i.item_text as string,
+      style: i.text_style,
+    }));
+
   const config = loadConfig();
   const outDir = join(config.appDataDir, "projects", job.project_id, "output");
   await Deno.mkdir(outDir, { recursive: true });
@@ -180,6 +196,7 @@ async function buildPlan(
     format: preset?.output_format ?? "mp4",
     preset,
     items: planItems,
+    text_overlays: textOverlays,
     total_duration: planItems.reduce((sum, i) => sum + i.duration, 0),
   };
 }
