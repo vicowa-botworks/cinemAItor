@@ -23,6 +23,11 @@ import {
   validateAdjustments,
 } from "@cinemaItor/services/audio_info.ts";
 import {
+  AUDIO_GENERATION_KINDS,
+  type AudioGenerationKind,
+  generateAudio,
+} from "@cinemaItor/services/creative_generation.ts";
+import {
   badRequest,
   forbidden,
   notFound,
@@ -116,6 +121,29 @@ export const audioRouter = new Router()
     }
     const unique = new Map(results.map((a) => [a.id, a]));
     ctx.response.body = [...unique.values()];
+  })
+  .post("/api/v1/audio/generate", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const raw = await readOptionalBody(ctx);
+    const kind = raw.kind as AudioGenerationKind;
+    if (!AUDIO_GENERATION_KINDS.some((k) => k === kind)) {
+      throw badRequest(
+        `kind must be one of: ${AUDIO_GENERATION_KINDS.join(", ")}`,
+      );
+    }
+    const result = generateAudio(userId, {
+      kind,
+      prompt: typeof raw.prompt === "string" ? raw.prompt : "",
+      project_id: typeof raw.project_id === "string" ? raw.project_id : undefined,
+      scene_id: typeof raw.scene_id === "string" ? raw.scene_id : undefined,
+      model_id: typeof raw.model_id === "string" ? raw.model_id : undefined,
+      seed: typeof raw.seed === "string" ? raw.seed : undefined,
+      settings: raw.settings && typeof raw.settings === "object"
+        ? raw.settings as Record<string, unknown>
+        : undefined,
+    });
+    ctx.response.status = 202;
+    ctx.response.body = result;
   })
   .post("/api/v1/audio/upload", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
