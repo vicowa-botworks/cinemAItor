@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import * as schema from "../src/db/schema.ts";
 import { getDb, resetDb } from "../src/db/database.ts";
 import { createProject } from "../src/db/projects.ts";
 import { createAsset, createAssetVersion } from "../src/db/assets.ts";
-import { createItem, createTimeline, createTrack } from "../src/db/timelines.ts";
+import {
+  createItem,
+  createTimeline,
+  createTrack,
+  getItem,
+  updateItem,
+} from "../src/db/timelines.ts";
 import {
   cancelRenderJob,
   createPreset,
@@ -18,7 +24,13 @@ import {
   TERMINAL_RENDER_STATUSES,
 } from "../src/db/renders.ts";
 import { type RenderRunner, startRenderRunner } from "../src/services/render_runner.ts";
-import { MockRenderEngine, setRenderEngine } from "../src/services/render_engine.ts";
+import {
+  buildFxArgs,
+  MockRenderEngine,
+  type RenderInputItem,
+  type RenderPlan,
+  setRenderEngine,
+} from "../src/services/render_engine.ts";
 import { getContentStore, resetContentStore } from "../src/storage/content_store.ts";
 
 let ownerId: number;
@@ -201,6 +213,113 @@ describe("renders", () => {
 
     // Cancel after terminal state -> conflict.
     assertThrows(() => cancelRenderJob(job.id), Error, "already succeeded");
+  });
+
+  it("applies per-item fx (transition / fades / color grade) at render time", async () => {
+    const noopHooks = { onProgress: () => {}, isCancelled: () => false };
+    const base = {
+      file_path: "/tmp/media.mp4",
+      start_time: 0,
+      end_time: 2,
+      duration: 2,
+      transition: "cut" as string,
+      transition_duration: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+      color_grade: null as Record<string, number> | null,
+    };
+    const planFor = (items: RenderInputItem[]): RenderPlan => ({
+      output_path: "/tmp/fx-out.mp4",
+      filename: "fx-out.mp4",
+      format: "mp4",
+      preset: null,
+      items,
+      total_duration: items.reduce((s, i) => s + i.duration, 0),
+    });
+    const engine = new MockRenderEngine();
+
+    const planNoFx = planFor([
+      { ...base },
+      { ...base, start_time: 2, end_time: 4 },
+    ]);
+    await engine.render(planNoFx, noopHooks);
+    const noFx = await Deno.readFile("/tmp/fx-out.mp4");
+    Deno.removeSync("/tmp/fx-out.mp4");
+
+    const planFx = planFor([
+      { ...base },
+      {
+        ...base,
+        start_time: 2,
+        end_time: 4,
+        transition: "dissolve",
+        fade_out: 0.25,
+        color_grade: { brightness: 0.1, temperature: 0.3 },
+      },
+    ]);
+    await engine.render(planFx, noopHooks);
+    const withFx = await Deno.readFile("/tmp/fx-out.mp4");
+    Deno.removeSync("/tmp/fx-out.mp4");
+    assertNotEquals(noFx, withFx);
+
+    // Same fx plan again: identical bytes (deterministic).
+    await engine.render(planFx, noopHooks);
+    assertEquals(await Deno.readFile("/tmp/fx-out.mp4"), withFx);
+    Deno.removeSync("/tmp/fx-out.mp4");
+
+    // ffmpeg fx command: xfade for transitions, eq/fade chain for the grade.
+    const fxArgs = buildFxArgs(planFx.items, "/tmp/out.mp4");
+    const fc = fxArgs[fxArgs.indexOf("-filter_complex") + 1];
+    assert(fc.includes("xfade=transition=dissolve"));
+    assert(fc.includes("eq=brightness=0.1"));
+    assert(fc.includes("colortemperature=temperature=7250"));
+    assert(fc.includes("fade=t=out:st=1.75:d=0.25"));
+    const concatArgs = buildFxArgs(planNoFx.items, "/tmp/out.mp4");
+    const fc2 = concatArgs[concatArgs.indexOf("-filter_complex") + 1];
+    assert(fc2.includes("concat=n=2:v=1:a=0"));
+    assert(!fc2.includes("xfade"));
+  });
+
+  it("renders timelines with fx items end to end", async () => {
+    const db = getDb();
+    const row = db.prepare(
+      "SELECT asset_version_id, track_id FROM timeline_items ORDER BY start_time LIMIT 1",
+    ).get() as { asset_version_id: string; track_id: string };
+    const second = createItem(ownerId, timelineId, {
+      track_id: row.track_id,
+      asset_version_id: row.asset_version_id,
+      start_time: 2,
+      end_time: 4,
+      transition: "dissolve",
+      transition_duration: 0.5,
+      fade_out: 0.25,
+      color_grade: { brightness: 0.1, saturation: 1.2, temperature: 0.3 },
+    });
+    assertEquals(second.transition, "dissolve");
+    assertEquals(second.transition_duration, 0.5);
+
+    const job = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    runner = startRenderRunner({ pollMs: 5 });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job.id)?.status ?? ""));
+    const done = rawGetRenderJob(job.id);
+    assert(done?.status === "succeeded");
+    assert(done?.validation_report?.ok === true);
+
+    // Clearing the fx via null restores the plain render path.
+    updateItem(ownerId, timelineId, second.id, {
+      transition: "cut",
+      fade_out: null,
+      color_grade: null,
+    });
+    const cleared = getItem(timelineId, second.id, ownerId);
+    assert(cleared);
+    assertEquals(cleared.transition, "cut");
+    assertEquals(cleared.fade_out, null);
+    assertEquals(cleared.color_grade, null);
   });
 
   it("cancels queued renders", () => {

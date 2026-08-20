@@ -77,6 +77,7 @@ describe("migrations", () => {
         "0010_render.sql",
         "0011_diagnostics.sql",
         "0012_backups.sql",
+        "0013_timeline_fx.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -94,12 +95,13 @@ describe("migrations", () => {
         "0010_render.sql",
         "0011_diagnostics.sql",
         "0012_backups.sql",
+        "0013_timeline_fx.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        12,
+        13,
       );
     } finally {
       db.close();
@@ -123,6 +125,7 @@ describe("migrations", () => {
       "0010_render.sql",
       "0011_diagnostics.sql",
       "0012_backups.sql",
+      "0013_timeline_fx.sql",
     ]);
   });
 

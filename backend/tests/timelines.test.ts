@@ -223,6 +223,90 @@ describe("timeline editor", () => {
     assertEquals(listItems(tl.id, ownerId).length, 0);
   });
 
+  it("validates item fx: transitions, transition duration, fades, color grade", () => {
+    const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
+    const track = createTrack(ownerId, tl.id, { track_type: "video", name: "V1" });
+    const item = {
+      track_id: track.id,
+      asset_version_id: versionId,
+      start_time: 0,
+      end_time: 2,
+    };
+
+    // Valid fx combination.
+    const ok = createItem(ownerId, tl.id, {
+      ...item,
+      transition: "wipeleft",
+      transition_duration: 1,
+      fade_in: 0.2,
+      fade_out: 0.4,
+      color_grade: {
+        brightness: -0.5,
+        contrast: 1.2,
+        saturation: 0.8,
+        temperature: 1,
+      },
+    });
+    assertEquals(ok.transition, "wipeleft");
+    assertEquals(ok.transition_duration, 1);
+    assertEquals(ok.color_grade?.temperature, 1);
+
+    // Invalid transition type.
+    assertThrows(
+      () => createItem(ownerId, tl.id, { ...item, transition: "crossfade" }),
+      Error,
+      "transition must be one of",
+    );
+    // Transition duration out of range.
+    assertThrows(
+      () => createItem(ownerId, tl.id, { ...item, transition_duration: 5 }),
+      Error,
+      "transition_duration",
+    );
+    // Fade longer than the item.
+    assertThrows(
+      () => createItem(ownerId, tl.id, { ...item, fade_out: 2 }),
+      Error,
+      "fade_out must be shorter",
+    );
+    // Unknown grade parameter.
+    assertThrows(
+      () => createItem(ownerId, tl.id, { ...item, color_grade: { gamma: 2 } }),
+      Error,
+      "unknown color_grade parameter",
+    );
+    // Grade value out of range.
+    assertThrows(
+      () => createItem(ownerId, tl.id, { ...item, color_grade: { brightness: 2 } }),
+      Error,
+      "color_grade.brightness",
+    );
+    // Non-numeric grade value.
+    assertThrows(
+      () => createItem(ownerId, tl.id, { ...item, color_grade: { contrast: "high" as never } }),
+      Error,
+      "color_grade.contrast",
+    );
+
+    // Update with merged values, and clearing via null.
+    const updated = updateItem(ownerId, tl.id, ok.id, {
+      transition: "fade",
+      fade_in: null,
+      fade_out: 0.1,
+      color_grade: null,
+    });
+    assert(updated);
+    assertEquals(updated.transition, "fade");
+    assertEquals(updated.fade_in, null);
+    assertEquals(updated.fade_out, 0.1);
+    assertEquals(updated.color_grade, null);
+    assertThrows(
+      () => updateItem(ownerId, tl.id, ok.id, { fade_out: 99 }),
+      Error,
+      "fade_out must be shorter",
+    );
+  });
+
   it("creates and deletes markers", () => {
     const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
     const m1 = createMarker(ownerId, tl.id, { time: 1.5, label: "cut" });

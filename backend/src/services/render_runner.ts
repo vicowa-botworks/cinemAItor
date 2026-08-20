@@ -159,6 +159,11 @@ async function buildPlan(
         start_time: i.start_time,
         end_time: i.end_time,
         duration: Math.max(0.01, i.end_time - i.start_time),
+        transition: i.transition ?? "cut",
+        transition_duration: i.transition_duration,
+        fade_in: i.fade_in ?? 0,
+        fade_out: i.fade_out ?? 0,
+        color_grade: i.color_grade as Record<string, number> | null,
       };
     });
   if (planItems.length === 0) {

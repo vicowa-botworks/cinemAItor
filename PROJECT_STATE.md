@@ -1,6 +1,8 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 in progress (audio generation + batch shot generation)
+## Current Status: Milestone 7 in progress (audio generation, batch shot generation, transitions +
+
+color grading)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -68,6 +70,12 @@ removed.
       each shot uses its own prompt when present, otherwise the scene prompt; shots without any
       prompt are skipped with a reason; on success the runner links each shot's
       `generated_asset_version_id` + status
+- [x] Transitions + color grading (Milestone 7 part 3): per-item transition type/duration, fade
+      in/out, and color grade (brightness/contrast/saturation/temperature) with strict validation;
+      null clears a field on updates; render plans carry the fx — ffmpeg engine uses a filter graph
+      (xfade/eq/colortemperature/fade, H.264 re-encode, video-only fx pass) when any item has fx and
+      keeps the lossless concat path otherwise; mock engine fingerprints fx into its deterministic
+      output
 
 ### In Progress
 
@@ -76,18 +84,19 @@ removed.
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 11 follow-ups: audio trim/gain rendering, waveforms in the timeline, basic mixer
-- [ ] Workstream 12 follow-ups: per-item effects/trim in the ffmpeg engine, frame-accurate cuts,
-      render farm / multiple render runners, progress from ffmpeg stats
+- [ ] Workstream 12 follow-ups: per-item source trimming in the ffmpeg engine, audio track placement
+      in renders (fx pass is video-only), frame-accurate cuts, render farm / multiple render
+      runners, progress from ffmpeg stats
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: transitions, color
-      grading, subtitles, text overlays, proxy workflow polish, skills (JSON/YAML v1), project
-      templates, advanced storage management, ducking, audio cleanup, subtitle generation from
-      dialogue/voiceover, A/B + version comparison improvements, model benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: subtitles, text
+      overlays, proxy workflow polish, skills (JSON/YAML v1), project templates, advanced storage
+      management, ducking, audio cleanup, subtitle generation from dialogue/voiceover, A/B + version
+      comparison improvements, model benchmark
 - [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues
@@ -108,3 +117,4 @@ removed.
   20 2026
 - Audio generation (music / voiceover / SFX): Thu Aug 20 2026
 - Batch shot generation: Thu Aug 20 2026
+- Transitions + color grading: Thu Aug 20 2026

@@ -7,6 +7,23 @@ export interface RenderInputItem {
   start_time: number;
   end_time: number;
   duration: number;
+  /** Blend between this item and the one preceding it. */
+  transition: string;
+  transition_duration: number;
+  fade_in: number;
+  fade_out: number;
+  color_grade: Record<string, number> | null;
+}
+
+/** True when any item carries per-item fx that force a re-encoding render. */
+export function planHasFx(items: RenderInputItem[]): boolean {
+  return items.some(
+    (i) =>
+      i.transition !== "cut" ||
+      i.fade_in > 0 ||
+      i.fade_out > 0 ||
+      (i.color_grade !== null && Object.keys(i.color_grade).length > 0),
+  );
 }
 
 export interface RenderPlan {
@@ -60,6 +77,91 @@ function checkCancelled(hooks: RenderHooks): void {
 // ffmpeg engine: concat of the timeline's video items (-c copy)
 // ---------------------------------------------------------------------------
 
+/** xfade transition name for each supported timeline transition. */
+const XFADE_NAMES: Record<string, string> = {
+  fade: "fade",
+  dissolve: "dissolve",
+  wipeleft: "wipeleft",
+  wiperight: "wiperight",
+  slideleft: "slideleft",
+  slideright: "slideright",
+};
+
+function round2(x: number): number {
+  return Math.round(x * 100) / 100;
+}
+
+/**
+ * Build the ffmpeg command for a plan whose items carry per-item fx
+ * (transitions, fades, color grade): one input per item, a filter graph that
+ * grades and fades each video input, and pairwise `xfade` (real transitions)
+ * or `concat` (hard cuts) between consecutive items. Re-encodes to H.264.
+ *
+ * The fx pass is video-only (`-an`): per-track audio placement is a separate
+ * render concern not yet modelled in the plan.
+ */
+export function buildFxArgs(items: RenderInputItem[], outputPath: string): string[] {
+  const args: string[] = ["-v", "error", "-y"];
+  for (const item of items) args.push("-i", item.file_path);
+
+  const filters: string[] = [];
+  for (const [i, item] of items.entries()) {
+    const chain: string[] = [];
+    const grade = item.color_grade ?? {};
+    if (
+      grade.brightness !== undefined || grade.contrast !== undefined ||
+      grade.saturation !== undefined
+    ) {
+      chain.push(
+        `eq=brightness=${grade.brightness ?? 0}` +
+          `:contrast=${grade.contrast ?? 1}:saturation=${grade.saturation ?? 1}`,
+      );
+    }
+    if (grade.temperature !== undefined && grade.temperature !== 0) {
+      chain.push(
+        `colortemperature=temperature=${Math.round(6500 + grade.temperature * 2500)}`,
+      );
+    }
+    if (item.fade_in > 0) {
+      chain.push(`fade=t=in:st=0:d=${round2(item.fade_in)}`);
+    }
+    if (item.fade_out > 0) {
+      const st = Math.max(0, round2(item.duration - item.fade_out));
+      chain.push(`fade=t=out:st=${st}:d=${round2(item.fade_out)}`);
+    }
+    filters.push(`[${i}:v]${chain.join(",")}[v${i}]`);
+  }
+
+  let acc = round2(items[0].duration);
+  let prev = "[v0]";
+  for (let i = 1; i < items.length; i++) {
+    const next = items[i];
+    if (next.transition !== "cut") {
+      const td = Math.max(
+        0.02,
+        Math.min(next.transition_duration, round2(acc - 0.02), round2(next.duration - 0.02)),
+      );
+      const offset = round2(acc - td);
+      filters.push(
+        `${prev}[v${i}]xfade=transition=${XFADE_NAMES[next.transition] ?? "fade"}` +
+          `:duration=${td}:offset=${offset}[x${i}]`,
+      );
+      acc = round2(acc + next.duration - td);
+    } else {
+      filters.push(`${prev}[v${i}]concat=n=2:v=1:a=0[x${i}]`);
+      acc = round2(acc + next.duration);
+    }
+    prev = `[x${i}]`;
+  }
+
+  args.push("-filter_complex", filters.join(";"));
+  args.push("-map", prev);
+  args.push("-an");
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p");
+  args.push(outputPath);
+  return args;
+}
+
 export class FfmpegRenderEngine implements RenderEngine {
   readonly name = "ffmpeg";
   private readonly binary: string;
@@ -68,9 +170,11 @@ export class FfmpegRenderEngine implements RenderEngine {
     this.binary = ffmpegPath;
   }
 
-  async render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
-    checkCancelled(hooks);
-    hooks.onProgress(5);
+  /** Fast path for fx-free timelines: lossless concat demuxer, stream copy. */
+  private async renderConcat(
+    plan: RenderPlan,
+    hooks: RenderHooks,
+  ): Promise<RenderResult> {
     const config = loadConfig();
     const listDir = join(config.appDataDir, "cache");
     try {
@@ -132,6 +236,46 @@ export class FfmpegRenderEngine implements RenderEngine {
       await Deno.remove(listPath).catch(() => {});
     }
   }
+
+  /** fx path: filter graph with per-item grade/fades and xfade transitions. */
+  private async renderFx(
+    plan: RenderPlan,
+    hooks: RenderHooks,
+  ): Promise<RenderResult> {
+    checkCancelled(hooks);
+    hooks.onProgress(10);
+    const child = new Deno.Command(this.binary, {
+      args: buildFxArgs(plan.items, plan.output_path),
+      stdout: "null",
+      stderr: "piped",
+    }).spawn();
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already exited
+      }
+    }, 300_000);
+    const stderr = await new Response(child.stderr).text();
+    const status = await child.status;
+    clearTimeout(timer);
+    checkCancelled(hooks);
+    if (!status.success) {
+      throw new RenderFailedError(
+        `ffmpeg exited with ${status.code}: ${stderr.slice(0, 500)}`,
+      );
+    }
+    hooks.onProgress(90);
+    const stat = await Deno.stat(plan.output_path);
+    hooks.onProgress(100);
+    return { output_path: plan.output_path, file_size: stat.size, ticks: 3 };
+  }
+
+  async render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
+    checkCancelled(hooks);
+    hooks.onProgress(5);
+    return planHasFx(plan.items) ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +303,20 @@ function seedFromText(text: string): number {
 }
 
 /**
+ * Stable serialization of the per-item fx carried on a plan; mixed into the
+ * mock engine's seed so different fx produce different output bytes.
+ */
+export function fxFingerprint(items: RenderInputItem[]): string {
+  return items
+    .map((i) =>
+      `${i.transition}:${i.transition_duration}:${i.fade_in}:${i.fade_out}:${
+        JSON.stringify(i.color_grade ?? null)
+      }`
+    )
+    .join("|");
+}
+
+/**
  * Produces a deterministic placeholder file so the full render pipeline
  * (queue, engine, validation, export record, provenance) works without
  * ffmpeg. For mp4 the bytes are a placeholder container; for wav a valid
@@ -168,7 +326,9 @@ export class MockRenderEngine implements RenderEngine {
   readonly name = "mock";
 
   async render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
-    const rand = xorshift(seedFromText(plan.output_path + plan.total_duration));
+    const rand = xorshift(
+      seedFromText(plan.output_path + plan.total_duration + fxFingerprint(plan.items)),
+    );
     const chunks: number[] = [];
     const targetBytes = Math.max(4096, Math.min(1 << 20, Math.ceil(plan.total_duration * 8000)));
     for (let i = 0; i < targetBytes; i++) {

@@ -133,7 +133,8 @@ server.ts (entry point)
  │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
  │   ├── Timelines + typed tracks (swap reorder, lock/mute) + placed items (move/trim/
- │   │   speed/transform/fades/effects), item duplicate, duration recompute, markers
+ │   │   speed/transform/fades/transitions/color grade), item duplicate, duration recompute,
+ │   │   markers
   │   ├── Full-state snapshots with restore
   │   └── (see docs/timelines.md)
   ├── Render routes (/api/v1/render-presets, /api/v1/renders/*, /api/v1/exports,
