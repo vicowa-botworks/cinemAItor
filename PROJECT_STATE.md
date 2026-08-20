@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 6 in progress (Render/Export + audio import + versioning complete)
+## Current Status: Milestone 7 in progress (Diagnostics/Ops complete)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -43,12 +43,21 @@ removed.
       adjustments applied at render time, waveform endpoint (503 when unanalyzable). Also: logger
       stdio writes are now failure-safe (a logging failure can no longer turn a 5xx into a
       plain 500)
-- [ ] Render / Export (Milestone 6 part 2): render presets (seeded draft/final/audio defaults,
+- [x] Render / Export (Milestone 6 part 2): render presets (seeded draft/final/audio defaults,
       admin-manageable), durable render queue with leases + stale recovery, in-process render
       runner, pluggable engines (ffmpeg concat `-c copy` when available, deterministic mock engine
       otherwise; `RENDER_ENGINE=auto|ffmpeg|mock`), cancellation (queued or running), structured log
       endpoint, output validation report, exports table with full provenance (render job, timeline,
       preset, engine, media hash) as asset + immutable asset version
+- [x] Diagnostics / Ops (Milestone 7): DIA-001 hardware report (CPU/RAM/GPU/OS); DIA-002 model
+      health batch report; DIA-003 durable `diagnostics` table mirrored from the backend logger
+      (warn/error sink; logging failures can never break a request); DIA-004 storage report
+      (per-directory usage, content-store dedup, orphan files, missing version media); DIA-005
+      redacted diagnostics export (no `*_secret` config keys); DIA-006 project backup (JSON bundle
+      under `backups/` + `backups` table record, media manifest with presence/size); DIA-007 restore
+      (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/timelines/tracks/
+      items/markers, per-file missing-media report); DIA-008 crash recovery (already covered by the
+      lease + stale-recovery of the job/render runners, tested)
 
 ### In Progress
 
@@ -63,6 +72,8 @@ removed.
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
+- [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
+      snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
 - [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues
@@ -79,3 +90,5 @@ removed.
 - Timeline editor core: Wed Aug 19 2026
 - Audio import + versioning: Wed Aug 19 2026
 - Render / Export: Wed Aug 19 2026
+- Diagnostics / Ops (hardware, model health, storage, logs, export, project backup/restore): Thu Aug
+  20 2026

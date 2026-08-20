@@ -15,16 +15,24 @@ export interface Logger {
   child(context: Record<string, unknown>): Logger;
 }
 
+/**
+ * Optional sink for warn/error entries (e.g. the diagnostics table).
+ * Never called for debug/info. Must not throw (wrapped defensively).
+ */
+export type LogSink = (level: LogLevel, entry: Record<string, unknown>) => void;
+
 export function createLogger(
   minLevel: LogLevel = "info",
   context: Record<string, unknown> = {},
+  sink?: LogSink,
 ): Logger {
-  return makeLogger(minLevel, context);
+  return makeLogger(minLevel, context, sink);
 }
 
 function makeLogger(
   minLevel: LogLevel,
   context: Record<string, unknown>,
+  sink?: LogSink,
 ): Logger {
   function log(
     level: LogLevel,
@@ -51,6 +59,13 @@ function makeLogger(
     } catch {
       // Logging must never break a request (e.g. captured stdio in tests).
     }
+    if (sink && (level === "warn" || level === "error")) {
+      try {
+        sink(level, entry);
+      } catch {
+        // A failing sink (e.g. locked DB) must never break the caller.
+      }
+    }
   }
 
   return {
@@ -58,6 +73,6 @@ function makeLogger(
     info: (msg, extra) => log("info", msg, extra),
     warn: (msg, extra) => log("warn", msg, extra),
     error: (msg, extra) => log("error", msg, extra, true),
-    child: (ctx) => makeLogger(minLevel, { ...context, ...ctx }),
+    child: (ctx) => makeLogger(minLevel, { ...context, ...ctx }, sink),
   };
 }
