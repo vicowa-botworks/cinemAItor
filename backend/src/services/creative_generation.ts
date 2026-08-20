@@ -4,6 +4,7 @@ import { createJob } from "../db/jobs.ts";
 import { createAsset, getAssetBySlug, getAssetVersion } from "../db/assets.ts";
 import { type CreativePrompt, creativePrompt, getPanel } from "../db/storyboards.ts";
 import { creativePromptFor, getScene } from "../db/scenes.ts";
+import { getProjectAccessible } from "../db/projects.ts";
 import { listReferencesForSource, type ReferenceRow } from "../db/references.ts";
 import { getDb } from "../db/database.ts";
 
@@ -207,5 +208,102 @@ export function generateScene(
     asset_id: asset.id,
     model_id: model.id,
     warnings: prompt.warnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Audio generation (AUD-009 music, AUD-010 voiceover, AUD-011 sfx)
+// ---------------------------------------------------------------------------
+
+export const AUDIO_GENERATION_KINDS = ["music", "voiceover", "sfx"] as const;
+export type AudioGenerationKind = (typeof AUDIO_GENERATION_KINDS)[number];
+
+const AUDIO_KIND_TASK_TYPES: Record<AudioGenerationKind, string> = {
+  music: "music",
+  voiceover: "voice",
+  sfx: "audio",
+};
+
+export interface AudioGenerateOptions {
+  kind: AudioGenerationKind;
+  prompt: string;
+  project_id?: string;
+  scene_id?: string;
+  model_id?: string;
+  seed?: string;
+  settings?: Record<string, unknown>;
+}
+
+export interface AudioGenerateResult {
+  job_id: string;
+  job_type: string;
+  asset_id: string;
+  model_id: string;
+}
+
+/**
+ * Generate music, voiceover (text to speech) or an SFX from a prompt. Each
+ * call targets a fresh audio asset; candidates are picked in the review
+ * workflow.
+ */
+export function generateAudio(
+  userId: number,
+  options: AudioGenerateOptions,
+): AudioGenerateResult {
+  const kind = options.kind;
+  if (!AUDIO_GENERATION_KINDS.includes(kind)) {
+    throw badRequest(
+      `kind must be one of: ${AUDIO_GENERATION_KINDS.join(", ")}`,
+    );
+  }
+  const prompt = options.prompt?.trim();
+  if (!prompt) throw badRequest("prompt is required");
+
+  let projectId: string | undefined;
+  if (options.scene_id) {
+    const scene = getScene(options.scene_id, userId, "write");
+    if (!scene) throw notFound("Scene not found");
+    projectId = scene.project_id;
+  } else if (options.project_id) {
+    const project = getProjectAccessible(options.project_id, userId, "write");
+    if (!project) throw notFound("Project not found");
+    projectId = project.id;
+  } else {
+    throw badRequest("project_id or scene_id is required");
+  }
+
+  const taskType = AUDIO_KIND_TASK_TYPES[kind];
+  const model = pickModel(taskType, options.model_id);
+
+  const hex = Array.from(
+    crypto.getRandomValues(new Uint8Array(4)),
+    (b) => b.toString(16).padStart(2, "0"),
+  ).join("");
+  const asset = createAsset(
+    {
+      unique_slug: `${kind}_${hex}`,
+      display_name: `${kind.charAt(0).toUpperCase()}${kind.slice(1)}: ${prompt.slice(0, 40)}`,
+      asset_type: "audio",
+      library_scope: "global",
+    },
+    userId,
+  );
+
+  const job = createJob(userId, {
+    job_type: taskType,
+    model_id: model.id,
+    asset_id: asset.id,
+    project_id: projectId,
+    scene_id: options.scene_id,
+    prompt_text: prompt,
+    seed: options.seed,
+    settings: (options.settings ?? {}) as Record<string, unknown>,
+  });
+
+  return {
+    job_id: job.id,
+    job_type: taskType,
+    asset_id: asset.id,
+    model_id: model.id,
   };
 }

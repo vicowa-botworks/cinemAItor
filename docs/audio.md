@@ -1,7 +1,7 @@
 # Audio
 
-Import, versioning, non-destructive trim/gain and waveform access for audio assets (Workstream 11,
-Milestone 6 part 1).
+Import, generation, versioning, non-destructive trim/gain and waveform access for audio assets
+(Workstream 11 + Workstream 14 audio generation).
 
 ## Concepts
 
@@ -21,13 +21,24 @@ Milestone 6 part 1).
 
 ## Endpoints
 
-| Method | Endpoint                                                   | Description                                                                                                                       |
-| ------ | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1 |
-| GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                          |
-| POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                |
-| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration)                                                            |
-| GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                      |
+| Method | Endpoint                                                   | Description                                                                                                                                                       |
+| ------ | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, settings?}` → `202 {job_id, job_type, asset_id, model_id}` |
+| POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1                                 |
+| GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                          |
+| POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                                                |
+| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration)                                                                                            |
+| GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                                                      |
 
 All endpoints require authentication; mutations follow asset write permissions (project scope
 included).
+
+## Generation (AUD-009/010/011)
+
+- `kind` maps to a model task type: `music` → `music`, `voiceover` → `voice`, `sfx` → `audio`. An
+  enabled model with the matching task type is required (or pass `model_id`).
+- Each generation targets a fresh `audio` asset (`<kind>_<hex>` slug, display name derived from the
+  prompt); the job runner stores candidates as immutable versions with full generation provenance,
+  and candidates are compared/promoted through the review workflow.
+- Scoping: `scene_id` (scene write) implies the scene's project; otherwise `project_id` (project
+  write) is required. The job records `project_id`/`scene_id` for provenance.

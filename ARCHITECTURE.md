@@ -123,8 +123,10 @@ server.ts (entry point)
  ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
  │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes
  │   └── (see docs/review.md)
- ├── Audio routes (/api/v1/audio/*, auth middleware, asset write permission)
- │   ├── Upload + versioning for audio assets (wav/mp3/flac/ogg/m4a/aac)
+  ├── Audio routes (/api/v1/audio/*, auth middleware, asset write permission)
+  │   ├── Generation (AUD-009/010/011): POST /generate — music/voiceover/sfx from prompt
+  │   │   (kind → task type music/voice/audio), fresh audio asset per call, job queue + review
+  │   ├── Upload + versioning for audio assets (wav/mp3/flac/ogg/m4a/aac)
  │   ├── Optional ffprobe/ffmpeg analysis: duration, sample rate, channels,
  │   │   200-bucket waveform (no-ffmpeg fallback keeps uploads working)
  │   ├── Non-destructive trim/gain adjustments (applied at render time); waveform endpoint

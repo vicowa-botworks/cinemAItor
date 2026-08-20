@@ -1,6 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 in progress (Diagnostics/Ops complete)
+## Current Status: Milestone 7 in progress (audio generation part 1 complete)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -49,15 +49,20 @@ removed.
       otherwise; `RENDER_ENGINE=auto|ffmpeg|mock`), cancellation (queued or running), structured log
       endpoint, output validation report, exports table with full provenance (render job, timeline,
       preset, engine, media hash) as asset + immutable asset version
-- [x] Diagnostics / Ops (Milestone 7): DIA-001 hardware report (CPU/RAM/GPU/OS); DIA-002 model
-      health batch report; DIA-003 durable `diagnostics` table mirrored from the backend logger
-      (warn/error sink; logging failures can never break a request); DIA-004 storage report
+- [x] Diagnostics / Ops (Milestone 6 part 3): DIA-001 hardware report (CPU/RAM/GPU/OS); DIA-002
+      model health batch report; DIA-003 durable `diagnostics` table mirrored from the backend
+      logger (warn/error sink; logging failures can never break a request); DIA-004 storage report
       (per-directory usage, content-store dedup, orphan files, missing version media); DIA-005
       redacted diagnostics export (no `*_secret` config keys); DIA-006 project backup (JSON bundle
       under `backups/` + `backups` table record, media manifest with presence/size); DIA-007 restore
       (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/timelines/tracks/
       items/markers, per-file missing-media report); DIA-008 crash recovery (already covered by the
       lease + stale-recovery of the job/render runners, tested)
+- [x] Audio generation (Milestone 7 part 1, AUD-009/010/011): `POST /api/v1/audio/generate`
+      generates music / voiceover (text to speech) / SFX from a prompt via the generation pipeline
+      (kind → task type `music` / `voice` / `audio`), each call targeting a fresh `audio` asset;
+      candidates are stored as asset versions with full provenance and picked in the review
+      workflow; scoped by `scene_id` (scene write) or `project_id` (project write)
 
 ### In Progress
 
@@ -74,6 +79,10 @@ removed.
 - [ ] Thumbnails/proxies/waveforms via FFmpeg (STO-007..009)
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: transitions, color
+      grading, subtitles, text overlays, batch generation, proxy workflow polish, skills (JSON/YAML
+      v1), project templates, advanced storage management, ducking, audio cleanup, subtitle
+      generation from dialogue/voiceover, A/B + version comparison improvements, model benchmark
 - [ ] E2E tests, Docker packaging, production hardening
 
 ### Known Issues
@@ -92,3 +101,4 @@ removed.
 - Render / Export: Wed Aug 19 2026
 - Diagnostics / Ops (hardware, model health, storage, logs, export, project backup/restore): Thu Aug
   20 2026
+- Audio generation (music / voiceover / SFX): Thu Aug 20 2026
