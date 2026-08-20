@@ -2532,6 +2532,91 @@ Avoid heavy client-side persistence for source of truth.
 
 The backend is source of truth.
 
+## 15.3 Migration Phases (Legacy Demo -> v1 Workbench)
+
+The current frontend only serves the legacy demo (`/api/auth`, `/api/movies`). It migrates to the
+`/api/v1` surface in dependency-ordered phases. Each phase is an independent, shippable PR that
+leaves the app in a working state and updates `PROJECT_STATE.md`.
+
+| Phase | v1 surface                      | Key components                                                          |
+| ----- | ------------------------------- | ----------------------------------------------------------------------- |
+| 1     | Auth + projects                 | `ls-project-card`, `ls-project-form`                                    |
+| 2     | Asset library                   | `ls-asset-grid`, `ls-asset-card`, `ls-asset-details`, `ls-version-list` |
+| 3     | Prompts, references, models     | `ls-prompt-editor`, `ls-reference-badge`, `ls-model-list`               |
+| 4     | Job queue                       | `ls-job-list`, `ls-progress-bar`                                        |
+| 5     | Storyboards, scenes, review     | `ls-storyboard-board`, `ls-shot-list`, `ls-review-board`                |
+| 6     | Timeline + render/export        | `ls-timeline`, `ls-track-row`, `ls-preview-monitor`                     |
+| 7     | Audio gen, diagnostics, cleanup | `ls-diagnostics-panel`                                                  |
+
+### Phase 1: v1 auth + project dashboard
+
+- `api.js` targets `/api/v1` (shared token lifecycle, consistent `ApiError` handling)
+- Login screen: bootstrap (first user = admin), login, logout, `GET /me`
+- Project dashboard: list accessible projects, create, edit, delete (soft), settings display
+- `#/projects` becomes the default route; legacy movie views stay reachable until phase 7 removes
+  them
+
+Exit criteria:
+
+- A fresh browser bootstraps and a returning browser logs in, both against `/api/v1/auth`
+- Project CRUD works from the UI; permission errors (403) surface as actionable messages
+
+### Phase 2: Asset library
+
+- Grid with search + type/scope/tag filters; upload dialog (multipart)
+- Asset details: version list, restore, active pointer, aliases, tags, preview streaming
+- Proxies shown when present (draft quality indicator)
+
+Exit criteria: full asset lifecycle in the UI: upload -> versions -> preview -> restore -> delete
+with broken-reference warnings.
+
+### Phase 3: Prompt editor + reference engine + model manager
+
+- Versioned prompt editor: history, restore, duplicate-detection notice
+- `@ref` / `@ref:vN` inline parsing, per-reference status badges (resolved/broken), reference picker
+  for insertion
+- Model manager view: list, health status, hardware summary; mutation buttons gated by role
+
+Exit criteria: a user can write a prompt with references, see per-reference status, and resolve a
+broken reference from the UI.
+
+### Phase 4: Job queue monitor
+
+- Job list (status/type filters), progress, cancel + retry, log viewer
+- Polls the REST endpoints as the baseline; switches to `/ws/v1/jobs` push once the backend
+  WebSocket gateway is implemented
+
+Exit criteria: every queued/running/cancelled/retried job is visible and candidates reach the review
+UI without a full page reload.
+
+### Phase 5: Storyboard + scene + review
+
+- Storyboard board: ordered panels, panel prompts, generate-preview (t2i), batch preview
+- Scene inspector: scenes + shots, shot prompts, batch generation, per-shot status
+- Review board: candidate comparison, approve (promote active) / reject / shortlist, notes
+
+Exit criteria: full creative loop in the UI: panel prompt -> preview -> scene generation ->
+candidate approval.
+
+### Phase 6: Timeline editor + render/export
+
+- Timeline: typed tracks (add/reorder/lock/mute), items from asset versions, move/trim/speed/
+  transform/fades, transitions + color grade, text/subtitle items, markers, snapshots with restore
+- Render: preset selection, render queue monitor, validation report, exports list
+
+Exit criteria: a user can assemble a timeline, render a draft (proxies) and a final (masters), and
+see the export as an asset.
+
+### Phase 7: Audio generation, diagnostics, cleanup
+
+- Audio generation dialog (music / voiceover / SFX) + waveforms in the timeline
+- Diagnostics and settings panel: hardware, model health, storage report, log viewer, redacted
+  export, project backup/restore
+- Remove the legacy `movies` demo API surface and `movie-*` components
+
+Exit criteria: no frontend references to legacy endpoints; the legacy demo routes are then removable
+from the backend.
+
 ---
 
 # 16. Authorization and Permissions Plan
