@@ -2,6 +2,8 @@ import { css, html, LitElement } from "lit";
 import { api } from "./api.js";
 import "./components/app-header.js";
 import "./components/login-form.js";
+import "./components/project-list.js";
+import "./components/project-detail.js";
 import "./components/movie-list.js";
 import "./components/movie-detail.js";
 
@@ -63,8 +65,12 @@ export class AppRoot extends LitElement {
 
   _onAuthChange(e) {
     const detail = e.detail;
+    if (!detail.loggedIn) {
+      this._logout();
+      return;
+    }
     this.loggedIn = detail.loggedIn;
-    if (detail.loggedIn && detail.user) {
+    if (detail.user) {
       this.userName = detail.user.display_name;
     } else {
       this.userName = "";
@@ -73,12 +79,20 @@ export class AppRoot extends LitElement {
     this._route();
   }
 
-  _logout() {
+  async _logout() {
+    if (api.getToken()) {
+      try {
+        await api.logout();
+      } catch {
+        // Session may already be expired; local cleanup still proceeds.
+      }
+    }
     localStorage.removeItem("token");
     api.clearToken();
     this.loggedIn = false;
     this.userName = "";
     this._updateHeader();
+    this._route();
   }
 
   _updateHeader() {
@@ -93,11 +107,27 @@ export class AppRoot extends LitElement {
 
     if (hash === "#/login" || hash === "") {
       if (this.loggedIn) {
-        window.location.hash = "#/movies";
+        window.location.hash = "#/projects";
         return;
       }
       this.currentView = "login";
-    } else if (hash === "#/movies" || hash === "#/") {
+    } else if (hash === "#/projects" || hash === "#/") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "projects";
+    } else if (hash.startsWith("#/project/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "project-detail";
+      const match = hash.match(/\/project\/([^/]+)/);
+      if (match) {
+        this.viewParams.id = decodeURIComponent(match[1]);
+      }
+    } else if (hash === "#/movies") {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
         return;
@@ -141,6 +171,12 @@ export class AppRoot extends LitElement {
     switch (this.currentView) {
       case "login":
         return html`<login-form></login-form>`;
+      case "projects":
+        return html`<project-list></project-list>`;
+      case "project-detail":
+        return html`
+          <project-detail .projectId=${this.viewParams.id}></project-detail>
+        `;
       case "movies":
         return html`<movie-list></movie-list>`;
       case "movie-detail":

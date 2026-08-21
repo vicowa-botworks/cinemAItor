@@ -90,6 +90,13 @@ export class LoginForm extends LitElement {
       cursor: not-allowed;
     }
 
+    .hint {
+      color: var(--color-text-muted);
+      font-size: 12px;
+      text-align: center;
+      margin-top: 12px;
+    }
+
     .error {
       color: var(--color-error);
       font-size: 13px;
@@ -123,33 +130,39 @@ export class LoginForm extends LitElement {
     this.error = "";
   }
 
+  _submitLabel() {
+    if (this.loading) return "Processing...";
+    return this.isLogin ? "Login" : "Create first account";
+  }
+
   async _submit(e) {
     e.preventDefault();
     this.error = "";
     this.loading = true;
 
     try {
+      let result;
       if (this.isLogin) {
-        const result = await api.login(this.email, this.password);
-        api.setToken(result.token);
-        localStorage.setItem("token", result.token);
-        window.dispatchEvent(
-          new CustomEvent("auth-change", { detail: { loggedIn: true, user: result.user } }),
-        );
-        window.location.hash = "#/movies";
+        result = await api.login(this.email, this.password);
       } else {
         if (!this.displayName.trim()) {
           this.error = "Display name is required";
           return;
         }
-        const result = await api.register(this.email, this.password, this.displayName);
-        api.setToken(result.token);
-        localStorage.setItem("token", result.token);
-        window.dispatchEvent(
-          new CustomEvent("auth-change", { detail: { loggedIn: true, user: result.user } }),
+        result = await api.bootstrap(
+          this.email,
+          this.password,
+          this.displayName,
         );
-        window.location.hash = "#/movies";
       }
+      api.setToken(result.token);
+      localStorage.setItem("token", result.token);
+      window.dispatchEvent(
+        new CustomEvent("auth-change", {
+          detail: { loggedIn: true, user: result.user },
+        }),
+      );
+      window.location.hash = "#/projects";
     } catch (err) {
       this.error = err.message || "Authentication failed";
     } finally {
@@ -165,16 +178,18 @@ export class LoginForm extends LitElement {
             <button class="tab ${this.isLogin ? "active" : ""}" @click=${this
               ._toggleMode}>Login</button>
             <button class="tab ${!this.isLogin ? "active" : ""}" @click=${this
-              ._toggleMode}>Register</button>
+              ._toggleMode}>Setup</button>
           </div>
+
+          <h2>${this.isLogin ? "Welcome back" : "Initial setup"}</h2>
 
           <form @submit=${this._submit}>
             ${!this.isLogin
               ? html`
                 <div class="form-group">
                   <label for="displayName">Display Name</label>
-                  <input id="displayName" type="text" .value=${this.displayName} @input=${this
-                    ._onDisplayNameInput} required />
+                  <input id="displayName" type="text" .value=${this.displayName}
+                    @input=${this._onDisplayNameInput} required />
                 </div>
               `
               : ""}
@@ -187,14 +202,22 @@ export class LoginForm extends LitElement {
 
             <div class="form-group">
               <label for="password">Password</label>
-              <input id="password" type="password" .value=${this.password} @input=${this
-                ._onPasswordInput} required minlength="8" />
+              <input id="password" type="password" .value=${this.password}
+                @input=${this._onPasswordInput} required minlength="8" />
             </div>
 
             <button type="submit" class="btn-submit" ?disabled=${this.loading}>
-              ${this.loading ? "Processing..." : this.isLogin ? "Login" : "Register"}
+              ${this._submitLabel()}
             </button>
           </form>
+
+          ${!this.isLogin
+            ? html`
+              <p class="hint">
+                Only available on a fresh instance. The first account becomes the admin.
+              </p>
+            `
+            : ""}
 
           <div class="error">${this.error}</div>
         </div>

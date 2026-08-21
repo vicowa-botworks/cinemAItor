@@ -93,10 +93,15 @@ removed.
       master if no proxy exists), `final` presets render masters only and fail on missing media;
       per-item `source` is part of the mock engine fingerprint and the validation report carries a
       `sources` tally (`{proxy, master}`)
+- [x] Frontend phase 1 (MASTER-PLAN §15.3): frontend auth on `/api/v1/auth` (bootstrap for the first
+      user, login, logout with server-side session revocation, `me`), project dashboard (list
+      accessible projects, create, edit settings, soft delete) on `/api/v1/projects`, `#/projects`
+      becomes the default route; legacy movie demo views remain until the phase 7 cleanup
 
 ### In Progress
 
-- [ ] Frontend: wire the asset library and project views to the `/api/v1` endpoints
+- [ ] Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): upload, list/search/filter,
+      versions/restore, preview
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -135,3 +140,7 @@ removed.
 - Audio generation (music / voiceover / SFX): Thu Aug 20 2026
 - Batch shot generation: Thu Aug 20 2026
 - Transitions + color grading: Thu Aug 20 2026
+- Subtitles + text overlays: Thu Aug 20 2026
+- Proxy workflow polish: Thu Aug 20 2026
+- Render draft/final source selection: Thu Aug 20 2026
+- Frontend phase 1 (v1 auth + project dashboard, MASTER-PLAN §15.3): Thu Aug 21 2026
