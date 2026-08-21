@@ -95,7 +95,7 @@ app-root (main router)
 │   │            clip playback, embedded audio generation)
 ├── review-board (job candidate comparison; approve / reject / shortlist + notes)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
-├── timeline-detail (tracks with lock/mute + swap reorder, clip/text placement via
+├── timeline-detail (tracks with lock/mute + mixer gain + swap reorder, clip/text placement via
 │   │               picker + move/resize + speed/volume/fades/transition/color-grade
 │   │               fx panel, waveform strip on audio items, markers, snapshots/restore,
 │   │               render presets + queue + exports with job log, in-browser playback preview
@@ -103,7 +103,7 @@ app-root (main router)
 ├── timeline-preview (browser-side timeline playback: play/pause/stop, 0.25×–2× rate, in/out
 │   │             loop range; proxy-first media with master fallback, render-source track
 │   │             selection, per-clip speed/fades, CSS-approximated color grade, audio mix from
-│   │             version gain/trim + fades, text/subtitle overlays)
+│   │             track + version gain/trim + fades, text/subtitle overlays)
 ├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
 │   │             embedded in scene-detail and timeline-detail)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
@@ -181,7 +181,7 @@ server.ts (entry point)
  │   ├── Non-destructive trim/gain adjustments (applied at render time); waveform endpoint
  │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
- │   ├── Timelines + typed tracks (swap reorder, lock/mute) + placed items (move/trim/
+  │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db) + placed items (move/trim/
  │   │   speed/transform/fades/transitions/color grade), text overlays (text/subtitle
  │   │   tracks), item duplicate, duration recompute, markers
   │   ├── Full-state snapshots with restore

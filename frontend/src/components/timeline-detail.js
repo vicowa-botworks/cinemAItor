@@ -352,6 +352,21 @@ export class TimelineDetail extends LitElement {
       opacity: 0.85;
     }
 
+    .track-gain {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+      font-size: 11px;
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+    }
+
+    .track-gain input[type="range"] {
+      width: 72px;
+      margin: 0;
+    }
+
     .track-actions {
       margin-left: auto;
       display: flex;
@@ -873,6 +888,21 @@ export class TimelineDetail extends LitElement {
         track.id,
         { [key]: !track[key] },
       );
+      await this._load();
+    } catch (e) {
+      this.error = e.message ?? "Failed to update track.";
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async _setTrackGain(track, input) {
+    const gainDb = Number(input.value);
+    if (!Number.isFinite(gainDb)) return;
+    if (gainDb === Number(track.gain_db ?? 0)) return;
+    this.busy = true;
+    try {
+      await api.updateTimelineTrack(this._timelineId, track.id, { gain_db: gainDb });
       await this._load();
     } catch (e) {
       this.error = e.message ?? "Failed to update track.";
@@ -1495,6 +1525,24 @@ export class TimelineDetail extends LitElement {
     `;
   }
 
+  _renderTrackGain(track) {
+    if (!AUDIO_TRACK_TYPES.includes(track.track_type)) return html``;
+    const gain = Number(track.gain_db ?? 0);
+    return html`
+      <label class="track-gain" title="Track gain, in dB (applied to the mix)">
+        <input
+          type="range"
+          min="-24"
+          max="24"
+          step="0.5"
+          .value=${String(gain)}
+          ?disabled=${this.busy}
+          @change=${(e) => this._setTrackGain(track, e.currentTarget)}>
+        <span>${gain.toFixed(1)} dB</span>
+      </label>
+    `;
+  }
+
   _renderTrackRow(track) {
     const color = TRACK_COLORS[track.track_type] ?? "#64748b";
     const index = this.tracks.indexOf(track);
@@ -1505,6 +1553,7 @@ export class TimelineDetail extends LitElement {
           <span
             class="track-type"
             style="color:${color};">${track.track_type}</span>
+          ${this._renderTrackGain(track)}
           <div class="track-actions">
             <button
               class="icon-btn ${track.locked ? "on" : ""}"

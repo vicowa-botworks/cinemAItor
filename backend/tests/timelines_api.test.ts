@@ -117,6 +117,34 @@ describe("timelines api", () => {
         );
         assertEquals(badType.status, 400);
 
+        // Mixer gain on creation + update, with range validation.
+        const musicRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/tracks`,
+          { track_type: "music", name: "M", gain_db: -6 },
+          ownerToken,
+        );
+        assertEquals(musicRes.status, 201);
+        assertEquals((musicRes.json as { gain_db: number }).gain_db, -6);
+        const musicId = (musicRes.json as { id: string }).id;
+
+        const gainPatch = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/tracks/${musicId}`,
+          { gain_db: 12 },
+          ownerToken,
+        );
+        assertEquals(gainPatch.status, 200);
+        assertEquals((gainPatch.json as { gain_db: number }).gain_db, 12);
+
+        const badGain = await req(
+          "PATCH",
+          `/api/v1/timelines/${timelineId}/tracks/${musicId}`,
+          { gain_db: 99 },
+          ownerToken,
+        );
+        assertEquals(badGain.status, 400);
+
         const itemRes = await req(
           "POST",
           `/api/v1/timelines/${timelineId}/items`,

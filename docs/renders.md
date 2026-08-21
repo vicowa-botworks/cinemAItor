@@ -45,9 +45,10 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
   resolved to its asset version's stored file (carrying the item's `source_offset` and `speed`);
   plus the active text overlays from unlocked `text`/`subtitle` tracks (text items sorted by start
-  time); plus audio items from unlocked `dialogue`/`voiceover`/`music`/`sfx`/`ambience` tracks
-  (non-archived items with an asset version, sorted by start time). The plan is passed to the engine
-  with progress and `isCancelled` hooks.
+  time); plus audio items from unlocked, non-muted `dialogue`/`voiceover`/`music`/`sfx`/`ambience`
+  tracks (non-archived items with an asset version, sorted by start time; each clip's version
+  `gain_db` plus its track's mixer `gain_db` is applied, so the render matches the preview mix). The
+  plan is passed to the engine with progress and `isCancelled` hooks.
 - **Source selection (draft/final)**: each plan item (video and audio) resolves to a `source` —
   `proxy` or `master` (the asset version's stored file). `draft`-kind presets prefer the version's
   proxy and fall back to the master if none exists; `final`-kind presets always use the master and

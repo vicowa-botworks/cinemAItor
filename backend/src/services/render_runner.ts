@@ -204,8 +204,12 @@ async function buildPlan(
   }
 
   const audioTrackIds = tracks
-    .filter((t) => (AUDIO_TRACK_TYPES as readonly string[]).includes(t.track_type) && !t.locked)
+    .filter((t) =>
+      (AUDIO_TRACK_TYPES as readonly string[]).includes(t.track_type) && !t.locked &&
+      !t.muted
+    )
     .map((t) => t.id);
+  const trackGainDb = new Map(tracks.map((t) => [t.id, Number(t.gain_db) || 0]));
   const pendingAudioItems = items
     .filter(
       (i) =>
@@ -231,7 +235,7 @@ async function buildPlan(
       if (!file_path) {
         throw new RenderFailedError(`No file for asset version ${i.asset_version_id}`);
       }
-      return planAudioItem(i, { file_path, source }, version);
+      return planAudioItem(i, { file_path, source }, version, trackGainDb.get(i.track_id) ?? 0);
     });
   const rawAudioItems = await Promise.all(pendingAudioItems);
   // Items fully clipped out by their version's trim window are dropped.
@@ -272,13 +276,15 @@ async function buildPlan(
 /**
  * Map a placed audio-track item onto a render audio item: the item's own
  * source_offset / speed / fades on top of the version's non-destructive
- * adjustments (trim window, gain_db). Returns null when the item sits fully
- * outside the trimmed source window (nothing to play).
+ * adjustments (trim window, gain_db) and the track's mixer gain (gain_db,
+ * AUD-007). Returns null when the item sits fully outside the trimmed
+ * source window (nothing to play).
  */
 function planAudioItem(
   item: TimelineItem,
   file: { file_path: string; source: "proxy" | "master" },
   version: AssetVersion | undefined,
+  trackGainDb = 0,
 ): RenderAudioItem | null {
   const duration = Math.max(0.01, item.end_time - item.start_time);
   const speed = item.speed > 0 ? item.speed : 1;
@@ -294,10 +300,12 @@ function planAudioItem(
   const sourceDuration = Math.min(sourceNeeded, trimEnd - sourceOffset);
   if (sourceDuration <= 0) return null;
 
-  let gain = 1;
+  let gainDb = 0;
   if (typeof adjustments.gain_db === "number" && Number.isFinite(adjustments.gain_db)) {
-    gain = Math.pow(10, adjustments.gain_db / 20);
+    gainDb = adjustments.gain_db;
   }
+  gainDb += Number(trackGainDb) || 0;
+  const gain = Math.pow(10, gainDb / 20);
 
   return {
     file_path: file.file_path,

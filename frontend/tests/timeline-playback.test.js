@@ -193,15 +193,15 @@ describe("gradeFilter", () => {
 });
 
 describe("audioVolumeFor", () => {
-  it("applies gain_db as 2^(db/20) scaled by fade", () => {
+  it("applies gain_db as 10^(db/20), matching the renderer scale", () => {
     assertEquals(audioVolumeFor(0, 1), 1);
-    assertAlmostEquals(audioVolumeFor(-6, 1), Math.pow(2, -6 / 20));
-    assertAlmostEquals(audioVolumeFor(-6, 0.5), Math.pow(2, -6 / 20) * 0.5);
+    assertAlmostEquals(audioVolumeFor(-6, 1), Math.pow(10, -6 / 20));
+    assertAlmostEquals(audioVolumeFor(-6, 0.5), Math.pow(10, -6 / 20) * 0.5);
   });
 
   it("clamps to 0..1", () => {
     assertEquals(audioVolumeFor(30, 1), 1);
-    assertAlmostEquals(audioVolumeFor(6, 0.4), 0.4 * Math.pow(2, 6 / 20));
+    assertAlmostEquals(audioVolumeFor(6, 0.4), 0.4 * Math.pow(10, 6 / 20));
     assertEquals(audioVolumeFor(0, 2), 1);
     assertEquals(audioVolumeFor(0, 0), 0);
   });
