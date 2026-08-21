@@ -90,6 +90,11 @@ app-root (main router)
 ├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
 │   │            clip playback)
 ├── review-board (job candidate comparison; approve / reject / shortlist + notes)
+├── timeline-list (timeline list + create; project filter via #/timelines?project=)
+├── timeline-detail (tracks with lock/mute + swap reorder, clip/text placement via
+│   │               picker + move/resize + speed/volume/fades/transition/color-grade
+│   │               fx panel, markers, snapshots/restore, render presets + queue +
+│   │               exports with job log)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
 ├── movie-list (legacy demo, removed in frontend phase 7)
 │   └── movie-card (individual item)

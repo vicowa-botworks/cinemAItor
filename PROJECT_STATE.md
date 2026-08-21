@@ -116,15 +116,21 @@ removed.
       (WebSocket fallback until `/ws/v1/jobs` exists), status/type/project filters, live progress
       bars, per-job detail (prompt, seed, settings, inputs, errors, event log), and cancel/retry
       actions; creative jobs (t2i / i2v / t2v) link through to the review board
-
-### In Progress
-
-- [ ] Frontend phase 5 (MASTER-PLAN §15.3): creative screens — storyboard board (`#/storyboards`,
+- [x] Frontend phase 5 (MASTER-PLAN §15.3): creative screens — storyboard board (`#/storyboards`,
       `#/storyboard/:id`) with panel CRUD, versioned panel prompts, and t2i preview generation into
       the job queue; scene inspector (`#/scenes`, `#/scene/:id`) with shot CRUD, scene/shot prompts,
       single + batch generation (i2v/t2v), model/seed selection, and clip playback; review board
       (`#/review/:jobId`) with candidate comparison and approve / reject / shortlist decisions;
       project-detail entry points into both boards
+
+### In Progress
+
+- [ ] Frontend phase 6 (MASTER-PLAN §15.3): timeline editor + render/export UI — timeline list
+      (`#/timelines`) with project filter + create; timeline editor (`#/timeline/:id`) with typed
+      tracks (lock/mute, swap reorder), clip/text placement via asset picker (move/resize,
+      speed/volume, fades, transitions, color grade), markers, full-state snapshots + restore, and a
+      render panel (preset list/create, queue draft/final renders, polling job cards with logs,
+      exports list)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -170,3 +176,4 @@ removed.
 - Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 3 (prompt studio + model manager, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 4 (job queue monitor, MASTER-PLAN §15.3): Thu Aug 20 2026
+- Frontend phase 5 (creative screens, MASTER-PLAN §15.3): Fri Aug 21 2026

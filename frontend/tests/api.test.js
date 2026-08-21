@@ -529,6 +529,172 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 timeline endpoints", () => {
+    it("listTimelines filters by project_id query param", async () => {
+      await api.listTimelines({ project_id: "p1" });
+      assertEquals(captured[0].url, "/api/v1/timelines?project_id=p1");
+    });
+
+    it("listTimelines with no filter omits the query string", async () => {
+      await api.listTimelines();
+      assertEquals(captured[0].url, "/api/v1/timelines");
+    });
+
+    it("createTimeline posts name and project_id", async () => {
+      await api.createTimeline({ name: "Cut v1", project_id: "p1" });
+      assertEquals(captured[0].url, "/api/v1/timelines");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.name, "Cut v1");
+      assertEquals(body.project_id, "p1");
+    });
+
+    it("getTimeline requests the id subpath", async () => {
+      await api.getTimeline("tl-1");
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1");
+    });
+
+    it("updateTimeline patches the id subpath", async () => {
+      await api.updateTimeline("tl-1", { name: "Renamed" });
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1");
+      assertEquals(captured[0].options.method, "PATCH");
+      assertEquals(JSON.parse(captured[0].options.body).name, "Renamed");
+    });
+
+    it("deleteTimeline deletes the id subpath", async () => {
+      await api.deleteTimeline("tl-1");
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("track methods hit the tracks subpaths", async () => {
+      await api.createTimelineTrack("tl-1", { track_type: "video", name: "V1" });
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1/tracks");
+      assertEquals(captured[0].options.method, "POST");
+
+      await api.updateTimelineTrack("tl-1", "tr-1", { locked: true });
+      assertEquals(captured[1].url, "/api/v1/timelines/tl-1/tracks/tr-1");
+      assertEquals(captured[1].options.method, "PATCH");
+      assertEquals(JSON.parse(captured[1].options.body).locked, true);
+
+      await api.deleteTimelineTrack("tl-1", "tr-1");
+      assertEquals(captured[2].url, "/api/v1/timelines/tl-1/tracks/tr-1");
+      assertEquals(captured[2].options.method, "DELETE");
+    });
+
+    it("item methods hit the items subpaths", async () => {
+      await api.createTimelineItem("tl-1", {
+        track_id: "tr-1",
+        asset_version_id: null,
+        start_time: 0,
+        end_time: 2,
+        text: "hello",
+      });
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1/items");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.track_id, "tr-1");
+      assertEquals(body.text, "hello");
+
+      await api.updateTimelineItem("tl-1", "it-1", { speed: 1.5 });
+      assertEquals(captured[1].url, "/api/v1/timelines/tl-1/items/it-1");
+      assertEquals(captured[1].options.method, "PATCH");
+
+      await api.duplicateTimelineItem("tl-1", "it-1", 5);
+      assertEquals(captured[2].url, "/api/v1/timelines/tl-1/items/it-1/duplicate");
+      assertEquals(captured[2].options.method, "POST");
+      assertEquals(JSON.parse(captured[2].options.body).at_time, 5);
+
+      await api.deleteTimelineItem("tl-1", "it-1");
+      assertEquals(captured[3].url, "/api/v1/timelines/tl-1/items/it-1");
+      assertEquals(captured[3].options.method, "DELETE");
+    });
+
+    it("marker methods hit the markers subpaths", async () => {
+      await api.createTimelineMarker("tl-1", { time: 4.5, label: "cut" });
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1/markers");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).time, 4.5);
+
+      await api.listTimelineMarkers("tl-1");
+      assertEquals(captured[1].url, "/api/v1/timelines/tl-1/markers");
+      assertEquals(captured[1].options.method ?? "GET", "GET");
+
+      await api.deleteTimelineMarker("tl-1", "mk-1");
+      assertEquals(captured[2].url, "/api/v1/timelines/tl-1/markers/mk-1");
+      assertEquals(captured[2].options.method, "DELETE");
+    });
+
+    it("snapshot methods hit the snapshots subpaths", async () => {
+      await api.createTimelineSnapshot("tl-1", { name: "Before recut" });
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1/snapshots");
+      assertEquals(captured[0].options.method, "POST");
+
+      await api.listTimelineSnapshots("tl-1");
+      assertEquals(captured[1].url, "/api/v1/timelines/tl-1/snapshots");
+
+      await api.restoreTimelineSnapshot("tl-1", "sn-1");
+      assertEquals(captured[2].url, "/api/v1/timelines/tl-1/snapshots/sn-1/restore");
+      assertEquals(captured[2].options.method, "POST");
+    });
+  });
+
+  describe("v1 render endpoints", () => {
+    it("listRenderPresets requests the presets endpoint", async () => {
+      await api.listRenderPresets();
+      assertEquals(captured[0].url, "/api/v1/render-presets");
+    });
+
+    it("createRenderPreset posts the preset payload", async () => {
+      await api.createRenderPreset({
+        name: "Draft 720",
+        kind: "draft",
+        codec: "h264",
+        width: 1280,
+        height: 720,
+        fps: 24,
+        audio: { enabled: true },
+        fx: { enabled: true },
+      });
+      assertEquals(captured[0].url, "/api/v1/render-presets");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.name, "Draft 720");
+      assertEquals(body.kind, "draft");
+    });
+
+    it("queueRender posts project/timeline/preset ids", async () => {
+      await api.queueRender({
+        project_id: "p1",
+        timeline_id: "tl-1",
+        preset_id: "p-9",
+      });
+      assertEquals(captured[0].url, "/api/v1/renders");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.project_id, "p1");
+      assertEquals(body.timeline_id, "tl-1");
+      assertEquals(body.preset_id, "p-9");
+    });
+
+    it("render job methods hit the renders subpaths", async () => {
+      await api.getRenderJob("rj-1");
+      assertEquals(captured[0].url, "/api/v1/renders/rj-1");
+
+      await api.getRenderJobLog("rj-1");
+      assertEquals(captured[1].url, "/api/v1/renders/rj-1/log");
+
+      await api.cancelRenderJob("rj-1");
+      assertEquals(captured[2].url, "/api/v1/renders/rj-1/cancel");
+      assertEquals(captured[2].options.method, "POST");
+    });
+
+    it("listExports filters by project_id", async () => {
+      await api.listExports({ project_id: "p1" });
+      assertEquals(captured[0].url, "/api/v1/exports?project_id=p1");
+    });
+  });
+
   describe("creative asset slug map", () => {
     it("maps prefix-matched slugs to asset ids", async () => {
       const rows = [

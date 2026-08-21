@@ -564,6 +564,194 @@ class ApiClient {
     );
   }
 
+  // --- v1 timelines ---
+
+  listTimelines(filter = {}) {
+    return this.request(`/timelines${this._query(filter)}`);
+  }
+
+  createTimeline(data) {
+    return this.request("/timelines", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  getTimeline(id) {
+    return this.request(`/timelines/${encodeURIComponent(id)}`);
+  }
+
+  updateTimeline(id, data) {
+    return this.request(`/timelines/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteTimeline(id) {
+    return this.request(`/timelines/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  createTimelineTrack(timelineId, data) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/tracks`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+  }
+
+  updateTimelineTrack(timelineId, trackId, data) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/tracks/${
+        encodeURIComponent(
+          trackId,
+        )
+      }`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+  }
+
+  deleteTimelineTrack(timelineId, trackId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/tracks/${
+        encodeURIComponent(
+          trackId,
+        )
+      }`,
+      { method: "DELETE" },
+    );
+  }
+
+  createTimelineItem(timelineId, data) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/items`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+  }
+
+  updateTimelineItem(timelineId, itemId, data) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/items/${
+        encodeURIComponent(
+          itemId,
+        )
+      }`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+  }
+
+  duplicateTimelineItem(timelineId, itemId, atTime) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/items/${
+        encodeURIComponent(
+          itemId,
+        )
+      }/duplicate`,
+      {
+        method: "POST",
+        body: JSON.stringify(atTime !== undefined ? { at_time: atTime } : {}),
+      },
+    );
+  }
+
+  deleteTimelineItem(timelineId, itemId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/items/${
+        encodeURIComponent(
+          itemId,
+        )
+      }`,
+      { method: "DELETE" },
+    );
+  }
+
+  createTimelineMarker(timelineId, data) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/markers`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+  }
+
+  listTimelineMarkers(timelineId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/markers`,
+    );
+  }
+
+  deleteTimelineMarker(timelineId, markerId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/markers/${
+        encodeURIComponent(
+          markerId,
+        )
+      }`,
+      { method: "DELETE" },
+    );
+  }
+
+  createTimelineSnapshot(timelineId, data) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/snapshots`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+  }
+
+  listTimelineSnapshots(timelineId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/snapshots`,
+    );
+  }
+
+  restoreTimelineSnapshot(timelineId, snapshotId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/snapshots/${
+        encodeURIComponent(
+          snapshotId,
+        )
+      }/restore`,
+      { method: "POST" },
+    );
+  }
+
+  // --- v1 renders / exports ---
+
+  listRenderPresets() {
+    return this.request("/render-presets");
+  }
+
+  createRenderPreset(data) {
+    return this.request("/render-presets", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  queueRender({ project_id, timeline_id, preset_id }) {
+    return this.request("/renders", {
+      method: "POST",
+      body: JSON.stringify({ project_id, timeline_id, preset_id }),
+    });
+  }
+
+  getRenderJob(id) {
+    return this.request(`/renders/${encodeURIComponent(id)}`);
+  }
+
+  getRenderJobLog(id) {
+    return this.request(`/renders/${encodeURIComponent(id)}/log`);
+  }
+
+  cancelRenderJob(id) {
+    return this.request(`/renders/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+  }
+
+  listExports(filter = {}) {
+    return this.request(`/exports${this._query(filter)}`);
+  }
+
   // --- legacy demo API (kept until the legacy surface is removed) ---
 
   getMovies() {
