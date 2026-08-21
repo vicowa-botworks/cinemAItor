@@ -2,9 +2,8 @@
 
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
-phase 6 timeline/render UI shipped; frontend phase 7 (audio generation + waveforms, diagnostics
-panel, legacy movies removal) in flight; remaining: skills, templates, advanced storage, audio
-polish, model benchmark)
+migration through phase 7 — audio generation + waveforms and the diagnostics panel shipped, legacy
+demo surface removed; remaining: skills, templates, advanced storage, audio polish, model benchmark)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -130,14 +129,15 @@ The product track follows `MASTER-PLAN.md`.
       text style), duplicate/delete, markers, full-state snapshots + restore, and a render / export
       panel (preset select, queue draft/final renders with polling status/progress, cancel,
       resulting export linked to its asset, recent-exports list)
+- [x] Frontend phase 7 (MASTER-PLAN §15.3): audio generation dialog (music / voiceover / SFX prompt
+      → job queue, scene-scoped in scene detail and project-scoped in timeline detail), waveform
+      strips (200-bucket peaks) on audio-track timeline items, and the diagnostics & settings panel
+      (`#/diagnostics`: hardware / model health / storage reports, diagnostics log browser with
+      filters, redacted export, project backup / restore); legacy `movies` demo surface removed
+      (frontend components/routes/API + `/api/movies` backend routes + legacy CRUD)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Frontend phase 7 (MASTER-PLAN §15.3, in flight): audio generation dialog (music / voiceover /
-      SFX) shared by scene detail and timeline, waveform strips on audio timeline items, diagnostics
-      & settings panel (`#/diagnostics`: hardware / model health / storage reports, diagnostics log
-      browser, redacted export, project backup / restore), and removal of the legacy `movies` demo
-      surface (frontend routes/components + `/api/movies` backend routes)
 - [ ] Workstream 11 follow-ups: audio trim/gain UI (adjustments exist at the API level), basic mixer
 - [ ] Workstream 12 follow-ups: per-item source trimming in the ffmpeg engine, audio track placement
       in renders (fx pass is video-only), frame-accurate cuts, render farm / multiple render
