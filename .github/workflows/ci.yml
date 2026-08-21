@@ -85,7 +85,7 @@ jobs:
 
       - name: Run backend tests
         working-directory: ./backend
-        run: deno test --allow-net --allow-env --allow-read --allow-write --allow-ffi
+        run: deno test --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run
 
   test-frontend:
     name: Frontend Tests

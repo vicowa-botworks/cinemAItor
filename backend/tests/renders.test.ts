@@ -1,5 +1,6 @@
+import { join } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertNotEquals, assertRejects, assertThrows } from "@std/assert";
 import * as schema from "../src/db/schema.ts";
 import { getDb, resetDb } from "../src/db/database.ts";
 import { createProject } from "../src/db/projects.ts";
@@ -28,7 +29,11 @@ import {
   buildAtempoFilters,
   buildDrawTextFilter,
   buildFxArgs,
+  consumeFfmpegProgressLine,
+  FfmpegRenderEngine,
+  mapFfmpegProgress,
   MockRenderEngine,
+  newFfmpegProgressState,
   planNeedsFxPass,
   type RenderAudioItem,
   type RenderInputItem,
@@ -612,6 +617,144 @@ describe("renders", () => {
       Error,
       "status must be one of",
     );
+  });
+
+  describe("ffmpeg progress reporting", () => {
+    function planFor(
+      item: Partial<RenderInputItem> = {},
+      overrides: Partial<RenderPlan> = {},
+    ): RenderPlan {
+      const base: RenderInputItem = {
+        file_path: "/tmp/fake_in.mp4",
+        start_time: 0,
+        end_time: 5,
+        duration: 5,
+        transition: "cut",
+        transition_duration: 0,
+        fade_in: 0,
+        fade_out: 0,
+        color_grade: null,
+      };
+      return {
+        output_path: join(appData, "out.mp4"),
+        filename: "out.mp4",
+        format: "mp4",
+        preset: null,
+        items: [{ ...base, ...item }],
+        text_overlays: [],
+        total_duration: 5,
+        ...overrides,
+      };
+    }
+
+    /** A stand-in ffmpeg: prints `-progress pipe:1` blocks, writes the output. */
+    function writeFakeFfmpeg(body: string): string {
+      const dir = Deno.makeTempDirSync({ prefix: "fake_ffmpeg_" });
+      const path = join(dir, "ffmpeg");
+      Deno.writeTextFileSync(path, `#!/bin/sh\n${body}\n`);
+      Deno.chmodSync(path, 0o755);
+      return path;
+    }
+
+    const progressScript = [
+      "out=$1",
+      'for a in "$@"; do out=$a; done',
+      'printf "out_time_us=2500000\\nprogress=continue\\n"',
+      'printf "out_time_us=5000000\\nprogress=end\\n"',
+      'printf "fake-video-bytes\\n" > "$out"',
+      "exit 0",
+    ].join("\n");
+
+    function flat(values: number[]): number[] {
+      return values.filter((v, i) => i === 0 || v !== values[i - 1]);
+    }
+
+    it("parses -progress pipe:1 output (us preferred over ms)", () => {
+      const state = newFfmpegProgressState();
+      for (
+        const line of [
+          "frame=1",
+          "out_time_us=2500000",
+          "out_time=00:00:02.500000",
+          "out_time_ms=2000",
+          "progress=continue",
+        ]
+      ) {
+        consumeFfmpegProgressLine(state, line);
+      }
+      assertEquals(state.out_time_sec, 2.5);
+      assertEquals(state.done, false);
+      consumeFfmpegProgressLine(state, "out_time_ms=4000");
+      consumeFfmpegProgressLine(state, "progress=end");
+      assertEquals(state.out_time_sec, 4);
+      assertEquals(state.done, true);
+    });
+
+    it("maps out_time into the [base, 90] band", () => {
+      assertEquals(mapFfmpegProgress(0, 5, 20), null);
+      assertEquals(mapFfmpegProgress(2.5, 5, 20), 55);
+      assertEquals(mapFfmpegProgress(5, 5, 20), 90);
+      assertEquals(mapFfmpegProgress(7.5, 5, 20), 90);
+      assertEquals(mapFfmpegProgress(1, 0, 20), null);
+      assertEquals(mapFfmpegProgress(1, Number.NaN, 20), null);
+    });
+
+    it("reports ffmpeg progress on the concat path", async () => {
+      const script = writeFakeFfmpeg(progressScript);
+      const seen: number[] = [];
+      const engine = new FfmpegRenderEngine(script);
+      const result = await engine.render(planFor(), {
+        onProgress: (p) => seen.push(p),
+        isCancelled: () => false,
+      });
+      assertEquals(result.file_size, "fake-video-bytes\n".length);
+      assertEquals(flat(seen), [5, 20, 55, 90, 100]);
+    });
+
+    it("reports ffmpeg progress on the fx path", async () => {
+      const script = writeFakeFfmpeg(progressScript);
+      const seen: number[] = [];
+      const engine = new FfmpegRenderEngine(script);
+      await engine.render(planFor({ fade_in: 0.5 }), {
+        onProgress: (p) => seen.push(p),
+        isCancelled: () => false,
+      });
+      assertEquals(flat(seen), [5, 10, 50, 90, 100]);
+    });
+
+    it("kills the ffmpeg process when the render is cancelled", async () => {
+      // The sleeper detaches its stdio so killing the (single-process,
+      // ffmpeg-like) script closes the pipe immediately — like a real ffmpeg.
+      const script = writeFakeFfmpeg(
+        [
+          "out=$1",
+          'for a in "$@"; do out=$a; done',
+          'printf "out_time_us=100000\\nprogress=continue\\n"',
+          "sleep 10 <&- 1>&- 2>&-",
+          'printf "nope\\n" > "$out"',
+          "exit 0",
+        ].join("\n"),
+      );
+      let cancelled = false;
+      const seen: number[] = [];
+      const engine = new FfmpegRenderEngine(script);
+      const start = performance.now();
+      await assertRejects(
+        () =>
+          engine.render(planFor(), {
+            onProgress: (p) => {
+              seen.push(p);
+              if (p > 20) cancelled = true;
+            },
+            isCancelled: () => cancelled,
+          }),
+        Error,
+        "Render cancelled",
+      );
+      const elapsedMs = performance.now() - start;
+      assert(elapsedMs < 5000, `cancellation took ${elapsedMs}ms`);
+      assert(seen.length >= 1, "expected a progress reading before cancellation");
+    });
   });
 });
 

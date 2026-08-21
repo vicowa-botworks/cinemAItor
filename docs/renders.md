@@ -30,6 +30,12 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
       into its timeline slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no
       1/N normalization) — the mix is trimmed back to the video length and mapped as AAC (192 k).
       Re-encodes to H.264 (+ AAC when audio is mixed); silent plans keep `-an`.
+    - **Progress**: both paths run ffmpeg with `-nostats -progress pipe:1`; the reported `out_time`
+      (microseconds preferred, seconds fallback) is mapped onto the job progress scale — concat 20 →
+      90, fx 10 → 90 — and 100 is reported after the output file is stat-verified. The read loop
+      races against process exit (a killed ffmpeg with helper processes would otherwise hold the
+      pipe open), and a 250 ms poller kills ffmpeg when the job is cancelled so cancellation does
+      not wait on ffmpeg output.
   - `MockRenderEngine` — deterministic placeholder output, content-addressed on the plan (seeded
     from format + duration + a fingerprint of every item's source/source-edit, fx and the text and
     audio overlays; valid minimal WAV for the `wav` format) so rendering works on machines without

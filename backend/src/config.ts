@@ -7,6 +7,7 @@ export interface AppConfig {
   jwtSecret: string;
   logLevel: LogLevel;
   ffmpegPath: string;
+  ffprobePath: string;
   uploadMaxBytes: number;
   jobConcurrencyGpu: number;
   jobConcurrencyCpu: number;
@@ -49,6 +50,7 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
     jwtSecret,
     logLevel: logLevel ?? "info",
     ffmpegPath: env.get("FFMPEG_PATH") ?? "ffmpeg",
+    ffprobePath: env.get("FFPROBE_PATH") ?? "ffprobe",
     uploadMaxBytes,
     jobConcurrencyGpu,
     jobConcurrencyCpu,

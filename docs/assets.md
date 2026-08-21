@@ -36,8 +36,10 @@ and audit logs.
 - Proxies are generated asynchronously as `proxy` generation jobs (model-less jobs dispatched by the
   normal job runner): uploading or registering a version queues one automatically.
 - Generation uses ffmpeg when available (`FFMPEG_PATH`), transcoding to a compact container (720p
-  H.264 + AAC for video, 320px JPEG for images, 128 kbps MP3 for audio). Without ffmpeg a
-  deterministic mock proxy is written instead, so the workflow degrades gracefully.
+  H.264 + AAC for video, 320px JPEG for images, 128 kbps MP3 for audio). The scratch output carries
+  the target extension — ffmpeg infers the output format from the file name — and a failed transcode
+  surfaces ffmpeg's stderr in the job error. Without ffmpeg a deterministic mock proxy is written
+  instead, so the workflow degrades gracefully.
 - `POST .../proxy` regenerates a version's proxy (a fresh job, re-linking `proxy_path` on success);
   `GET .../proxy` streams the proxy file (404 until the job has produced one).
 
