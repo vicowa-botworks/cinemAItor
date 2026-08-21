@@ -178,11 +178,13 @@ The product track follows `MASTER-PLAN.md`.
       (unlocked video/overlay tracks, top track wins): proxy-first media resolution with master
       fallback for the active/preview version, per-clip speed/fade-in-fade-out (applied to
       playbackRate, opacity, and audio volume), and CSS-filter approximations of the stored color
-      grade + temperature. Audio-track items are mixed from a small pool of `<audio>` elements with
-      the version-level gain and trim window (gated to the active/preview version, whose
-      server-fetched master already has adjustments applied) plus item fades; text/subtitle items
-      render as positioned overlays. The pure geometry (active-visual/audio/text selection, source
-      time at timeline time, fade factors, grade → filter mapping, in/out range) lives in
+      grade + temperature. Audio-track items are mixed from a small pool of `<audio>` elements: the
+      served stream is the unadjusted stored file, so the version-level gain and trim window are
+      applied client-side (only the active version carries adjustments — the adjustments UI targets
+      that version); audio plays for the asset's active/preview version only, since the media
+      endpoint streams that version's file. Item fades apply on top; text/subtitle items render as
+      positioned overlays. The pure geometry (active-visual/audio/text selection, source time at
+      timeline time, fade factors, grade → filter mapping, in/out range) lives in
       `frontend/src/timeline-playback.js` with unit tests; the component drives it from a
       requestAnimationFrame loop and emits `playheadchange` (~10 Hz) which the ruler playhead
       follows. The ruler now also drag-scrubs (pointer capture) in addition to click-to-set.
