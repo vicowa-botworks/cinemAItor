@@ -1,5 +1,6 @@
 import { getDb } from "./database.ts";
 import { badRequest } from "../errors.ts";
+import { emitJobProgress, emitJobStatus } from "../services/job_events.ts";
 
 export const JOB_STATUSES = [
   "queued",
@@ -267,6 +268,7 @@ export function createJob(userId: number, input: CreateJobInput): GenerationJob 
     now,
   );
   addJobEvent(id, "created", "Job created", { user_id: userId, job_type: input.job_type });
+  emitJobStatus(id, "queued");
   return getJob(id) as GenerationJob;
 }
 
@@ -299,7 +301,10 @@ export function claimJob(
     candidate.id,
   );
   const job = statusOf(candidate.id) === "running" ? getJob(candidate.id) : undefined;
-  if (job) addJobEvent(job.id, "started", "Job started", { owner });
+  if (job) {
+    addJobEvent(job.id, "started", "Job started", { owner });
+    emitJobStatus(job.id, "running");
+  }
   return job;
 }
 
@@ -316,6 +321,7 @@ export function updateJobProgress(id: string, progress: number): void {
   db.prepare(
     "UPDATE generation_jobs SET progress = ? WHERE id = ? AND status = 'running'",
   ).run(clamped, id);
+  emitJobProgress(id, clamped);
 }
 
 export function finishJob(
@@ -369,6 +375,7 @@ export function finishJob(
         ? "Cancellation requested"
         : "Job cancelled",
     );
+    emitJobStatus(id, status);
   }
   return job;
 }
@@ -396,6 +403,7 @@ export function retryJob(id: string): GenerationJob | undefined {
   const updated = getJob(id);
   if (updated && updated.status === "queued") {
     addJobEvent(id, "retried", "Job re-queued for retry");
+    emitJobStatus(id, "queued");
   }
   return updated;
 }
@@ -434,6 +442,7 @@ export function recoverStaleJobs(leaseGraceSeconds = 5): string[] {
        WHERE id = ?`,
     ).run(row.id);
     addJobEvent(row.id, "recovered", "Lease expired; job re-queued");
+    emitJobStatus(row.id, "queued");
   }
   return rows.map((r) => r.id);
 }

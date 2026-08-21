@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { jobEvents } from "../job-events.js";
 import "./audio-dialog.js";
 
 const SCALE = 60;
@@ -607,6 +608,7 @@ export class TimelineDetail extends LitElement {
     this.renderBusy = false;
     this._renderTimer = null;
     this._drag = null;
+    this._unsubscribeEvents = null;
   }
 
   async connectedCallback() {
@@ -617,11 +619,14 @@ export class TimelineDetail extends LitElement {
           "",
       );
     await this._load();
+    this._unsubscribeEvents = jobEvents.subscribe((ev) => this._onLiveEvent(ev));
   }
 
   disconnectedCallback() {
     super.disconnectedCallback?.();
     this._stopRenderPolling();
+    this._unsubscribeEvents?.();
+    this._unsubscribeEvents = null;
     window.removeEventListener("pointermove", this._onDragMove);
     window.removeEventListener("pointerup", this._onDragUp);
   }
@@ -1217,17 +1222,32 @@ export class TimelineDetail extends LitElement {
       if (!this.renderJob) return;
       api
         .getRenderJob(this.renderJob.id)
-        .then((job) => {
-          this.renderJob = job;
-          if (TERMINAL_STATUSES.has(job.status)) {
-            this._stopRenderPolling();
-            if (job.status === "succeeded") {
-              this._loadExports();
-            }
-          }
-        })
+        .then((job) => this._applyRenderJob(job))
         .catch(() => {});
     }, 2000);
+  }
+
+  _applyRenderJob(job) {
+    this.renderJob = job;
+    if (TERMINAL_STATUSES.has(job.status)) {
+      this._stopRenderPolling();
+      if (job.status === "succeeded") {
+        this._loadExports();
+      }
+    }
+  }
+
+  /** Live render updates over the WebSocket fast path. */
+  _onLiveEvent(ev) {
+    if (!ev || !this.renderJob || ev.renderId !== this.renderJob.id) return;
+    if (ev.kind === "progress" && typeof ev.progress === "number") {
+      this.renderJob = { ...this.renderJob, progress: ev.progress };
+    } else if (ev.kind === "status") {
+      api
+        .getRenderJob(this.renderJob.id)
+        .then((job) => this._applyRenderJob(job))
+        .catch(() => {});
+    }
   }
 
   _stopRenderPolling() {

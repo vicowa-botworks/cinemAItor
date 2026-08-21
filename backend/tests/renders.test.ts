@@ -14,16 +14,20 @@ import {
 } from "../src/db/timelines.ts";
 import {
   cancelRenderJob,
+  claimRenderJob,
   createPreset,
   createRenderJob,
   ensureDefaultPresets,
+  finishRenderJob,
   getRenderJob,
   listPresets,
   listRenderEvents,
   listRenderJobs,
   rawGetRenderJob,
   TERMINAL_RENDER_STATUSES,
+  updateRenderProgress,
 } from "../src/db/renders.ts";
+import { type JobEventMessage, subscribeJobEvents } from "../src/services/job_events.ts";
 import { type RenderRunner, startRenderRunner } from "../src/services/render_runner.ts";
 import {
   buildAtempoFilters,
@@ -754,6 +758,30 @@ describe("renders", () => {
       const elapsedMs = performance.now() - start;
       assert(elapsedMs < 5000, `cancellation took ${elapsedMs}ms`);
       assert(seen.length >= 1, "expected a progress reading before cancellation");
+    });
+  });
+
+  describe("live event emission", () => {
+    it("emits status and progress events for render jobs", () => {
+      const seen: JobEventMessage[] = [];
+      const unsubscribe = subscribeJobEvents((m) => seen.push(m));
+      try {
+        const job = createRenderJob(ownerId, {
+          project_id: projectId,
+          timeline_id: timelineId,
+        });
+        claimRenderJob("emit-test", 120);
+        updateRenderProgress(job.id, 55);
+        finishRenderJob(job.id, "succeeded");
+        assertEquals(seen, [
+          { kind: "status", renderId: job.id, status: "queued" },
+          { kind: "status", renderId: job.id, status: "running" },
+          { kind: "progress", renderId: job.id, progress: 55 },
+          { kind: "status", renderId: job.id, status: "succeeded" },
+        ]);
+      } finally {
+        unsubscribe();
+      }
     });
   });
 });

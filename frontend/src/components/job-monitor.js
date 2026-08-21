@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { jobEvents } from "../job-events.js";
 
 const JOB_STATUSES = [
   "queued",
@@ -412,6 +413,7 @@ export class JobMonitor extends LitElement {
     this.error = "";
     this.notice = null;
     this._timer = null;
+    this._unsubscribeEvents = null;
   }
 
   async connectedCallback() {
@@ -419,11 +421,32 @@ export class JobMonitor extends LitElement {
     await this._loadReferenceData();
     await this._refresh();
     this._startTimer();
+    this._unsubscribeEvents = jobEvents.subscribe((ev) => this._onLiveEvent(ev));
   }
 
   disconnectedCallback() {
     super.disconnectedCallback?.();
     this._stopTimer();
+    this._unsubscribeEvents?.();
+    this._unsubscribeEvents = null;
+  }
+
+  /**
+   * Live updates over the WebSocket fast path. Progress events patch the
+   * local list in place (no fetch); status events trigger a full refresh so
+   * filters, active count, and detail fields stay consistent.
+   */
+  _onLiveEvent(ev) {
+    if (!ev || typeof ev.jobId !== "string") return;
+    if (ev.kind === "progress" && typeof ev.progress === "number") {
+      const index = this.jobs.findIndex((j) => j.id === ev.jobId);
+      if (index === -1) return;
+      const updated = [...this.jobs];
+      updated[index] = { ...updated[index], progress: ev.progress };
+      this.jobs = updated;
+    } else if (ev.kind === "status") {
+      if (!this.loading) this._refresh();
+    }
   }
 
   render() {

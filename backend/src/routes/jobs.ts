@@ -20,6 +20,10 @@ import {
   hasAssetPermission,
 } from "@cinemaItor/db/assets.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import { getUserById } from "@cinemaItor/db/schema.ts";
+import { verifyToken } from "@cinemaItor/services/jwt.ts";
+import { isSessionValid } from "@cinemaItor/services/sessions.ts";
+import { subscribeJobEvents } from "@cinemaItor/services/job_events.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -122,7 +126,38 @@ function validateInputVersions(
   });
 }
 
+/**
+ * WS handshake auth. Browsers cannot set the Authorization header on a
+ * WebSocket, so the bearer token travels as a `?token=` query param and is
+ * verified through the same path as the auth middleware.
+ */
+async function authenticateQueryToken(token: string | null): Promise<number> {
+  if (!token) throw unauthorized("Authentication required");
+  const payload = await verifyToken(token);
+  if (!payload) throw unauthorized("Invalid or expired token");
+  const user = getUserById(payload.sub);
+  if (!user || !user.is_active) throw unauthorized("User not found or inactive");
+  if (!payload.jti || !isSessionValid(payload.jti)) {
+    throw unauthorized("Session revoked or expired");
+  }
+  return user.id;
+}
+
 export const jobRouter = new Router()
+  .get("/ws/v1/jobs", async (ctx, _next) => {
+    if (!ctx.isUpgradable) throw badRequest("WebSocket upgrade required");
+    const search = ctx.request.url as unknown as URL;
+    await authenticateQueryToken(search.searchParams.get("token"));
+    const ws = ctx.upgrade();
+    const unsubscribe = subscribeJobEvents((message) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message));
+      }
+    });
+    // The client is read-only; inbound frames are ignored.
+    ws.onmessage = () => {};
+    ws.onclose = () => unsubscribe();
+  })
   .get("/api/v1/jobs", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
     const search = ctx.request.url as unknown as URL;

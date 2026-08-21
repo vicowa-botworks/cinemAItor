@@ -20,14 +20,15 @@ leases, and model runtimes behind a common adapter interface.
 
 ## Endpoints
 
-| Method | Endpoint                  | Description                                                |
-| ------ | ------------------------- | ---------------------------------------------------------- |
-| GET    | `/api/v1/jobs`            | List (filter: `status`, `project_id`, `model_id`, `limit`) |
-| POST   | `/api/v1/jobs`            | Create a queued job                                        |
-| GET    | `/api/v1/jobs/:id`        | Job detail                                                 |
-| POST   | `/api/v1/jobs/:id/cancel` | Cancel queued (immediate) or running (graceful)            |
-| POST   | `/api/v1/jobs/:id/retry`  | Re-queue a finished job (input state preserved)            |
-| GET    | `/api/v1/jobs/:id/events` | Event log for the job                                      |
+| Method   | Endpoint                  | Description                                                |
+| -------- | ------------------------- | ---------------------------------------------------------- |
+| GET      | `/api/v1/jobs`            | List (filter: `status`, `project_id`, `model_id`, `limit`) |
+| POST     | `/api/v1/jobs`            | Create a queued job                                        |
+| GET      | `/api/v1/jobs/:id`        | Job detail                                                 |
+| POST     | `/api/v1/jobs/:id/cancel` | Cancel queued (immediate) or running (graceful)            |
+| POST     | `/api/v1/jobs/:id/retry`  | Re-queue a finished job (input state preserved)            |
+| GET      | `/api/v1/jobs/:id/events` | Event log for the job                                      |
+| GET (WS) | `/ws/v1/jobs`             | Live job/render updates (WebSocket, see below)             |
 
 Creation validates the model: it must exist, be **enabled**, and its task types must include the
 requested `job_type`. Target/input asset permissions are checked too. `prompt_text` is required
@@ -49,7 +50,29 @@ except for image-input tasks.
   id/type, model id/name/version/backend, prompt, negative prompt, seed used, settings, input
   versions, request context, and candidate index/count.
 
-## Notes
+## Live updates (WebSocket)
 
-- Live push updates (WebSocket `/ws/v1/jobs`) are a follow-up; clients poll the job and its events
-  endpoints in the meantime.
+`GET /ws/v1/jobs` upgrades to a WebSocket that pushes job and render updates to connected clients.
+
+- **Auth**: browsers cannot set the `Authorization` header on a WebSocket handshake, so the bearer
+  token is passed as `?token=...` and verified through the same path as the auth middleware (JWT
+  signature + expiry, active user, unrevoked session). A failed handshake returns `401` before the
+  upgrade.
+- **Messages** (JSON, one object per frame):
+  - `{ "kind": "progress", jobId, progress }` — generation job progress (0-100)
+  - `{ "kind": "status", jobId, status }` — generation job transition (`queued` / `running` /
+    `succeeded` / `failed` / `cancelled`)
+  - `{ "kind": "progress", renderId, progress }` — render job progress
+  - `{ "kind": "status", renderId, status }` — render job transition
+- **Source**: events are emitted from the job/render store write paths (`createJob`, `claimJob`,
+  `updateJobProgress`, `finishJob`, `retryJob`, `recoverStaleJobs`, and the render equivalents), so
+  every transition is pushed exactly once regardless of which code path performed it.
+- **Scope**: one shared in-process broadcast per server; connections are read-only (inbound frames
+  are ignored) and no messages are buffered for absent subscribers. A single instance is expected,
+  so a multi-process deployment would need a fan-out mechanism (e.g. pub/sub) added.
+- **Client side** (`frontend/src/job-events.js`): a small shared client multiplexes one socket
+  across all mounted consumers (job monitor, timeline render panel), authenticates with the stored
+  token, reconnects with exponential backoff (1 s base, 30 s cap) while any listener is subscribed,
+  and closes the socket when the last consumer unmounts. Consumers keep their 2-3 second polling as
+  a fallback: progress frames patch the local list in place, status frames trigger a full refresh so
+  filters and detail fields stay consistent.

@@ -65,7 +65,7 @@ function requestLogger(logger: ReturnType<typeof createLogger>): Middleware {
 
 export function createApp(
   config: AppConfig = loadConfig(),
-): Application & { jobRunner?: JobRunner } {
+): Application & { jobRunner?: JobRunner; renderRunner?: RenderRunner } {
   const diagnosticSink = createDiagnosticLogSink();
   const logger = createLogger(config.logLevel, { component: "http" }, diagnosticSink);
   getDb();
