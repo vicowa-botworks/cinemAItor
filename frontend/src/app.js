@@ -4,6 +4,11 @@ import "./components/app-header.js";
 import "./components/login-form.js";
 import "./components/project-list.js";
 import "./components/project-detail.js";
+import "./components/asset-list.js";
+import "./components/asset-detail.js";
+import "./components/asset-card.js";
+import "./components/asset-form.js";
+import "./components/asset-upload.js";
 import "./components/movie-list.js";
 import "./components/movie-detail.js";
 
@@ -28,6 +33,7 @@ export class AppRoot extends LitElement {
     userName: {},
     currentView: {},
     viewParams: {},
+    assetProjectId: {},
   };
 
   constructor() {
@@ -36,6 +42,7 @@ export class AppRoot extends LitElement {
     this.userName = "";
     this.currentView = "login";
     this.viewParams = {};
+    this.assetProjectId = null;
   }
 
   connectedCallback() {
@@ -117,13 +124,37 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "projects";
+    } else if (hash === "#/assets") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "assets";
+      this.assetProjectId = null;
     } else if (hash.startsWith("#/project/")) {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
         return;
       }
-      this.currentView = "project-detail";
-      const match = hash.match(/\/project\/([^/]+)/);
+      const assetMatch = hash.match(/^#\/project\/([^/]+)\/assets$/);
+      if (assetMatch) {
+        this.currentView = "assets";
+        this.assetProjectId = decodeURIComponent(assetMatch[1]);
+      } else {
+        this.currentView = "project-detail";
+        this.assetProjectId = null;
+        const match = hash.match(/\/project\/([^/]+)/);
+        if (match) {
+          this.viewParams.id = decodeURIComponent(match[1]);
+        }
+      }
+    } else if (hash.startsWith("#/asset/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "asset-detail";
+      const match = hash.match(/^#\/asset\/([^/]+)/);
       if (match) {
         this.viewParams.id = decodeURIComponent(match[1]);
       }
@@ -176,6 +207,17 @@ export class AppRoot extends LitElement {
       case "project-detail":
         return html`
           <project-detail .projectId=${this.viewParams.id}></project-detail>
+        `;
+      case "assets":
+        return html`<asset-list .projectId=${this.assetProjectId}></asset-list>`;
+      case "asset-detail":
+        return html`
+          <asset-detail
+            .assetId=${this.viewParams.id}
+            .backHash=${this.assetProjectId
+              ? `#/project/${encodeURIComponent(this.assetProjectId)}/assets`
+              : "#/assets"}
+          ></asset-detail>
         `;
       case "movies":
         return html`<movie-list></movie-list>`;

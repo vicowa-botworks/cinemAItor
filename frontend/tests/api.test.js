@@ -116,6 +116,131 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 asset endpoints", () => {
+    it("listAssets builds the query from the filter", async () => {
+      await api.listAssets({ project_id: "p1", asset_type: "image", q: "hero" });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/assets?project_id=p1&asset_type=image&q=hero",
+      );
+    });
+
+    it("listAssets omits empty filter values", async () => {
+      await api.listAssets({ q: "", tag: undefined, status: null });
+      assertEquals(captured[0].url, "/api/v1/assets");
+    });
+
+    it("getAsset requests /api/v1/assets/:id", async () => {
+      await api.getAsset("a-1");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1");
+    });
+
+    it("createAsset posts to /api/v1/assets", async () => {
+      await api.createAsset({ unique_slug: "hero", display_name: "Hero" });
+      assertEquals(captured[0].url, "/api/v1/assets");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(
+        JSON.parse(captured[0].options.body).unique_slug,
+        "hero",
+      );
+    });
+
+    it("updateAsset patches /api/v1/assets/:id", async () => {
+      await api.updateAsset("a-1", { status: "approved" });
+      assertEquals(captured[0].url, "/api/v1/assets/a-1");
+      assertEquals(captured[0].options.method, "PATCH");
+    });
+
+    it("deleteAsset deletes /api/v1/assets/:id", async () => {
+      await api.deleteAsset("a-1");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("uploadAsset posts a multipart body without JSON content type", async () => {
+      const file = new File(["bytes"], "a.png", { type: "image/png" });
+      await api.uploadAsset("a-1", file, "first take");
+      const { url, options } = captured[0];
+      assertEquals(url, "/api/v1/assets/a-1/upload");
+      assertEquals(options.method, "POST");
+      assert(options.body instanceof FormData);
+      assertEquals(options.body.get("file"), file);
+      assertEquals(options.body.get("notes"), "first take");
+      assertEquals(options.headers["Content-Type"], undefined);
+    });
+
+    it("listAssetVersions requests /api/v1/assets/:id/versions", async () => {
+      await api.listAssetVersions("a-1");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/versions");
+    });
+
+    it("restoreAssetVersion posts to the restore path", async () => {
+      await api.restoreAssetVersion("a-1", "v-9");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/versions/v-9/restore");
+      assertEquals(captured[0].options.method, "POST");
+    });
+
+    it("addAssetAlias posts the alias slug", async () => {
+      await api.addAssetAlias("a-1", "hero_v2");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/aliases");
+      assertEquals(JSON.parse(captured[0].options.body).alias_slug, "hero_v2");
+    });
+
+    it("removeAssetAlias deletes the alias path", async () => {
+      await api.removeAssetAlias("a-1", "hero_v2");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/aliases/hero_v2");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("addAssetTag posts the tag", async () => {
+      await api.addAssetTag("a-1", "vfx");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/tags");
+      assertEquals(JSON.parse(captured[0].options.body).tag, "vfx");
+    });
+
+    it("removeAssetTag deletes the tag path", async () => {
+      await api.removeAssetTag("a-1", "vfx");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/tags/vfx");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("regenerateAssetProxy posts to the proxy path", async () => {
+      await api.regenerateAssetProxy("a-1", "v-9");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/versions/v-9/proxy");
+      assertEquals(captured[0].options.method, "POST");
+    });
+
+    it("encodes asset ids and slugs in paths", async () => {
+      await api.getAsset("a b/c");
+      assertEquals(captured[0].url, "/api/v1/assets/a%20b%2Fc");
+      await api.removeAssetAlias("a-1", "has space");
+      assertEquals(
+        captured[1].url,
+        "/api/v1/assets/a-1/aliases/has%20space",
+      );
+    });
+  });
+
+  describe("fetchMediaUrl", () => {
+    it("resolves a blob url and the content type", async () => {
+      const blob = new Blob(["img"], { type: "image/png" });
+      globalThis.fetch = async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => blob,
+      });
+      const media = await api.fetchMediaUrl("/assets/a-1/preview");
+      assert(media.url.startsWith("blob:"));
+      assertEquals(media.type, "image/png");
+      URL.revokeObjectURL(media.url);
+    });
+
+    it("throws ApiError for failed media requests", async () => {
+      globalThis.fetch = async () => jsonResponse({ error: "not found" }, 404);
+      await assertRejects(() => api.fetchMediaUrl("/assets/a-1/preview"), ApiError);
+    });
+  });
+
   describe("legacy demo endpoints", () => {
     it("keeps movie calls on the /api base", async () => {
       await api.getMovies();

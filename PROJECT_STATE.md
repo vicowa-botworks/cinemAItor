@@ -1,6 +1,8 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow shipped;
+## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
+
+phase 2 asset library shipped;
 
 remaining: skills, templates, advanced storage, audio polish, model benchmark)
 
@@ -97,11 +99,18 @@ removed.
       user, login, logout with server-side session revocation, `me`), project dashboard (list
       accessible projects, create, edit settings, soft delete) on `/api/v1/projects`, `#/projects`
       becomes the default route; legacy movie demo views remain until the phase 7 cleanup
+- [x] Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): `#/assets` global library plus
+      per-project `#/project/:id/assets` (linked from project detail); asset cards with lazy
+      blob-preview thumbnails; create (metadata-only asset) and upload (multipart `POST /upload`
+      producing the first version) flows with auto-slugification, type/scope/project selection and
+      version notes; list filters (search, scope, type, status, tag) mapped to the v1 query params;
+      asset detail with image/video/audio blob preview, master/proxy switch + proxy regeneration,
+      metadata editing, new-version upload, version history with restore, tag and alias management,
+      soft delete
 
 ### In Progress
 
-- [ ] Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): upload, list/search/filter,
-      versions/restore, preview
+- (none)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -143,4 +152,5 @@ removed.
 - Subtitles + text overlays: Thu Aug 20 2026
 - Proxy workflow polish: Thu Aug 20 2026
 - Render draft/final source selection: Thu Aug 20 2026
-- Frontend phase 1 (v1 auth + project dashboard, MASTER-PLAN §15.3): Thu Aug 21 2026
+- Frontend phase 1 (v1 auth + project dashboard, MASTER-PLAN §15.3): Thu Aug 20 2026
+- Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): Thu Aug 20 2026
