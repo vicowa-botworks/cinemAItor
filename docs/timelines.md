@@ -50,6 +50,36 @@ to) an asset version; it is drawn as a video overlay at render time (`drawtext`)
 All endpoints require authentication and follow project permissions (read for fetches, write for
 mutations).
 
+## Playback preview (frontend, TIM-010)
+
+The timeline editor plays the timeline in the browser above the canvas (`timeline-preview`,
+supported by the pure module `timeline-playback.js`). It is a preview: the render pipeline remains
+the source of truth for final output.
+
+- **Source selection matches the render runner**: the visible frame comes from the topmost unlocked
+  `video`/`overlay` track item at the playhead time; audio-track items are mixed; `text`/`subtitle`
+  items render as positioned overlays.
+- **Media resolution is proxy-first**: item version → `GET /versions/:versionId/proxy`; if the
+  version is the asset's active or preview version, a failed/missing proxy falls back to
+  `GET /preview` (master). Other versions have no fallback — the shared preview endpoint only serves
+  the asset's active/preview version _file_, so it can only stand in for that version. Audio items
+  play the master directly (full quality) under the same active/preview restriction; an audio item
+  referencing any other version is skipped rather than playing the wrong file.
+- **Per-clip fidelity**: `speed` maps to media `playbackRate` (source time is recomputed with the
+  same math as the render engine — `source_offset + (t - start) * speed`); `fade_in`/`fade_out`
+  scale video opacity and audio volume; `color_grade` (brightness/contrast/saturation/temperature)
+  is approximated with CSS filters (`brightness`/`contrast`/`saturate` + a warm/cool color tint).
+- **Audio mix**: both the proxy and the preview endpoint stream the stored file without adjustments
+  (they are non-destructive and applied at render time), so the preview applies them client-side:
+  version-level `gain_db` is added to the item fade volume on each pooled `<audio>` element, and the
+  version `trim` window gates playback (silence outside it). Adjustments are read from the asset's
+  _active_ version only — the adjustments UI targets that version, so no other version has any to
+  apply.
+- **Controls**: play/pause, stop (reset to 0), rate 0.25×–2×, and an in/out loop range (blank = full
+  timeline). Scrubbing works from the preview's own state and from the canvas ruler, which now
+  drag-scrubs in addition to click-to-set; the playhead line follows the preview at ~10 Hz while
+  playing.
+
 ## Endpoints
 
 | Method | Endpoint                                              | Description                                                                                                                             |

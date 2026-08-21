@@ -226,6 +226,8 @@ export class TimelineDetail extends LitElement {
       position: relative;
       border-bottom: 1px solid var(--color-border);
       cursor: crosshair;
+      user-select: none;
+      touch-action: none;
     }
 
     .tick {
@@ -582,6 +584,8 @@ export class TimelineDetail extends LitElement {
     this.editingName = false;
     this.nameDraft = "";
     this.playhead = 0;
+    this.previewVersions = new Map();
+    this._rulerEl = null;
     this.dragPreview = null;
     this.selectedItemId = null;
     this.fx = null;
@@ -629,6 +633,8 @@ export class TimelineDetail extends LitElement {
     this._unsubscribeEvents = null;
     window.removeEventListener("pointermove", this._onDragMove);
     window.removeEventListener("pointerup", this._onDragUp);
+    window.removeEventListener("pointermove", this._onRulerScrubMove);
+    window.removeEventListener("pointerup", this._onRulerScrubEnd);
   }
 
   async _load() {
@@ -651,6 +657,7 @@ export class TimelineDetail extends LitElement {
         .catch(() => []);
       this._buildClipNames();
       this._loadAudioWaveforms();
+      this._buildPreviewVersions();
       if (this.placeTrackId && !this._trackById(this.placeTrackId)) {
         this.placeTrackId = this.tracks[0]?.id ?? "";
       }
@@ -686,6 +693,39 @@ export class TimelineDetail extends LitElement {
       }
     }
     this.clipNames = map;
+  }
+
+  // Maps each resolvable version id to the asset context the preview player
+  // needs to fetch media (proxy-first, master fallback for the active or
+  // preview version only). Generated audio is global-scoped, so the audio
+  // asset list is merged in the same way the waveform loader does.
+  async _buildPreviewVersions() {
+    const map = new Map();
+    const add = (asset) => {
+      for (
+        const versionId of [
+          asset.active_version_id,
+          asset.preview_version_id,
+        ]
+      ) {
+        if (!versionId || map.has(versionId)) continue;
+        map.set(versionId, {
+          assetId: asset.id,
+          name: asset.name,
+          assetType: asset.asset_type,
+          activeVersionId: asset.active_version_id,
+          previewVersionId: asset.preview_version_id,
+        });
+      }
+    };
+    for (const asset of this.assets) add(asset);
+    const audioAssets = await api
+      .listAudioAssets()
+      .catch(() => []);
+    for (const asset of audioAssets) {
+      if (!this.assets.some((a) => a.id === asset.id)) add(asset);
+    }
+    this.previewVersions = map;
   }
 
   async _loadAudioWaveforms() {
@@ -1124,9 +1164,27 @@ export class TimelineDetail extends LitElement {
 
   // --- markers ---
 
-  _onRulerClick(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const sec = (e.clientX - rect.left) / SCALE;
+  _onRulerPointerDown(e) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    this._rulerEl = e.currentTarget;
+    this._setPlayheadFromClientX(e.clientX);
+    window.addEventListener("pointermove", this._onRulerScrubMove);
+    window.addEventListener("pointerup", this._onRulerScrubEnd, { once: true });
+  }
+
+  _onRulerScrubMove = (e) => {
+    this._setPlayheadFromClientX(e.clientX);
+  };
+
+  _onRulerScrubEnd = () => {
+    window.removeEventListener("pointermove", this._onRulerScrubMove);
+    this._rulerEl = null;
+  };
+
+  _setPlayheadFromClientX(clientX) {
+    if (!this._rulerEl) return;
+    const rect = this._rulerEl.getBoundingClientRect();
+    const sec = (clientX - rect.left) / SCALE;
     this.playhead = Math.max(0, round2(sec));
   }
 
@@ -1349,6 +1407,13 @@ export class TimelineDetail extends LitElement {
           `
           : null}
 
+        <timeline-preview
+          .tracks=${this.tracks}
+          .versions=${this.previewVersions}
+          .duration=${this.timeline.duration}
+          .playhead=${this.playhead}
+          @playheadchange=${(e) => (this.playhead = e.detail)}></timeline-preview>
+
         ${this._renderCanvas(width)}
 
         ${this._renderFxPanel()}
@@ -1374,11 +1439,11 @@ export class TimelineDetail extends LitElement {
       <div class="canvas">
         <div class="canvas-inner" style="width:${width}px;">
           <div class="row">
-            <div class="row-label">Ruler (click to set playhead)</div>
+            <div class="row-label">Ruler (click or drag to set playhead)</div>
             <div
               class="ruler"
               style="flex:1;"
-              @click=${this._onRulerClick}>
+              @pointerdown=${this._onRulerPointerDown}>
               ${ticks.map(
                 (i) =>
                   html`
