@@ -81,6 +81,8 @@ app-root (main router)
 │   │              parsing with status badges, asset picker, history view/restore)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, admin-gated install/enable/remove)
+├── job-monitor (queue monitor: auto-refresh polling, status/type/project filters,
+│   │            progress bars, per-job detail + event log, cancel/retry)
 ├── movie-list (legacy demo, removed in frontend phase 7)
 │   └── movie-card (individual item)
 └── movie-detail (legacy demo, removed in frontend phase 7)

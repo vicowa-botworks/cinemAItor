@@ -11,6 +11,7 @@ import "./components/asset-form.js";
 import "./components/asset-upload.js";
 import "./components/prompt-editor.js";
 import "./components/model-manager.js";
+import "./components/job-monitor.js";
 import "./components/movie-list.js";
 import "./components/movie-detail.js";
 
@@ -172,6 +173,12 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "models";
+    } else if (hash === "#/jobs") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "jobs";
     } else if (hash === "#/movies") {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
@@ -237,6 +244,8 @@ export class AppRoot extends LitElement {
         return html`<prompt-editor></prompt-editor>`;
       case "models":
         return html`<model-manager></model-manager>`;
+      case "jobs":
+        return html`<job-monitor></job-monitor>`;
       case "movies":
         return html`<movie-list></movie-list>`;
       case "movie-detail":

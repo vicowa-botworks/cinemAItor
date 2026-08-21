@@ -372,6 +372,39 @@ class ApiClient {
     return this.request("/models/hardware");
   }
 
+  // --- v1 jobs ---
+
+  listJobs(filter = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return this.request(`/jobs${query ? `?${query}` : ""}`);
+  }
+
+  getJob(id) {
+    return this.request(`/jobs/${encodeURIComponent(id)}`);
+  }
+
+  cancelJob(id) {
+    return this.request(`/jobs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+  }
+
+  retryJob(id) {
+    return this.request(`/jobs/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    });
+  }
+
+  listJobEvents(id) {
+    return this.request(`/jobs/${encodeURIComponent(id)}/events`);
+  }
+
   // --- legacy demo API (kept until the legacy surface is removed) ---
 
   getMovies() {

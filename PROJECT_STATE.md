@@ -2,8 +2,8 @@
 
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
-phase 3 prompt studio + model manager shipped; remaining: skills, templates, advanced storage, audio
-polish, model benchmark)
+phase 4 job monitor shipped; remaining: skills, templates, advanced storage, audio polish, model
+benchmark)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -109,12 +109,16 @@ removed.
 
 ### In Progress
 
-- [ ] Frontend phase 3 (MASTER-PLAN §15.3): prompt studio (`#/prompts`) with versioned editing per
+- [x] Frontend phase 3 (MASTER-PLAN §15.3): prompt studio (`#/prompts`) with versioned editing per
       scope (history view + restore, duplicate detection notice), live `@slug` / `@slug:vN`
       reference parsing with per-token status badges, asset picker that inserts references at the
       caret; model manager (`#/models`) with registry list/filters, hardware report + requirement
       warnings, per-model health check + checksum verification, admin-gated install (with network
       consent), enable/disable, and remove
+- [ ] Frontend phase 4 (MASTER-PLAN §15.3): job queue monitor (`#/jobs`) with auto-refresh polling
+      (WebSocket fallback until `/ws/v1/jobs` exists), status/type/project filters, live progress
+      bars, per-job detail (prompt, seed, settings, inputs, errors, event log), and cancel/retry
+      actions
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -158,3 +162,4 @@ removed.
 - Render draft/final source selection: Thu Aug 20 2026
 - Frontend phase 1 (v1 auth + project dashboard, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): Thu Aug 20 2026
+- Frontend phase 3 (prompt studio + model manager, MASTER-PLAN §15.3): Thu Aug 20 2026
