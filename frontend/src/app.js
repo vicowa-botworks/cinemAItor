@@ -17,6 +17,8 @@ import "./components/storyboard-detail.js";
 import "./components/scene-list.js";
 import "./components/scene-detail.js";
 import "./components/review-board.js";
+import "./components/timeline-list.js";
+import "./components/timeline-detail.js";
 import "./components/movie-list.js";
 import "./components/movie-detail.js";
 
@@ -226,6 +228,22 @@ export class AppRoot extends LitElement {
       if (match) {
         this.viewParams.jobId = decodeURIComponent(match[1]);
       }
+    } else if (hash.startsWith("#/timelines")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "timelines";
+    } else if (hash.startsWith("#/timeline/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "timeline-detail";
+      const match = hash.match(/^#\/timeline\/([^/?]+)/);
+      if (match) {
+        this.viewParams.id = decodeURIComponent(match[1]);
+      }
     } else if (hash === "#/movies") {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
@@ -307,6 +325,12 @@ export class AppRoot extends LitElement {
         `;
       case "review":
         return html`<review-board .jobId=${this.viewParams.jobId}></review-board>`;
+      case "timelines":
+        return html`<timeline-list></timeline-list>`;
+      case "timeline-detail":
+        return html`
+          <timeline-detail .timelineId=${this.viewParams.id}></timeline-detail>
+        `;
       case "movies":
         return html`<movie-list></movie-list>`;
       case "movie-detail":

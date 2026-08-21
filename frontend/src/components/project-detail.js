@@ -252,6 +252,10 @@ export class ProjectDetail extends LitElement {
               @click=${() => this._gotoCreative("/scenes")}>
               View scenes
             </button>
+            <button class="btn-edit"
+              @click=${() => this._gotoCreative("/timelines")}>
+              View timelines
+            </button>
             <button class="btn-delete" ?disabled=${this.deleting}
               @click=${this._deleteProject}>
               ${this.deleting ? "Deleting..." : "Delete"}

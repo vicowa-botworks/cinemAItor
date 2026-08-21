@@ -112,6 +112,9 @@ export class AppHeader extends LitElement {
                   "/models",
                 )}">Models</a>
                 <a href="#/jobs" class="${this._isActive("/jobs")}">Jobs</a>
+                <a href="#/timelines" class="${this._isActive(
+                  "/timeline",
+                )}">Timelines</a>
                 <a href="#/movies" class="${this._isActive(
                   "/movies",
                 )}">My Movies</a>
