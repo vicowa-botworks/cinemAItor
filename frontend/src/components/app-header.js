@@ -95,11 +95,16 @@ export class AppHeader extends LitElement {
           <nav class="nav">
             ${this.isLoggedIn
               ? html`
-                <a href="#/movies" class="${this._isActive("/movies")}">My Movies</a>
-                <a href="#/create" class="${this._isActive("/create")}">Create</a>
+                <a href="#/projects" class="${this._isActive(
+                  "/projects",
+                )}">Projects</a>
+                <a href="#/movies" class="${this._isActive(
+                  "/movies",
+                )}">My Movies</a>
                 <div class="user-info">
                   <span class="user-name">${this.userName}</span>
-                  <button class="btn-logout" @click=${this._logout}>Logout</button>
+                  <button class="btn-logout" @click=${this
+                    ._logout}>Logout</button>
                 </div>
               `
               : html`
@@ -117,12 +122,14 @@ export class AppHeader extends LitElement {
   }
 
   _goHome() {
-    window.location.hash = this.isLoggedIn ? "#/movies" : "#/login";
+    window.location.hash = this.isLoggedIn ? "#/projects" : "#/login";
   }
 
   _logout() {
     localStorage.removeItem("token");
-    window.dispatchEvent(new CustomEvent("auth-change", { detail: { loggedIn: false } }));
+    window.dispatchEvent(
+      new CustomEvent("auth-change", { detail: { loggedIn: false } }),
+    );
     window.location.hash = "#/login";
   }
 }

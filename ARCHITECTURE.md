@@ -65,10 +65,15 @@ only planned processing step:
 ```
 app-root (main router)
 ├── app-header (navigation)
-├── login-form (auth)
-├── movie-list (grid view)
+├── login-form (v1 auth: login / bootstrap)
+├── project-list (project dashboard)
+│   ├── project-card (individual project)
+│   └── project-form (create)
+├── project-detail (project settings, edit, delete)
+│   └── project-form (edit)
+├── movie-list (legacy demo, removed in frontend phase 7)
 │   └── movie-card (individual item)
-└── movie-detail (detail view)
+└── movie-detail (legacy demo, removed in frontend phase 7)
 ```
 
 **Key design decisions:**
