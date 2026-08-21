@@ -82,8 +82,11 @@ app-root (main router)
 │   │              parsing with status badges, asset picker, history view/restore)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, admin-gated install/enable/remove)
-├── job-monitor (queue monitor: auto-refresh polling, status/type/project filters,
-│   │            progress bars, per-job detail + event log, cancel/retry)
+├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
+│   │            updates (see `job-events.js`), status/type/project filters, progress bars,
+│   │            per-job detail + event log, cancel/retry)
+├── job-events (shared WebSocket client: one socket multiplexed across consumers, token
+│   │           handshake auth, reconnect with backoff, polling kept as fallback)
 ├── storyboard-list (board list + create; project filter via #/storyboards?project=)
 ├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
 │   │                 live preview polling)
@@ -150,6 +153,8 @@ server.ts (entry point)
   │   ├── Adapters: mock (deterministic); provenance on produced asset versions
   │   ├── Model-less `proxy` jobs (ffmpeg or mock transcode of media proxies); list filter
   │   │   `?job_type=`
+  │   ├── WebSocket `/ws/v1/jobs` (?token= auth): pushes job + render progress/status
+  │   │   frames from the store write paths (in-process broadcast, read-only clients)
   │   └── (see docs/jobs.md)
  ├── Storyboard/scene/shot routes (auth middleware, project-permission gated)
  │   ├── Storyboards + ordered panels; scenes + ordered shots

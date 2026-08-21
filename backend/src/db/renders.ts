@@ -3,6 +3,7 @@ import { badRequest, conflict, notFound } from "../errors.ts";
 import { getProjectAccessible } from "./projects.ts";
 import { getTimeline } from "./timelines.ts";
 import { hasAssetPermission } from "./assets.ts";
+import { emitRenderProgress, emitRenderStatus } from "../services/job_events.ts";
 
 export const RENDER_STATUSES = [
   "queued",
@@ -333,6 +334,7 @@ export function createRenderJob(
   );
   addRenderEvent(id, "info", "Render job created");
   logAudit(userId, "render.create", id, { timeline_id: timeline.id });
+  emitRenderStatus(id, "queued");
   return rawGetRenderJob(id) as RenderJob;
 }
 
@@ -350,10 +352,12 @@ export function claimRenderJob(
   const expires = new Date(Date.now() + leaseSeconds * 1000).toISOString();
   db.prepare(
     `UPDATE render_jobs
-     SET status = 'running', started_at = ?, lease_owner = ?, lease_expires_at = ?
-     WHERE id = ? AND status = 'queued'`,
+      SET status = 'running', started_at = ?, lease_owner = ?, lease_expires_at = ?
+      WHERE id = ? AND status = 'queued'`,
   ).run(now, owner, expires, row.id);
-  return rawGetRenderJob(row.id);
+  const job = rawGetRenderJob(row.id);
+  if (job && job.status === "running") emitRenderStatus(job.id, "running");
+  return job;
 }
 
 export function updateRenderProgress(jobId: string, progress: number): void {
@@ -362,6 +366,7 @@ export function updateRenderProgress(jobId: string, progress: number): void {
   db.prepare(
     `UPDATE render_jobs SET progress = ? WHERE id = ? AND status = 'running'`,
   ).run(clamped, jobId);
+  emitRenderProgress(jobId, clamped);
 }
 
 export function finishRenderJob(
@@ -409,6 +414,7 @@ export function finishRenderJob(
         ? "Render completed"
         : `Render ${status}${fields.errorText ? `: ${fields.errorText}` : ""}`,
     );
+    emitRenderStatus(id, status);
   }
   return job;
 }
@@ -441,6 +447,7 @@ export function recoverStaleRenderJobs(owner: string): number {
        WHERE id = ? AND status = 'running'`,
     ).run(row.id);
     addRenderEvent(row.id, "warn", "Lease expired; job recovered to queue");
+    emitRenderStatus(row.id, "queued");
   }
   void owner;
   return stale.length;

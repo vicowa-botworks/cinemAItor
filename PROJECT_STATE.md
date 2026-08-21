@@ -160,14 +160,25 @@ The product track follows `MASTER-PLAN.md`.
       format from the file name) and failed transcodes include ffmpeg's stderr in the job error, and
       audio analysis probes with ffprobe (`FFPROBE_PATH`, default `ffprobe`) instead of passing
       ffprobe-only flags to ffmpeg
+- [x] WebSocket `/ws/v1/jobs` live updates (Milestone 3 follow-up): authenticated WebSocket
+      (`?token=` query param verified through the auth-middleware path — JWT + session) that pushes
+      job and render updates to every connected client. Frames are
+      `{kind: "progress"|"status", jobId|renderId, progress?|status?}` and are emitted from the
+      store write paths (create/claim/updateProgress/finish/retry/recover for both generation jobs
+      and render jobs), so every transition is pushed exactly once regardless of code path
+      (in-process broadcast; single-instance assumption documented). Frontend: shared
+      `job-events.js` client (one socket multiplexed across consumers, reconnect with 1s→30s
+      backoff, closes when the last consumer unmounts); job-monitor patches progress in place and
+      refreshes on status, timeline render panel does the same for the active render; 2-3s polling
+      is kept as a fallback so the UI degrades to the previous behavior when the socket cannot
+      connect
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 11 follow-ups: basic mixer
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
-- [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
-      (ComfyUI/local CLI)
+- [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Thumbnails in the timeline view (STO-007..008) — waveforms now ship with phase 7, asset
       proxies with the proxy workflow above
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
