@@ -221,6 +221,154 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 prompt endpoints", () => {
+    it("savePrompt posts scope, id, and content", async () => {
+      await api.savePrompt({
+        scope_type: "scene",
+        scope_id: "scene-42",
+        content: "@hero in @room",
+        roles: { hero: "character" },
+      });
+      const { url, options } = captured[0];
+      assertEquals(url, "/api/v1/prompts");
+      assertEquals(options.method, "POST");
+      const body = JSON.parse(options.body);
+      assertEquals(body.scope_type, "scene");
+      assertEquals(body.scope_id, "scene-42");
+      assertEquals(body.content, "@hero in @room");
+      assertEquals(body.roles.hero, "character");
+    });
+
+    it("savePrompt omits roles when not provided", async () => {
+      await api.savePrompt({ scope_type: "prompt", scope_id: "p1", content: "x" });
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.roles, undefined);
+    });
+
+    it("listPromptVersions requests the scope path with encoding", async () => {
+      await api.listPromptVersions("storyboard panel", "a b/c");
+      assertEquals(
+        captured[0].url,
+        "/api/v1/prompts/storyboard%20panel/a%20b%2Fc",
+      );
+    });
+
+    it("getLatestPrompt hits the latest subpath", async () => {
+      await api.getLatestPrompt("scene", "s1");
+      assertEquals(captured[0].url, "/api/v1/prompts/scene/s1/latest");
+    });
+
+    it("getPromptVersion requests /api/v1/prompts/:id", async () => {
+      await api.getPromptVersion("pv-1");
+      assertEquals(captured[0].url, "/api/v1/prompts/pv-1");
+    });
+
+    it("restorePrompt posts to the restore path", async () => {
+      await api.restorePrompt("pv-1");
+      assertEquals(captured[0].url, "/api/v1/prompts/pv-1/restore");
+      assertEquals(captured[0].options.method, "POST");
+    });
+  });
+
+  describe("v1 reference endpoints", () => {
+    it("parseReferences posts text only by default", async () => {
+      await api.parseReferences({ text: "@hero walks" });
+      const { url, options } = captured[0];
+      assertEquals(url, "/api/v1/references/parse");
+      assertEquals(options.method, "POST");
+      const body = JSON.parse(options.body);
+      assertEquals(body, { text: "@hero walks" });
+    });
+
+    it("parseReferences includes roles and persist when provided", async () => {
+      await api.parseReferences({
+        text: "@hero",
+        roles: { hero: "character" },
+        persist: { scope_type: "prompt", scope_id: "p1" },
+      });
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.roles.hero, "character");
+      assertEquals(body.persist.scope_type, "prompt");
+      assertEquals(body.persist.scope_id, "p1");
+    });
+
+    it("auditReferences builds the query from the filter", async () => {
+      await api.auditReferences({ status: "missing", source_type: "prompt" });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/references/audit?status=missing&source_type=prompt",
+      );
+    });
+
+    it("auditReferences omits empty filter values", async () => {
+      await api.auditReferences({ status: "", asset_id: null });
+      assertEquals(captured[0].url, "/api/v1/references/audit");
+    });
+
+    it("replaceReference posts slug and optional version", async () => {
+      await api.replaceReference("ref-1", { slug: "hero", version: 2 });
+      const { url, options } = captured[0];
+      assertEquals(url, "/api/v1/references/ref-1/replace");
+      assertEquals(options.method, "POST");
+      assertEquals(JSON.parse(options.body), { slug: "hero", version: 2 });
+    });
+  });
+
+  describe("v1 model endpoints", () => {
+    it("listModels builds the query from the filter", async () => {
+      await api.listModels({ enabled: "true", task_type: "audio", query: "tts" });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/models?enabled=true&task_type=audio&query=tts",
+      );
+    });
+
+    it("listModels omits empty filter values", async () => {
+      await api.listModels({ query: "", task_type: undefined });
+      assertEquals(captured[0].url, "/api/v1/models");
+    });
+
+    it("registerModel posts to /api/v1/models", async () => {
+      await api.registerModel({ name: "M", backend: "mock" });
+      assertEquals(captured[0].url, "/api/v1/models");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).backend, "mock");
+    });
+
+    it("updateModel patches /api/v1/models/:id", async () => {
+      await api.updateModel("m-1", { enabled: false });
+      assertEquals(captured[0].url, "/api/v1/models/m-1");
+      assertEquals(captured[0].options.method, "PATCH");
+    });
+
+    it("deleteModel deletes /api/v1/models/:id", async () => {
+      await api.deleteModel("m-1");
+      assertEquals(captured[0].url, "/api/v1/models/m-1");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("installModel posts consent only when provided", async () => {
+      await api.installModel("m-1");
+      assertEquals(JSON.parse(captured[0].options.body), {});
+      await api.installModel("m-1", { consent: true });
+      assertEquals(JSON.parse(captured[1].options.body), { consent: true });
+    });
+
+    it("verifyModel and healthCheckModel post to their subpaths", async () => {
+      await api.verifyModel("m-1");
+      await api.healthCheckModel("m 1");
+      assertEquals(captured[0].url, "/api/v1/models/m-1/verify");
+      assertEquals(captured[1].url, "/api/v1/models/m%201/health-check");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(captured[1].options.method, "POST");
+    });
+
+    it("getModelsHardware requests the hardware report", async () => {
+      await api.getModelsHardware();
+      assertEquals(captured[0].url, "/api/v1/models/hardware");
+    });
+  });
+
   describe("fetchMediaUrl", () => {
     it("resolves a blob url and the content type", async () => {
       const blob = new Blob(["img"], { type: "image/png" });

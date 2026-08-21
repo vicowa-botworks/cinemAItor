@@ -77,6 +77,10 @@ app-root (main router)
 │   └── asset-upload (create + multipart file upload → first version)
 ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
 │   │              tags, aliases, delete)
+├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
+│   │              parsing with status badges, asset picker, history view/restore)
+├── model-manager (registry list/filters, hardware report + warnings, per-model
+│   │              health check + checksum verify, admin-gated install/enable/remove)
 ├── movie-list (legacy demo, removed in frontend phase 7)
 │   └── movie-card (individual item)
 └── movie-detail (legacy demo, removed in frontend phase 7)

@@ -235,6 +235,143 @@ class ApiClient {
     );
   }
 
+  // --- v1 prompts ---
+
+  savePrompt({ scope_type, scope_id, content, roles }) {
+    const body = { scope_type, scope_id, content };
+    if (roles) {
+      body.roles = roles;
+    }
+    return this.request("/prompts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  listPromptVersions(scopeType, scopeId) {
+    return this.request(
+      `/prompts/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}`,
+    );
+  }
+
+  getLatestPrompt(scopeType, scopeId) {
+    return this.request(
+      `/prompts/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}/latest`,
+    );
+  }
+
+  getPromptVersion(id) {
+    return this.request(`/prompts/${encodeURIComponent(id)}`);
+  }
+
+  restorePrompt(id) {
+    return this.request(`/prompts/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+    });
+  }
+
+  // --- v1 references ---
+
+  parseReferences({ text, roles, persist }) {
+    const body = { text };
+    if (roles) {
+      body.roles = roles;
+    }
+    if (persist) {
+      body.persist = persist;
+    }
+    return this.request("/references/parse", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  auditReferences(filter = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return this.request(`/references/audit${query ? `?${query}` : ""}`);
+  }
+
+  replaceReference(id, { slug, version }) {
+    const body = { slug };
+    if (version !== undefined) {
+      body.version = version;
+    }
+    return this.request(`/references/${encodeURIComponent(id)}/replace`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  // --- v1 models ---
+
+  listModels(filter = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return this.request(`/models${query ? `?${query}` : ""}`);
+  }
+
+  getModel(id) {
+    return this.request(`/models/${encodeURIComponent(id)}`);
+  }
+
+  registerModel(data) {
+    return this.request("/models", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updateModel(id, data) {
+    return this.request(`/models/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteModel(id) {
+    return this.request(`/models/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  installModel(id, { consent } = {}) {
+    const body = {};
+    if (consent !== undefined) {
+      body.consent = consent;
+    }
+    return this.request(`/models/${encodeURIComponent(id)}/install`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  verifyModel(id) {
+    return this.request(`/models/${encodeURIComponent(id)}/verify`, {
+      method: "POST",
+    });
+  }
+
+  healthCheckModel(id) {
+    return this.request(`/models/${encodeURIComponent(id)}/health-check`, {
+      method: "POST",
+    });
+  }
+
+  getModelsHardware() {
+    return this.request("/models/hardware");
+  }
+
   // --- legacy demo API (kept until the legacy surface is removed) ---
 
   getMovies() {
