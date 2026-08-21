@@ -22,6 +22,11 @@ const JOB_TYPES = [
 ];
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancelling"]);
+const CREATIVE_JOB_TYPES = new Set([
+  "text_to_image",
+  "image_to_video",
+  "text_to_video",
+]);
 
 export class JobMonitor extends LitElement {
   static styles = css`
@@ -548,6 +553,17 @@ export class JobMonitor extends LitElement {
                   ?disabled=${busy}
                   @click=${() => this._cancel(job.id)}>
                   Cancel
+                </button>
+              `
+              : null}
+            ${CREATIVE_JOB_TYPES.has(job.job_type) && job.status === "succeeded"
+              ? html`
+                <button
+                  class="btn-small"
+                  @click=${() => {
+                    window.location.hash = `#/review/${encodeURIComponent(job.id)}`;
+                  }}>
+                  Review
                 </button>
               `
               : null}

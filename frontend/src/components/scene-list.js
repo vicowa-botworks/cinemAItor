@@ -1,0 +1,478 @@
+import { css, html, LitElement } from "lit";
+import { api } from "../api.js";
+
+export class SceneList extends LitElement {
+  static styles = css`
+    .scene-list {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .list-title {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .filters {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .filters label {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .filters select {
+      padding: 8px 12px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text);
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      cursor: pointer;
+      font-weight: 500;
+      background-color: var(--color-primary);
+      color: white;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background-color: var(--color-surface-hover);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .error {
+      color: var(--color-error);
+      font-size: 14px;
+    }
+
+    .create-panel {
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 640px;
+    }
+
+    .create-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .field label {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .field.wide {
+      grid-column: 1 / -1;
+    }
+
+    input,
+    select,
+    textarea {
+      padding: 8px 12px;
+      background-color: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text);
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .error-text {
+      color: var(--color-error);
+      font-size: 13px;
+      align-self: center;
+    }
+
+    .panels {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .scene-card {
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 20px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .scene-card:hover {
+      border-color: var(--color-primary);
+      transform: translateY(-2px);
+    }
+
+    .scene-name {
+      font-size: 16px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .scene-meta {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .status-chip {
+      align-self: flex-start;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background-color: var(--color-surface-hover);
+      color: var(--color-text-muted);
+      border: 1px solid var(--color-border);
+    }
+
+    .status-chip.approved {
+      background-color: rgba(34, 197, 94, 0.15);
+      color: #15803d;
+      border-color: transparent;
+    }
+
+    .status-chip.in_production {
+      background-color: rgba(59, 130, 246, 0.15);
+      color: #1d4ed8;
+      border-color: transparent;
+    }
+
+    .empty {
+      background-color: var(--color-surface);
+      border: 1px dashed var(--color-border);
+      border-radius: var(--radius);
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--color-text-muted);
+      font-size: 14px;
+    }
+  `;
+
+  static properties = {
+    scenes: { state: true },
+    projects: { state: true },
+    storyboards: { state: true },
+    projectFilter: { state: true },
+    storyboardFilter: { state: true },
+    loading: { state: true },
+    error: { state: true },
+    showCreate: { state: true },
+    creating: { state: true },
+    createError: { state: true },
+    form: { state: true },
+  };
+
+  constructor() {
+    super();
+    const query = window.location.hash.split("?")[1] ?? "";
+    this.projectFilter = query.split("&").find((kv) => kv.startsWith("project="))?.split("=")[1] ??
+      "";
+    this.storyboardFilter =
+      query.split("&").find((kv) => kv.startsWith("storyboard="))?.split("=")[1] ??
+        "";
+    this.scenes = [];
+    this.projects = [];
+    this.storyboards = [];
+    this.loading = false;
+    this.error = "";
+    this.showCreate = false;
+    this.creating = false;
+    this.createError = "";
+    this.form = {
+      name: "",
+      project_id: this.projectFilter,
+      storyboard_id: "",
+      description: "",
+      prompt: "",
+      target_duration: "",
+    };
+  }
+
+  async connectedCallback() {
+    super.connectedCallback?.();
+    await this._load();
+  }
+
+  render() {
+    return html`
+      <div class="scene-list">
+        <div class="list-header">
+          <div class="list-title">Scenes</div>
+          <div class="filters">
+            <label for="filter-project">Project</label>
+            <select
+              id="filter-project"
+              .value=${this.projectFilter}
+              @change=${(e) => {
+                this.projectFilter = e.target.value;
+                this.storyboardFilter = "";
+                this._load();
+              }}>
+              <option value="">all</option>
+              ${this.projects.map(
+                (p) => html`<option value=${p.id}>${p.name}</option>`,
+              )}
+            </select>
+            <label for="filter-storyboard">Storyboard</label>
+            <select
+              id="filter-storyboard"
+              .value=${this.storyboardFilter}
+              @change=${(e) => {
+                this.storyboardFilter = e.target.value;
+                this._load();
+              }}>
+              <option value="">any</option>
+              ${this.storyboards.map(
+                (b) => html`<option value=${b.id}>${b.name}</option>`,
+              )}
+            </select>
+          </div>
+          <button
+            class="btn"
+            @click=${() => {
+              this.showCreate = true;
+              this.createError = "";
+              this.form.project_id = this.projectFilter ||
+                this.projects[0]?.id || "";
+            }}>
+            New scene
+          </button>
+        </div>
+
+        ${this.error ? html`<div class="error">${this.error}</div>` : null}
+
+        ${this.showCreate
+          ? html`
+            <div class="create-panel">
+              <div class="create-grid">
+                <div class="field">
+                  <label>Name</label>
+                  <input
+                    type="text"
+                    .value=${this.form.name}
+                    @input=${(e) => (this.form = { ...this.form, name: e.target.value })}
+                    placeholder="Scene 1 - Opening">
+                </div>
+                <div class="field">
+                  <label>Project</label>
+                  <select
+                    .value=${this.form.project_id}
+                    @change=${(e) => (this.form = {
+                      ...this.form,
+                      project_id: e.target.value,
+                      storyboard_id: "",
+                    })}>
+                    ${this.projects.map(
+                      (p) => html`<option value=${p.id}>${p.name}</option>`,
+                    )}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Storyboard (optional)</label>
+                  <select
+                    .value=${this.form.storyboard_id}
+                    @change=${(e) => (this.form = {
+                      ...this.form,
+                      storyboard_id: e.target.value,
+                    })}>
+                    <option value="">none</option>
+                    ${this._storyboardsForProject(this.form.project_id).map(
+                      (b) => html`<option value=${b.id}>${b.name}</option>`,
+                    )}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Target duration (s)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    .value=${this.form.target_duration}
+                    @input=${(e) => (this.form = {
+                      ...this.form,
+                      target_duration: e.target.value,
+                    })}>
+                </div>
+                <div class="field wide">
+                  <label>Description</label>
+                  <input
+                    type="text"
+                    .value=${this.form.description}
+                    @input=${(e) => (this.form = {
+                      ...this.form,
+                      description: e.target.value,
+                    })}>
+                </div>
+                <div class="field wide">
+                  <label>Prompt (supports @asset references)</label>
+                  <textarea
+                    rows="3"
+                    .value=${this.form.prompt}
+                    @input=${(
+                      e,
+                    ) => (this.form = { ...this.form, prompt: e.target.value })}></textarea>
+                </div>
+              </div>
+              <div class="filters">
+                <button
+                  class="btn"
+                  ?disabled=${this.creating}
+                  @click=${this._create}>
+                  ${this.creating ? "Creating..." : "Create"}
+                </button>
+                <button class="btn btn-secondary"
+                  @click=${() => (this.showCreate = false)}>
+                  Cancel
+                </button>
+                ${this.createError
+                  ? html`<span class="error-text">${this.createError}</span>`
+                  : null}
+              </div>
+            </div>
+          `
+          : null}
+
+        ${this.scenes.length === 0
+          ? html`
+            <div class="empty">
+              ${this.loading
+                ? "Loading scenes..."
+                : this.projectFilter
+                ? "No scenes in this project."
+                : "No scenes yet. Create the first one."}
+            </div>
+          `
+          : html`
+            <div class="panels">
+              ${this.scenes.map((s) =>
+                html`
+                  <div
+                    class="scene-card"
+                    @click=${() => (window.location.hash = `#/scene/${encodeURIComponent(s.id)}`)}>
+                    <div class="scene-name">${s.name}</div>
+                    <div class="scene-meta">
+                      ${s.description ?? ""}${this._boardName(s.storyboard_id)}
+                    </div>
+                    <span class="status-chip ${s.status}">${s.status}</span>
+                  </div>
+                `
+              )}
+            </div>
+          `}
+      </div>
+    `;
+  }
+
+  _boardName(storyboardId) {
+    if (!storyboardId) return "";
+    const board = this.storyboards.find((b) => b.id === storyboardId);
+    return board ? ` · ${board.name}` : ` · board ${storyboardId.slice(0, 8)}`;
+  }
+
+  _storyboardsForProject(projectId) {
+    return this.storyboards.filter((b) => !projectId || b.project_id === projectId);
+  }
+
+  async _load() {
+    this.loading = true;
+    this.error = "";
+    try {
+      const [projects, storyboards] = await Promise.all([
+        api.listProjects(),
+        api.listStoryboards(
+          this.projectFilter ? { project_id: this.projectFilter } : {},
+        ),
+      ]);
+      this.projects = projects;
+      this.storyboards = storyboards;
+      this.scenes = await api.listScenes({
+        project_id: this.projectFilter,
+        storyboard_id: this.storyboardFilter,
+      });
+    } catch (err) {
+      this.error = err.message || "Failed to load scenes.";
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  async _create() {
+    const f = this.form;
+    if (!f.name.trim() || !f.project_id) {
+      this.createError = "Name and project are required.";
+      return;
+    }
+    this.creating = true;
+    this.createError = "";
+    try {
+      const payload = {
+        name: f.name.trim(),
+        project_id: f.project_id,
+      };
+      if (f.storyboard_id) payload.storyboard_id = f.storyboard_id;
+      if (f.description.trim()) payload.description = f.description.trim();
+      if (f.prompt.trim()) payload.prompt = f.prompt.trim();
+      if (f.target_duration !== "") payload.target_duration = Number(f.target_duration);
+      await api.createScene(payload);
+      this.showCreate = false;
+      this.form = {
+        name: "",
+        project_id: f.project_id,
+        storyboard_id: "",
+        description: "",
+        prompt: "",
+        target_duration: "",
+      };
+      await this._load();
+    } catch (err) {
+      this.createError = err.message || "Failed to create scene.";
+    } finally {
+      this.creating = false;
+    }
+  }
+}
+
+customElements.define("scene-list", SceneList);

@@ -12,6 +12,11 @@ import "./components/asset-upload.js";
 import "./components/prompt-editor.js";
 import "./components/model-manager.js";
 import "./components/job-monitor.js";
+import "./components/storyboard-list.js";
+import "./components/storyboard-detail.js";
+import "./components/scene-list.js";
+import "./components/scene-detail.js";
+import "./components/review-board.js";
 import "./components/movie-list.js";
 import "./components/movie-detail.js";
 
@@ -179,6 +184,48 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "jobs";
+    } else if (hash.startsWith("#/storyboard/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "storyboard-detail";
+      const match = hash.match(/^#\/storyboard\/([^/?]+)/);
+      if (match) {
+        this.viewParams.id = decodeURIComponent(match[1]);
+      }
+    } else if (hash.startsWith("#/storyboards")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "storyboards";
+    } else if (hash.startsWith("#/scene/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "scene-detail";
+      const match = hash.match(/^#\/scene\/([^/?]+)/);
+      if (match) {
+        this.viewParams.id = decodeURIComponent(match[1]);
+      }
+    } else if (hash.startsWith("#/scenes")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "scenes";
+    } else if (hash.startsWith("#/review/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "review";
+      const match = hash.match(/^#\/review\/([^/?]+)/);
+      if (match) {
+        this.viewParams.jobId = decodeURIComponent(match[1]);
+      }
     } else if (hash === "#/movies") {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
@@ -246,6 +293,20 @@ export class AppRoot extends LitElement {
         return html`<model-manager></model-manager>`;
       case "jobs":
         return html`<job-monitor></job-monitor>`;
+      case "storyboards":
+        return html`<storyboard-list></storyboard-list>`;
+      case "storyboard-detail":
+        return html`
+          <storyboard-detail .boardId=${this.viewParams.id}></storyboard-detail>
+        `;
+      case "scenes":
+        return html`<scene-list></scene-list>`;
+      case "scene-detail":
+        return html`
+          <scene-detail .sceneId=${this.viewParams.id}></scene-detail>
+        `;
+      case "review":
+        return html`<review-board .jobId=${this.viewParams.jobId}></review-board>`;
       case "movies":
         return html`<movie-list></movie-list>`;
       case "movie-detail":

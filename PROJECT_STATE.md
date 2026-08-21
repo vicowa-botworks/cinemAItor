@@ -106,19 +106,25 @@ removed.
       asset detail with image/video/audio blob preview, master/proxy switch + proxy regeneration,
       metadata editing, new-version upload, version history with restore, tag and alias management,
       soft delete
-
-### In Progress
-
 - [x] Frontend phase 3 (MASTER-PLAN §15.3): prompt studio (`#/prompts`) with versioned editing per
       scope (history view + restore, duplicate detection notice), live `@slug` / `@slug:vN`
       reference parsing with per-token status badges, asset picker that inserts references at the
       caret; model manager (`#/models`) with registry list/filters, hardware report + requirement
       warnings, per-model health check + checksum verification, admin-gated install (with network
       consent), enable/disable, and remove
-- [ ] Frontend phase 4 (MASTER-PLAN §15.3): job queue monitor (`#/jobs`) with auto-refresh polling
+- [x] Frontend phase 4 (MASTER-PLAN §15.3): job queue monitor (`#/jobs`) with auto-refresh polling
       (WebSocket fallback until `/ws/v1/jobs` exists), status/type/project filters, live progress
       bars, per-job detail (prompt, seed, settings, inputs, errors, event log), and cancel/retry
-      actions
+      actions; creative jobs (t2i / i2v / t2v) link through to the review board
+
+### In Progress
+
+- [ ] Frontend phase 5 (MASTER-PLAN §15.3): creative screens — storyboard board (`#/storyboards`,
+      `#/storyboard/:id`) with panel CRUD, versioned panel prompts, and t2i preview generation into
+      the job queue; scene inspector (`#/scenes`, `#/scene/:id`) with shot CRUD, scene/shot prompts,
+      single + batch generation (i2v/t2v), model/seed selection, and clip playback; review board
+      (`#/review/:jobId`) with candidate comparison and approve / reject / shortlist decisions;
+      project-detail entry points into both boards
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -163,3 +169,4 @@ removed.
 - Frontend phase 1 (v1 auth + project dashboard, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 3 (prompt studio + model manager, MASTER-PLAN §15.3): Thu Aug 20 2026
+- Frontend phase 4 (job queue monitor, MASTER-PLAN §15.3): Thu Aug 20 2026
