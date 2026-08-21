@@ -93,6 +93,15 @@ The product track follows `MASTER-PLAN.md`.
       master if no proxy exists), `final` presets render masters only and fail on missing media;
       per-item `source` is part of the mock engine fingerprint and the validation report carries a
       `sources` tally (`{proxy, master}`)
+- [x] Audio + source edits in renders (Workstream 12 follow-ups): the ffmpeg fx pass now handles
+      per-item video source trimming + speed (`trim`/`setpts`) and mixes audio-track items
+      (`dialogue`/`voiceover`/`music`/`sfx`/`ambience`) into the output — per-item `atrim` (with the
+      version's trim window clamping the source window), `atempo` chain for speed, `volume` from the
+      version's `gain_db`, item fades, `adelay` into the timeline slot, `amix` (no normalization,
+      tail cut to video length) mapped as AAC; plans with audio or source edits always take the fx
+      pass; mock engine fingerprints audio + source edits (bytes are content-addressed, so unchanged
+      re-renders dedupe in the content store); validation report gains an `audio`
+      (`{items, proxy, master}`) tally
 - [x] Frontend phase 1 (MASTER-PLAN §15.3): frontend auth on `/api/v1/auth` (bootstrap for the first
       user, login, logout with server-side session revocation, `me`), project dashboard (list
       accessible projects, create, edit settings, soft delete) on `/api/v1/projects`, `#/projects`
@@ -139,9 +148,8 @@ The product track follows `MASTER-PLAN.md`.
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 11 follow-ups: audio trim/gain UI (adjustments exist at the API level), basic mixer
-- [ ] Workstream 12 follow-ups: per-item source trimming in the ffmpeg engine, audio track placement
-      in renders (fx pass is video-only), frame-accurate cuts, render farm / multiple render
-      runners, progress from ffmpeg stats
+- [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners, progress
+      from ffmpeg stats
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)

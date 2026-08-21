@@ -25,9 +25,12 @@ import {
 } from "../src/db/renders.ts";
 import { type RenderRunner, startRenderRunner } from "../src/services/render_runner.ts";
 import {
+  buildAtempoFilters,
   buildDrawTextFilter,
   buildFxArgs,
   MockRenderEngine,
+  planNeedsFxPass,
+  type RenderAudioItem,
   type RenderInputItem,
   type RenderPlan,
   type RenderTextOverlay,
@@ -384,6 +387,186 @@ describe("renders", () => {
     assertEquals(cleared.transition, "cut");
     assertEquals(cleared.fade_out, null);
     assertEquals(cleared.color_grade, null);
+  });
+
+  it("routes audio and source-edit plans to the fx pass", () => {
+    const video: RenderInputItem = {
+      file_path: "/tmp/v.mp4",
+      start_time: 0,
+      end_time: 4,
+      duration: 4,
+      transition: "cut",
+      transition_duration: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+      color_grade: null,
+    };
+    const base: RenderPlan = {
+      output_path: "/tmp/o.mp4",
+      filename: "o.mp4",
+      format: "mp4",
+      preset: null,
+      items: [video],
+      text_overlays: [],
+      total_duration: 4,
+    };
+    assert(!planNeedsFxPass(base));
+
+    const audio: RenderAudioItem = {
+      file_path: "/tmp/a.wav",
+      start_time: 1,
+      end_time: 3,
+      duration: 2,
+      source_offset: 0.5,
+      source_duration: 2,
+      speed: 2,
+      gain: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+    };
+    assert(planNeedsFxPass({ ...base, audio_items: [audio] }));
+    assert(planNeedsFxPass({ ...base, items: [{ ...video, source_offset: 1 }] }));
+    assert(planNeedsFxPass({ ...base, items: [{ ...video, speed: 2 }] }));
+    const overlay: RenderTextOverlay = {
+      start_time: 0,
+      end_time: 1,
+      duration: 1,
+      text: "x",
+      style: null,
+    };
+    assert(planNeedsFxPass({ ...base, text_overlays: [overlay] }));
+  });
+
+  it("builds atempo chains for extreme speeds", () => {
+    assertEquals(buildAtempoFilters(1), []);
+    assertEquals(buildAtempoFilters(0.5), ["atempo=0.5"]);
+    assertEquals(buildAtempoFilters(4), ["atempo=4"]);
+    assertEquals(buildAtempoFilters(0.25), ["atempo=0.5", "atempo=0.5"]);
+    assertEquals(buildAtempoFilters(150), ["atempo=100", "atempo=1.5"]);
+    assertEquals(buildAtempoFilters(0), []);
+  });
+
+  it("builds the ffmpeg mix for audio-track items", () => {
+    const video: RenderInputItem = {
+      file_path: "/tmp/v.mp4",
+      start_time: 0,
+      end_time: 4,
+      duration: 4,
+      transition: "cut",
+      transition_duration: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+      color_grade: null,
+    };
+    const audio: RenderAudioItem = {
+      file_path: "/tmp/a.wav",
+      start_time: 1,
+      end_time: 3,
+      duration: 2,
+      source_offset: 0.5,
+      source_duration: 2,
+      speed: 2,
+      gain: 0.5,
+      fade_in: 0.2,
+      fade_out: 0.25,
+    };
+    const args = buildFxArgs([video], [], "/tmp/out.mp4", [audio]);
+
+    // The audio file is an additional input, after the video inputs.
+    assertEquals(args[args.indexOf("/tmp/a.wav") - 1], "-i");
+
+    const fc = args[args.indexOf("-filter_complex") + 1];
+    assert(fc.includes("atrim=start=0.5:end=2.5"));
+    assert(fc.includes("asetpts=PTS-STARTPTS"));
+    assert(fc.includes("atempo=2"));
+    assert(fc.includes("volume=0.5"));
+    assert(fc.includes("afade=t=in:st=0:d=0.2"));
+    assert(fc.includes("afade=t=out:st=1.75:d=0.25"));
+    assert(fc.includes("adelay=1000:all=1"));
+    assert(fc.includes("amix=inputs=1:duration=longest:normalize=0"));
+    assert(fc.includes("atrim=end=4"));
+
+    // Audio is mapped as AAC; the silent path keeps -an and no audio map.
+    assert(args.includes("-c:a"));
+    assert(args.includes("[aout]"));
+    const silent = buildFxArgs([video], [], "/tmp/out.mp4");
+    assert(silent.includes("-an"));
+    assert(!silent.includes("[aout]"));
+
+    // Video items with source edits get a trim + setpts stage first;
+    // items without them are left untouched.
+    const trimmed = buildFxArgs([{ ...video, source_offset: 0.5, speed: 2 }], [], "/tmp/x.mp4");
+    const fcTrimmed = trimmed[trimmed.indexOf("-filter_complex") + 1];
+    assert(fcTrimmed.includes("trim=start=0.5:end=2.5"));
+    assert(fcTrimmed.includes("setpts=(PTS-STARTPTS)/2"));
+    const fcPlain = silent[silent.indexOf("-filter_complex") + 1];
+    assert(!fcPlain.includes("trim="));
+    assert(!fcPlain.includes("setpts="));
+  });
+
+  it("renders audio-track items end to end (deterministic mock mix)", async () => {
+    const db = getDb();
+    const firstRow = db
+      .prepare(
+        "SELECT id FROM asset_versions WHERE asset_id = ? ORDER BY version_number DESC LIMIT 1",
+      )
+      .get(mediaAssetId) as { id: string };
+    const music = createTrack(ownerId, timelineId, { track_type: "music", name: "M1" });
+    createItem(ownerId, timelineId, {
+      track_id: music.id,
+      asset_version_id: firstRow.id,
+      start_time: 0,
+      end_time: 2,
+      source_offset: 0.25,
+      speed: 0.5,
+      fade_in: 0.1,
+    });
+
+    const job = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    runner = startRenderRunner({ pollMs: 5 });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job.id)?.status ?? ""));
+    const done = rawGetRenderJob(job.id);
+    assert(done?.status === "succeeded");
+    const report = done.validation_report as { audio?: { items: number } } | null;
+    assertEquals(report?.audio?.items, 1);
+
+    // A re-render of the same timeline produces identical bytes.
+    const bytesFor = (jobId: string): Uint8Array => {
+      const exportRow = db
+        .prepare("SELECT asset_version_id FROM exports WHERE render_job_id = ?")
+        .get(jobId) as { asset_version_id: string };
+      const version = db
+        .prepare("SELECT file_path FROM asset_versions WHERE id = ?")
+        .get(exportRow.asset_version_id) as { file_path: string };
+      return Deno.readFileSync(version.file_path);
+    };
+    const first = bytesFor(job.id);
+
+    const job2 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job2.id)?.status ?? ""));
+    assertEquals(rawGetRenderJob(job2.id)?.status, "succeeded");
+    assertEquals(bytesFor(job2.id), first);
+
+    // Changing the audio item's placement changes the output bytes.
+    const audioItem = db
+      .prepare("SELECT id FROM timeline_items WHERE track_id = ? LIMIT 1")
+      .get(music.id) as { id: string };
+    updateItem(ownerId, timelineId, audioItem.id, { fade_in: 0.4 });
+    const job3 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job3.id)?.status ?? ""));
+    assertNotEquals(bytesFor(job3.id), first);
   });
 
   it("cancels queued renders", () => {

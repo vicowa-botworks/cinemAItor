@@ -14,11 +14,25 @@ import {
   type RenderPreset,
   updateRenderProgress,
 } from "../db/renders.ts";
-import { listItems, listTracks, TEXT_TRACK_TYPES } from "../db/timelines.ts";
-import { createAsset, createAssetVersion, getAssetBySlug, getAssetVersion } from "../db/assets.ts";
+import {
+  AUDIO_TRACK_TYPES,
+  listItems,
+  listTracks,
+  TEXT_TRACK_TYPES,
+  type TimelineItem,
+} from "../db/timelines.ts";
+import {
+  type AssetVersion,
+  createAsset,
+  createAssetVersion,
+  getAssetBySlug,
+  getAssetVersion,
+} from "../db/assets.ts";
+import { parseAudioMetadata } from "../db/audio.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import {
   getRenderEngine,
+  type RenderAudioItem,
   RenderCancelledError,
   RenderFailedError,
   type RenderPlan,
@@ -76,7 +90,7 @@ export function startRenderRunner(
 
       // Real engine: verify the timeline's media files exist first.
       if (engine.name !== "mock") {
-        for (const item of plan.items) {
+        for (const item of [...plan.items, ...(plan.audio_items ?? [])]) {
           try {
             await Deno.stat(item.file_path);
           } catch {
@@ -175,6 +189,8 @@ async function buildPlan(
         start_time: i.start_time,
         end_time: i.end_time,
         duration: Math.max(0.01, i.end_time - i.start_time),
+        source_offset: i.source_offset,
+        speed: i.speed,
         transition: i.transition ?? "cut",
         transition_duration: i.transition_duration,
         fade_in: i.fade_in ?? 0,
@@ -186,6 +202,40 @@ async function buildPlan(
   if (planItems.length === 0) {
     throw new RenderFailedError("Timeline has no renderable video items");
   }
+
+  const audioTrackIds = tracks
+    .filter((t) => (AUDIO_TRACK_TYPES as readonly string[]).includes(t.track_type) && !t.locked)
+    .map((t) => t.id);
+  const pendingAudioItems = items
+    .filter(
+      (i) =>
+        i.status !== "archived" && i.asset_version_id !== null &&
+        audioTrackIds.includes(i.track_id),
+    )
+    .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
+    .map(async (i) => {
+      const version = getAssetVersion(i.asset_version_id as string);
+      // Same proxy semantics as video: draft renders prefer stored proxies,
+      // final renders use the master.
+      let file_path: string | null = version?.file_path ?? null;
+      let source: "proxy" | "master" = "master";
+      if (useProxy && version?.proxy_path) {
+        try {
+          await Deno.stat(version.proxy_path);
+          file_path = version.proxy_path;
+          source = "proxy";
+        } catch {
+          // Proxy evicted: fall back to the master below.
+        }
+      }
+      if (!file_path) {
+        throw new RenderFailedError(`No file for asset version ${i.asset_version_id}`);
+      }
+      return planAudioItem(i, { file_path, source }, version);
+    });
+  const rawAudioItems = await Promise.all(pendingAudioItems);
+  // Items fully clipped out by their version's trim window are dropped.
+  const audioItems = rawAudioItems.filter((a): a is RenderAudioItem => a !== null);
 
   const textTrackIds = tracks
     .filter((t) => (TEXT_TRACK_TYPES as readonly string[]).includes(t.track_type) && !t.locked)
@@ -214,7 +264,53 @@ async function buildPlan(
     preset,
     items: planItems,
     text_overlays: textOverlays,
+    audio_items: audioItems,
     total_duration: planItems.reduce((sum, i) => sum + i.duration, 0),
+  };
+}
+
+/**
+ * Map a placed audio-track item onto a render audio item: the item's own
+ * source_offset / speed / fades on top of the version's non-destructive
+ * adjustments (trim window, gain_db). Returns null when the item sits fully
+ * outside the trimmed source window (nothing to play).
+ */
+function planAudioItem(
+  item: TimelineItem,
+  file: { file_path: string; source: "proxy" | "master" },
+  version: AssetVersion | undefined,
+): RenderAudioItem | null {
+  const duration = Math.max(0.01, item.end_time - item.start_time);
+  const speed = item.speed > 0 ? item.speed : 1;
+  const sourceNeeded = duration / speed;
+
+  const adjustments = ((version ? parseAudioMetadata(version) : null)?.adjustments ?? {}) as {
+    trim?: { start?: unknown; end?: unknown };
+    gain_db?: unknown;
+  };
+  const trimStart = typeof adjustments.trim?.start === "number" ? adjustments.trim.start : 0;
+  const trimEnd = typeof adjustments.trim?.end === "number" ? adjustments.trim.end : Infinity;
+  const sourceOffset = Math.max(item.source_offset, trimStart);
+  const sourceDuration = Math.min(sourceNeeded, trimEnd - sourceOffset);
+  if (sourceDuration <= 0) return null;
+
+  let gain = 1;
+  if (typeof adjustments.gain_db === "number" && Number.isFinite(adjustments.gain_db)) {
+    gain = Math.pow(10, adjustments.gain_db / 20);
+  }
+
+  return {
+    file_path: file.file_path,
+    source: file.source,
+    start_time: item.start_time,
+    end_time: item.end_time,
+    duration,
+    source_offset: sourceOffset,
+    source_duration: sourceDuration,
+    speed,
+    gain,
+    fade_in: item.fade_in ?? 0,
+    fade_out: item.fade_out ?? 0,
   };
 }
 
@@ -245,6 +341,11 @@ function validateOutput(
     sources: {
       proxy: plan.items.filter((i) => i.source === "proxy").length,
       master: plan.items.filter((i) => i.source !== "proxy").length,
+    },
+    audio: {
+      items: (plan.audio_items ?? []).length,
+      proxy: (plan.audio_items ?? []).filter((i) => i.source === "proxy").length,
+      master: (plan.audio_items ?? []).filter((i) => i.source !== "proxy").length,
     },
     checks,
   };
