@@ -157,6 +157,10 @@ export class ProjectDetail extends LitElement {
     window.location.hash = `#/project/${encodeURIComponent(this.projectId)}/assets`;
   }
 
+  _gotoCreative(path) {
+    window.location.hash = `#${path}?project=${encodeURIComponent(this.projectId)}`;
+  }
+
   _toggleEdit() {
     this.editing = !this.editing;
     this.error = "";
@@ -239,6 +243,14 @@ export class ProjectDetail extends LitElement {
             </button>
             <button class="btn-edit" @click=${this._gotoAssets}>
               View assets
+            </button>
+            <button class="btn-edit"
+              @click=${() => this._gotoCreative("/storyboards")}>
+              View storyboards
+            </button>
+            <button class="btn-edit"
+              @click=${() => this._gotoCreative("/scenes")}>
+              View scenes
             </button>
             <button class="btn-delete" ?disabled=${this.deleting}
               @click=${this._deleteProject}>

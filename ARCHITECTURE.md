@@ -83,6 +83,14 @@ app-root (main router)
 │   │              health check + checksum verify, admin-gated install/enable/remove)
 ├── job-monitor (queue monitor: auto-refresh polling, status/type/project filters,
 │   │            progress bars, per-job detail + event log, cancel/retry)
+├── storyboard-list (board list + create; project filter via #/storyboards?project=)
+├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
+│   │                 live preview polling)
+├── scene-list (scene list + create; project/storyboard filters)
+├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
+│   │            clip playback)
+├── review-board (job candidate comparison; approve / reject / shortlist + notes)
+├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
 ├── movie-list (legacy demo, removed in frontend phase 7)
 │   └── movie-card (individual item)
 └── movie-detail (legacy demo, removed in frontend phase 7)

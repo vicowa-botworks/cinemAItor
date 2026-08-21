@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "jsr:@std/testing/bdd";
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import { api, ApiError } from "../src/api.js";
+import { creativeAssetIds } from "../src/creative-assets.js";
 
 function jsonResponse(body, status = 200) {
   return {
@@ -411,6 +412,154 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 storyboard endpoints", () => {
+    it("listStoryboards builds the query from the filter", async () => {
+      await api.listStoryboards({ project_id: "p1" });
+      assertEquals(captured[0].url, "/api/v1/storyboards?project_id=p1");
+    });
+
+    it("listStoryboards omits empty filter values", async () => {
+      await api.listStoryboards({ project_id: "" });
+      assertEquals(captured[0].url, "/api/v1/storyboards");
+    });
+
+    it("createStoryboard posts to /api/v1/storyboards", async () => {
+      await api.createStoryboard({ name: "Act one", project_id: "p1" });
+      assertEquals(captured[0].url, "/api/v1/storyboards");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).name, "Act one");
+    });
+
+    it("storyboard id routes target /:id", async () => {
+      await api.getStoryboard("sb-1");
+      assertEquals(captured[0].url, "/api/v1/storyboards/sb-1");
+      await api.updateStoryboard("sb-1", { name: "X" });
+      assertEquals(captured[1].url, "/api/v1/storyboards/sb-1");
+      assertEquals(captured[1].options.method, "PATCH");
+      await api.deleteStoryboard("sb-1");
+      assertEquals(captured[2].url, "/api/v1/storyboards/sb-1");
+      assertEquals(captured[2].options.method, "DELETE");
+    });
+
+    it("panel routes nest under the storyboard", async () => {
+      await api.listPanels("sb-1");
+      assertEquals(captured[0].url, "/api/v1/storyboards/sb-1/panels");
+      await api.createPanel("sb-1", { panel_order: 1 });
+      assertEquals(captured[1].url, "/api/v1/storyboards/sb-1/panels");
+      assertEquals(captured[1].options.method, "POST");
+      await api.updatePanel("sb-1", "p-1", { prompt: "close-up" });
+      assertEquals(captured[2].url, "/api/v1/storyboards/sb-1/panels/p-1");
+      assertEquals(captured[2].options.body, JSON.stringify({ prompt: "close-up" }));
+      await api.deletePanel("sb-1", "p-1");
+      assertEquals(captured[3].url, "/api/v1/storyboards/sb-1/panels/p-1");
+      assertEquals(captured[3].options.method, "DELETE");
+    });
+
+    it("generatePanelPreview posts to the generate-preview subpath", async () => {
+      await api.generatePanelPreview("sb-1", "p-1", { model_id: "m-1", seed: "42" });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/storyboards/sb-1/panels/p-1/generate-preview",
+      );
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).seed, "42");
+    });
+  });
+
+  describe("v1 scene endpoints", () => {
+    it("listScenes builds the query from the filter", async () => {
+      await api.listScenes({ project_id: "p1", storyboard_id: "sb-1" });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/scenes?project_id=p1&storyboard_id=sb-1",
+      );
+    });
+
+    it("scene id routes target /:id", async () => {
+      await api.getScene("sc-1");
+      assertEquals(captured[0].url, "/api/v1/scenes/sc-1");
+      await api.deleteScene("sc-1");
+      assertEquals(captured[1].url, "/api/v1/scenes/sc-1");
+      assertEquals(captured[1].options.method, "DELETE");
+    });
+
+    it("shot routes nest under the scene", async () => {
+      await api.listShots("sc-1");
+      assertEquals(captured[0].url, "/api/v1/scenes/sc-1/shots");
+      await api.createShot("sc-1", { shot_order: 2, name: "Wide" });
+      assertEquals(captured[1].url, "/api/v1/scenes/sc-1/shots");
+      assertEquals(JSON.parse(captured[1].options.body).shot_order, 2);
+      await api.updateShot("sc-1", "sh-1", { prompt: "night shot" });
+      assertEquals(captured[2].url, "/api/v1/scenes/sc-1/shots/sh-1");
+      assertEquals(captured[2].options.method, "PATCH");
+      await api.deleteShot("sc-1", "sh-1");
+      assertEquals(captured[3].url, "/api/v1/scenes/sc-1/shots/sh-1");
+      assertEquals(captured[3].options.method, "DELETE");
+    });
+
+    it("generate and batch-generate post to the scene subpaths", async () => {
+      await api.generateScene("sc 1", { model_id: "m-1" });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/scenes/sc%201/generate",
+      );
+      assertEquals(captured[0].options.method, "POST");
+      await api.batchGenerateScene("sc-1", { seed: "9" });
+      assertEquals(captured[1].url, "/api/v1/scenes/sc-1/batch-generate");
+      assertEquals(captured[1].options.method, "POST");
+      assertEquals(JSON.parse(captured[1].options.body).seed, "9");
+    });
+  });
+
+  describe("v1 review endpoints", () => {
+    it("listJobCandidates requests the job candidates subpath", async () => {
+      await api.listJobCandidates("job-1");
+      assertEquals(captured[0].url, "/api/v1/review/jobs/job-1/candidates");
+    });
+
+    it("reviewDecision posts approve/reject/shortlist to the action subpath", async () => {
+      await api.reviewDecision("v-1", "approve", "best take");
+      assertEquals(captured[0].url, "/api/v1/review/candidates/v-1/approve");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).notes, "best take");
+
+      await api.reviewDecision("v-2", "shortlist");
+      assertEquals(captured[1].url, "/api/v1/review/candidates/v-2/shortlist");
+      assertEquals(captured[1].options.body, JSON.stringify({}));
+    });
+  });
+
+  describe("creative asset slug map", () => {
+    it("maps prefix-matched slugs to asset ids", async () => {
+      const rows = [
+        { unique_slug: "panel_abcd1234", id: "asset-panel-1" },
+        { unique_slug: "panel_00000000", id: "asset-panel-2" },
+        { unique_slug: "scene_abcd1234", id: "asset-scene-1" },
+      ];
+      globalThis.fetch = async (url) => {
+        const q = new URL(String(url), "http://localhost").searchParams.get("q") ?? "";
+        return jsonResponse(
+          rows.filter((r) => r.unique_slug.includes(q)),
+        );
+      };
+      const map = await creativeAssetIds("panel", { force: true });
+      assertEquals(map.get("panel_abcd1234"), "asset-panel-1");
+      assert(map.get("scene_abcd1234") === undefined, "other prefixes excluded");
+    });
+
+    it("reuses the cached map until forced", async () => {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls++;
+        return jsonResponse([{ unique_slug: "panel_abcd1234", id: "a1" }]);
+      };
+      await creativeAssetIds("panel", { force: true });
+      const map = await creativeAssetIds("panel");
+      assertEquals(calls, 1, "second read should not refetch");
+      assertEquals(map.get("panel_abcd1234"), "a1");
+    });
+  });
+
   describe("fetchMediaUrl", () => {
     it("resolves a blob url and the content type", async () => {
       const blob = new Blob(["img"], { type: "image/png" });
@@ -435,7 +584,7 @@ describe("ApiClient", () => {
     it("keeps movie calls on the /api base", async () => {
       await api.getMovies();
       await api.getMovie(7);
-      await api.createScene(7, { scene_number: 1 });
+      await api.createMovieScene(7, { scene_number: 1 });
       assertEquals(captured[0].url, "/api/movies");
       assertEquals(captured[1].url, "/api/movies/7");
       assertEquals(captured[2].url, "/api/movies/7/scenes");

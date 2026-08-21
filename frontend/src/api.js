@@ -53,6 +53,17 @@ class ApiClient {
     return response.json();
   }
 
+  _query(filter = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }
+
   /**
    * Fetch a media endpoint (preview/proxy streams) and resolve it to a
    * blob: object URL plus the blob's MIME type. The caller owns the URL
@@ -405,6 +416,154 @@ class ApiClient {
     return this.request(`/jobs/${encodeURIComponent(id)}/events`);
   }
 
+  // --- v1 storyboards, panels, scenes, shots ---
+
+  listStoryboards(filter = {}) {
+    return this.request(
+      `/storyboards${this._query(filter)}`,
+    );
+  }
+
+  createStoryboard(data) {
+    return this.request("/storyboards", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  getStoryboard(id) {
+    return this.request(`/storyboards/${encodeURIComponent(id)}`);
+  }
+
+  updateStoryboard(id, data) {
+    return this.request(`/storyboards/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteStoryboard(id) {
+    return this.request(`/storyboards/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  listPanels(storyboardId) {
+    return this.request(
+      `/storyboards/${encodeURIComponent(storyboardId)}/panels`,
+    );
+  }
+
+  createPanel(storyboardId, data) {
+    return this.request(`/storyboards/${encodeURIComponent(storyboardId)}/panels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updatePanel(storyboardId, panelId, data) {
+    return this.request(
+      `/storyboards/${encodeURIComponent(storyboardId)}/panels/${encodeURIComponent(panelId)}`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+  }
+
+  deletePanel(storyboardId, panelId) {
+    return this.request(
+      `/storyboards/${encodeURIComponent(storyboardId)}/panels/${encodeURIComponent(panelId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  generatePanelPreview(storyboardId, panelId, options = {}) {
+    return this.request(
+      `/storyboards/${encodeURIComponent(storyboardId)}/panels/${
+        encodeURIComponent(panelId)
+      }/generate-preview`,
+      { method: "POST", body: JSON.stringify(options) },
+    );
+  }
+
+  listScenes(filter = {}) {
+    return this.request(`/scenes${this._query(filter)}`);
+  }
+
+  createScene(data) {
+    return this.request("/scenes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  getScene(id) {
+    return this.request(`/scenes/${encodeURIComponent(id)}`);
+  }
+
+  updateScene(id, data) {
+    return this.request(`/scenes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteScene(id) {
+    return this.request(`/scenes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  listShots(sceneId) {
+    return this.request(`/scenes/${encodeURIComponent(sceneId)}/shots`);
+  }
+
+  createShot(sceneId, data) {
+    return this.request(`/scenes/${encodeURIComponent(sceneId)}/shots`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updateShot(sceneId, shotId, data) {
+    return this.request(
+      `/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+  }
+
+  deleteShot(sceneId, shotId) {
+    return this.request(
+      `/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  generateScene(id, options = {}) {
+    return this.request(`/scenes/${encodeURIComponent(id)}/generate`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
+  batchGenerateScene(id, options = {}) {
+    return this.request(`/scenes/${encodeURIComponent(id)}/batch-generate`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
+  // --- v1 review ---
+
+  listJobCandidates(jobId) {
+    return this.request(`/review/jobs/${encodeURIComponent(jobId)}/candidates`);
+  }
+
+  reviewDecision(versionId, action, notes) {
+    return this.request(
+      `/review/candidates/${encodeURIComponent(versionId)}/${action}`,
+      { method: "POST", body: JSON.stringify(notes ? { notes } : {}) },
+    );
+  }
+
   // --- legacy demo API (kept until the legacy surface is removed) ---
 
   getMovies() {
@@ -435,11 +594,11 @@ class ApiClient {
     }, LEGACY_BASE);
   }
 
-  getScenes(movieId) {
+  getMovieScenes(movieId) {
     return this.request(`/movies/${movieId}/scenes`, {}, LEGACY_BASE);
   }
 
-  createScene(movieId, data) {
+  createMovieScene(movieId, data) {
     return this.request(`/movies/${movieId}/scenes`, {
       method: "POST",
       body: JSON.stringify(data),
