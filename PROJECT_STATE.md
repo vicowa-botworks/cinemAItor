@@ -122,15 +122,14 @@ removed.
       single + batch generation (i2v/t2v), model/seed selection, and clip playback; review board
       (`#/review/:jobId`) with candidate comparison and approve / reject / shortlist decisions;
       project-detail entry points into both boards
-
-### In Progress
-
-- [ ] Frontend phase 6 (MASTER-PLAN §15.3): timeline editor + render/export UI — timeline list
-      (`#/timelines`) with project filter + create; timeline editor (`#/timeline/:id`) with typed
-      tracks (lock/mute, swap reorder), clip/text placement via asset picker (move/resize,
-      speed/volume, fades, transitions, color grade), markers, full-state snapshots + restore, and a
-      render panel (preset list/create, queue draft/final renders, polling job cards with logs,
-      exports list)
+- [x] Frontend phase 6 (MASTER-PLAN §15.3): timeline editor + render/export UI — timeline list
+      (`#/timelines`, also `?project=` filter from project detail) with project filtering, card
+      grid, and create; timeline editor (`#/timeline/:id`) with ruler + click-to-set playhead, typed
+      tracks (add, lock/mute, swap reorder, delete), clip + text placement via asset version picker,
+      pointer-drag item moving, per-item fx panel (trim, speed, fades, transitions, color grade,
+      text style), duplicate/delete, markers, full-state snapshots + restore, and a render / export
+      panel (preset select, queue draft/final renders with polling status/progress, cancel,
+      resulting export linked to its asset, recent-exports list)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -177,3 +176,4 @@ removed.
 - Frontend phase 3 (prompt studio + model manager, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 4 (job queue monitor, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 5 (creative screens, MASTER-PLAN §15.3): Fri Aug 21 2026
+- Frontend phase 6 (timeline editor + render/export UI, MASTER-PLAN §15.3): Fri Aug 21 2026
