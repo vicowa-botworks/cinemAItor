@@ -174,11 +174,13 @@ server.ts (entry point)
   ├── Render routes (/api/v1/render-presets, /api/v1/renders/*, /api/v1/exports,
   │   auth middleware, project-permission gated; preset writes admin-only)
   │   ├── Durable render queue (leases, stale recovery) + in-process render runner
- │   ├── Engines: ffmpeg concat (`-c copy`), ffmpeg fx pass (transitions/fades/grade/
- │   │   `drawtext` text overlays) or deterministic mock (auto by availability,
- │   │   `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running); structured logs
-   │   ├── Draft/final source selection: draft presets render proxies (master fallback),
-   │   │   final presets render masters only; per-source tally in the validation report
+  │   ├── Engines: ffmpeg concat (`-c copy`), ffmpeg fx pass (source trim/speed,
+  │   │   transitions/fades/grade, `drawtext` text overlays, audio-track mix via
+  │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC) or deterministic mock (auto by
+  │   │   availability, `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running); structured logs
+    │   ├── Draft/final source selection (video + audio items): draft presets render proxies
+    │   │   (master fallback), final presets render masters only; per-source tallies in the
+    │   │   validation report; audio items apply the version's trim/gain_db adjustments
    │   ├── Output validation report; exports with provenance as asset + immutable version
    │   └── (see docs/renders.md)
   ├── Diagnostics routes (/api/v1/diagnostics/*, auth middleware)

@@ -16,30 +16,44 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   `queued` by `recoverStaleRenderJobs`. The in-process render runner polls every 250 ms, claims one
   job per poll, and executes it.
 - **Engines** implement `RenderEngine.render(plan, hooks)` in `services/render_engine.ts`:
-  - `FfmpegRenderEngine` — two paths, chosen per plan:
-    - **No fx** (all items hard-cut, no fades, no grade, no text overlays): lossless concat demuxer
-      (`ffmpeg -f concat -c copy`), stream copy.
-    - **With fx**: one input per item plus a filter graph — per-item `eq` (brightness/contrast/
-      saturation), `colortemperature` (grade temperature → Kelvin), `fade` in/out — chained with
-      `xfade` for real transitions and the `concat` filter for hard cuts; text overlays are drawn in
-      a final `drawtext` stage (per-overlay `enable=between(t, start, end)`, position/size/color
-      from the item's `text_style`). Re-encodes to H.264. The fx pass is video-only (`-an`):
-      per-track audio placement is a separate render concern not yet modelled in the plan.
-  - `MockRenderEngine` — deterministic placeholder output (seeded from `output_path` + duration +
-    per-item source/fx and text-overlay fingerprint, valid minimal WAV for the `wav` format) so
-    rendering works on machines without ffmpeg.
+  - `FfmpegRenderEngine` — two paths, chosen per plan (`planNeedsFxPass`):
+    - **No fx** (all items hard-cut, no fades, no grade, no source trim/speed, no text overlays, no
+      audio): lossless concat demuxer (`ffmpeg -f concat -c copy`), stream copy.
+    - **With fx**: one input per item plus a filter graph — per-item `trim` + `setpts` (source
+      offset / speed), `eq` (brightness/contrast/saturation), `colortemperature` (grade temperature
+      → Kelvin), `fade` in/out — chained with `xfade` for real transitions and the `concat` filter
+      for hard cuts; text overlays are drawn in a final `drawtext` stage (per-overlay
+      `enable=between(t, start, end)`, position/size/color from the item's `text_style`).
+      Audio-track items become extra inputs, each run through `atrim` (the source window after the
+      version trim is applied) + `asetpts` + `atempo` chain (speed; extreme speeds are split into
+      repeated `atempo` stages) + `volume` (the version's `gain_db`) + `afade` in/out, then silenced
+      into its timeline slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no
+      1/N normalization) — the mix is trimmed back to the video length and mapped as AAC (192 k).
+      Re-encodes to H.264 (+ AAC when audio is mixed); silent plans keep `-an`.
+  - `MockRenderEngine` — deterministic placeholder output, content-addressed on the plan (seeded
+    from format + duration + a fingerprint of every item's source/source-edit, fx and the text and
+    audio overlays; valid minimal WAV for the `wav` format) so rendering works on machines without
+    ffmpeg and re-renders of an unchanged timeline deduplicate in the content store.
   - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
     `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
-  resolved to its asset version's stored file; plus the active text overlays from unlocked
-  `text`/`subtitle` tracks (text items sorted by start time). The plan is passed to the engine with
-  progress and `isCancelled` hooks.
-- **Source selection (draft/final)**: each plan item resolves to a `source` — `proxy` or `master`
-  (the asset version's stored file). `draft`-kind presets prefer the version's proxy and fall back
-  to the master if none exists; `final`-kind presets always use the master and fail the render
-  (`No file for asset version ...`) if its proxy-only state has no master file. Per-item `source` is
-  part of the mock engine's fingerprint and of the `validation_report.sources` (`{proxy, master}`)
-  tally.
+  resolved to its asset version's stored file (carrying the item's `source_offset` and `speed`);
+  plus the active text overlays from unlocked `text`/`subtitle` tracks (text items sorted by start
+  time); plus audio items from unlocked `dialogue`/`voiceover`/`music`/`sfx`/`ambience` tracks
+  (non-archived items with an asset version, sorted by start time). The plan is passed to the engine
+  with progress and `isCancelled` hooks.
+- **Source selection (draft/final)**: each plan item (video and audio) resolves to a `source` —
+  `proxy` or `master` (the asset version's stored file). `draft`-kind presets prefer the version's
+  proxy and fall back to the master if none exists; `final`-kind presets always use the master and
+  fail the render (`No file for asset version ...`) if its proxy-only state has no master file.
+  Per-item `source` is part of the mock engine's fingerprint and of the `validation_report.sources`
+  (video `{proxy, master}`) and `validation_report.audio` (`{items, proxy, master}`) tallies.
+- **Audio placement (items × version adjustments)**: an audio item's source window starts at
+  `max(item.source_offset, version trim.start)` and consumes
+  `min(duration / speed, trim.end −
+  start)` source seconds; the version's `gain_db` becomes a
+  linear `volume` multiplier, and an item that lands entirely outside the version's trimmed window
+  is dropped from the plan. Item-level `source_offset`, `speed` and fades always apply.
 - **Validation**: after rendering, the output must exist, be non-empty and match the preset's
   extension; the outcome (including `file_size` and per-check booleans) is stored as
   `validation_report_json` on the job. Failures fail the job.

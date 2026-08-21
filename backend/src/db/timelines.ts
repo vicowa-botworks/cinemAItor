@@ -621,6 +621,15 @@ export interface ItemInput {
 
 export const TEXT_TRACK_TYPES = ["text", "subtitle"] as const;
 
+/** Track types whose placed items are mixed into the rendered output audio. */
+export const AUDIO_TRACK_TYPES = [
+  "dialogue",
+  "voiceover",
+  "music",
+  "sfx",
+  "ambience",
+] as const;
+
 const MAX_TEXT_LENGTH = 512;
 const TEXT_POSITIONS = ["top", "middle", "bottom"] as const;
 const TEXT_COLORS = new Set([

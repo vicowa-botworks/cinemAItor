@@ -9,12 +9,38 @@ export interface RenderInputItem {
   start_time: number;
   end_time: number;
   duration: number;
+  /** Offset into the source where the item begins (seconds). */
+  source_offset?: number;
+  /** Playback speed (1 = normal). */
+  speed?: number;
   /** Blend between this item and the one preceding it. */
   transition: string;
   transition_duration: number;
   fade_in: number;
   fade_out: number;
   color_grade: Record<string, number> | null;
+}
+
+/** An audio-track item placed on the timeline; mixed into the output by the fx pass. */
+export interface RenderAudioItem {
+  file_path: string;
+  /** Whether this item renders from its proxy (draft) or master (final) media. */
+  source?: "proxy" | "master";
+  /** Timeline position of the item (seconds). */
+  start_time: number;
+  end_time: number;
+  /** Timeline duration of the item (seconds). */
+  duration: number;
+  /** Source position where the item begins (seconds; clamped by version trim). */
+  source_offset: number;
+  /** Source seconds consumed, before speed is applied (clamped by version trim). */
+  source_duration: number;
+  /** Playback speed (1 = normal). */
+  speed: number;
+  /** Linear gain multiplier (10^(gain_db/20) of the version's adjustment). */
+  gain: number;
+  fade_in: number;
+  fade_out: number;
 }
 
 /** Text/subtitle overlay drawn on top of the video during the fx pass. */
@@ -44,7 +70,29 @@ export interface RenderPlan {
   preset: RenderPreset | null;
   items: RenderInputItem[];
   text_overlays: RenderTextOverlay[];
+  audio_items?: RenderAudioItem[];
   total_duration: number;
+}
+
+/** True when an item trims into its source or plays at a non-normal speed. */
+export function itemNeedsSourceEdit(
+  item: Pick<RenderInputItem, "source_offset" | "speed">,
+): boolean {
+  return (item.source_offset ?? 0) > 0 || (item.speed ?? 1) !== 1;
+}
+
+/**
+ * True when the plan needs the re-encoding fx pass: per-item fx, text
+ * overlays, audio-track placement, or per-item source edits (the lossless
+ * concat path can only splice whole video files).
+ */
+export function planNeedsFxPass(plan: RenderPlan): boolean {
+  return (
+    planHasFx(plan.items) ||
+    plan.text_overlays.length > 0 ||
+    (plan.audio_items?.length ?? 0) > 0 ||
+    plan.items.some(itemNeedsSourceEdit)
+  );
 }
 
 export interface RenderHooks {
@@ -103,6 +151,30 @@ function round2(x: number): number {
   return Math.round(x * 100) / 100;
 }
 
+function round4(x: number): number {
+  return Math.round(x * 10000) / 10000;
+}
+
+/**
+ * `atempo` chain for an arbitrary positive speed: each atempo stage accepts
+ * 0.5-100.0, so extreme speeds are split into repeated stages (rounded to
+ * dodge float drift like 0.5*0.5*8 -> 1.999999).
+ */
+export function buildAtempoFilters(speed: number): string[] {
+  if (!Number.isFinite(speed) || speed <= 0) return [];
+  let remaining = speed;
+  if (Math.abs(remaining - 1) < 1e-9) return [];
+  const filters: string[] = [];
+  while (remaining < 0.5 - 1e-9 || remaining > 100 + 1e-9) {
+    const step = remaining < 1 ? 0.5 : 100;
+    filters.push(`atempo=${step}`);
+    remaining = round4(remaining / step);
+  }
+  if (Math.abs(remaining - 1) < 1e-9) return filters;
+  filters.push(`atempo=${round4(remaining)}`);
+  return filters;
+}
+
 /** Escape text for use inside a single-quoted ffmpeg filter argument. */
 function escapeFilterText(text: string): string {
   return text.replace(/'/g, "''");
@@ -129,25 +201,37 @@ export function buildDrawTextFilter(overlay: RenderTextOverlay): string {
 
 /**
  * Build the ffmpeg command for a plan whose items carry per-item fx
- * (transitions, fades, color grade) or text overlays: one input per item, a
- * filter graph that grades and fades each video input, pairwise `xfade` (real
- * transitions) or `concat` (hard cuts) between consecutive items, and a final
- * `drawtext` stage per text overlay. Re-encodes to H.264.
- *
- * The fx pass is video-only (`-an`): per-track audio placement is a separate
- * render concern not yet modelled in the plan.
+ * (transitions, fades, color grade, source trimming, speed) or text
+ * overlays: one input per item, a filter graph that trims, grades and fades
+ * each video input, pairwise `xfade` (real transitions) or `concat` (hard
+ * cuts) between consecutive items, and a final `drawtext` stage per text
+ * overlay. Audio-track items become additional inputs, each trimmed, speed-
+ * adjusted, gain-scaled and faded, then silenced into its timeline slot via
+ * `adelay` and summed with `amix` (no normalization) onto the output.
+ * Re-encodes to H.264 (+ AAC when audio is mixed).
  */
 export function buildFxArgs(
   items: RenderInputItem[],
   textOverlays: RenderTextOverlay[],
   outputPath: string,
+  audioItems: RenderAudioItem[] = [],
 ): string[] {
   const args: string[] = ["-v", "error", "-y"];
   for (const item of items) args.push("-i", item.file_path);
+  for (const audio of audioItems) args.push("-i", audio.file_path);
 
   const filters: string[] = [];
   for (const [i, item] of items.entries()) {
     const chain: string[] = [];
+    if (itemNeedsSourceEdit(item)) {
+      const so = item.source_offset ?? 0;
+      const speed = item.speed ?? 1;
+      const srcEnd = round4(so + item.duration / speed);
+      chain.push(
+        `trim=start=${round4(so)}:end=${srcEnd}`,
+        `setpts=(PTS-STARTPTS)/${round4(speed)}`,
+      );
+    }
     const grade = item.color_grade ?? {};
     if (
       grade.brightness !== undefined || grade.contrast !== undefined ||
@@ -202,9 +286,45 @@ export function buildFxArgs(
     finalLabel = "[out]";
   }
 
+  if (audioItems.length > 0) {
+    // Each audio item: trim the source window, reset timestamps, apply speed,
+    // gain and fades, then silence it into its timeline slot.
+    audioItems.forEach((audio, k) => {
+      const input = items.length + k;
+      const chain: string[] = [
+        `atrim=start=${round4(audio.source_offset)}:end=${
+          round4(audio.source_offset + audio.source_duration)
+        }`,
+        "asetpts=PTS-STARTPTS",
+        ...buildAtempoFilters(audio.speed),
+      ];
+      if (Math.abs(audio.gain - 1) > 1e-9) chain.push(`volume=${round4(audio.gain)}`);
+      if (audio.fade_in > 0) {
+        chain.push(`afade=t=in:st=0:d=${round2(audio.fade_in)}`);
+      }
+      if (audio.fade_out > 0) {
+        const st = Math.max(0, round2(audio.duration - audio.fade_out));
+        chain.push(`afade=t=out:st=${st}:d=${round2(audio.fade_out)}`);
+      }
+      chain.push(`adelay=${Math.round(audio.start_time * 1000)}:all=1`);
+      filters.push(`[${input}:a]${chain.join(",")}[ak${k}]`);
+    });
+    const mixInputs = audioItems.map((_, k) => `[ak${k}]`).join("");
+    // Longest surviving stream wins, no 1/N normalization; the tail is cut
+    // back to the video length so the mix never outruns the picture.
+    filters.push(
+      `${mixInputs}amix=inputs=${audioItems.length}:duration=longest:normalize=0` +
+        `,atrim=end=${round2(acc)},asetpts=PTS-STARTPTS[aout]`,
+    );
+  }
+
   args.push("-filter_complex", filters.join(";"));
   args.push("-map", finalLabel);
-  args.push("-an");
+  if (audioItems.length > 0) {
+    args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  } else {
+    args.push("-an");
+  }
   args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p");
   args.push(outputPath);
   return args;
@@ -285,7 +405,10 @@ export class FfmpegRenderEngine implements RenderEngine {
     }
   }
 
-  /** fx path: filter graph with per-item grade/fades and xfade transitions. */
+  /**
+   * fx path: filter graph with per-item source edits, grade/fades, xfade
+   * transitions, drawtext overlays and the audio-track mix.
+   */
   private async renderFx(
     plan: RenderPlan,
     hooks: RenderHooks,
@@ -293,7 +416,12 @@ export class FfmpegRenderEngine implements RenderEngine {
     checkCancelled(hooks);
     hooks.onProgress(10);
     const child = new Deno.Command(this.binary, {
-      args: buildFxArgs(plan.items, plan.text_overlays, plan.output_path),
+      args: buildFxArgs(
+        plan.items,
+        plan.text_overlays,
+        plan.output_path,
+        plan.audio_items ?? [],
+      ),
       stdout: "null",
       stderr: "piped",
     }).spawn();
@@ -322,8 +450,7 @@ export class FfmpegRenderEngine implements RenderEngine {
   render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
     checkCancelled(hooks);
     hooks.onProgress(5);
-    const needsFxPass = planHasFx(plan.items) || plan.text_overlays.length > 0;
-    return needsFxPass ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);
+    return planNeedsFxPass(plan) ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);
   }
 }
 
@@ -352,18 +479,19 @@ function seedFromText(text: string): number {
 }
 
 /**
- * Stable serialization of the per-item fx carried on a plan; mixed into the
- * mock engine's seed so different fx produce different output bytes.
+ * Stable serialization of the per-item fx carried on a plan (source edits,
+ * transitions, grades, text overlays, audio placement); mixed into the mock
+ * engine's seed so different fx produce different output bytes.
  */
 export function fxFingerprint(
   items: RenderInputItem[],
   textOverlays: RenderTextOverlay[] = [],
+  audioItems: RenderAudioItem[] = [],
 ): string {
   const itemPart = items
     .map((i) =>
-      `${
-        i.source ?? "master"
-      }:${i.transition}:${i.transition_duration}:${i.fade_in}:${i.fade_out}:${
+      `${i.source ?? "master"}:${i.source_offset ?? 0}:${i.speed ?? 1}:${i.transition}` +
+      `:${i.transition_duration}:${i.fade_in}:${i.fade_out}:${
         JSON.stringify(i.color_grade ?? null)
       }`
     )
@@ -371,14 +499,23 @@ export function fxFingerprint(
   const overlayPart = textOverlays
     .map((o) => `${o.start_time}-${o.end_time}:${o.text}:${JSON.stringify(o.style ?? null)}`)
     .join("|");
-  return overlayPart === "" ? itemPart : `${itemPart}##${overlayPart}`;
+  const audioPart = audioItems
+    .map((a) =>
+      `${a.source ?? "master"}:${a.start_time}-${a.end_time}:${a.source_offset}` +
+      `:${a.source_duration}:${a.speed}:${a.gain}:${a.fade_in}:${a.fade_out}`
+    )
+    .join("|");
+  const tail = [overlayPart, audioPart].filter((p) => p !== "").join("##");
+  return tail === "" ? itemPart : `${itemPart}##${tail}`;
 }
 
 /**
  * Produces a deterministic placeholder file so the full render pipeline
  * (queue, engine, validation, export record, provenance) works without
- * ffmpeg. For mp4 the bytes are a placeholder container; for wav a valid
- * minimal PCM header + silence.
+ * ffmpeg. Bytes are content-addressed on the plan (format, duration and fx
+ * fingerprint), so re-renders of an unchanged timeline are byte-identical
+ * and deduplicate in the content store. For mp4 the bytes are a placeholder
+ * container; for wav a valid minimal PCM header + silence.
  */
 export class MockRenderEngine implements RenderEngine {
   readonly name = "mock";
@@ -386,8 +523,8 @@ export class MockRenderEngine implements RenderEngine {
   async render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
     const rand = xorshift(
       seedFromText(
-        plan.output_path + plan.total_duration +
-          fxFingerprint(plan.items, plan.text_overlays),
+        plan.format + plan.total_duration +
+          fxFingerprint(plan.items, plan.text_overlays, plan.audio_items ?? []),
       ),
     );
     const chunks: number[] = [];
