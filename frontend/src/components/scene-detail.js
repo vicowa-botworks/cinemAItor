@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
+import "./audio-dialog.js";
 
 const SCENE_STATUSES = [
   "draft",
@@ -282,6 +283,7 @@ export class SceneDetail extends LitElement {
     shotDraft: { state: true },
     clipUrls: { state: true },
     sceneClip: { state: true },
+    showAudioGen: { state: true },
     busy: { state: true },
   };
 
@@ -299,6 +301,7 @@ export class SceneDetail extends LitElement {
     this.shotDraft = null;
     this.clipUrls = new Map();
     this.sceneClip = null;
+    this.showAudioGen = false;
     this.busy = false;
     this._sceneId = null;
     this._modelChoice = "";
@@ -507,10 +510,26 @@ export class SceneDetail extends LitElement {
                     @click=${() => this._generate(true)}>
                     Batch generate (one job per shot)
                   </button>
-                  <a class="btn-small" href="#/jobs" style="text-decoration:none; display:inline-block;">
+                    <a class="btn-small" href="#/jobs" style="text-decoration:none; display:inline-block;">
                     Jobs
                   </a>
                 </div>
+              </div>
+
+              <div class="card">
+                <div class="card-title">Audio</div>
+                ${this.showAudioGen
+                  ? html`
+                    <audio-dialog .sceneId=${this._sceneId}></audio-dialog>
+                  `
+                  : html`
+                    <button
+                      class="btn-secondary"
+                      style="padding:8px 14px;border-radius:var(--radius);background:transparent;border:1px solid var(--color-border);color:var(--color-text);cursor:pointer;font-size:13px;"
+                      @click=${() => (this.showAudioGen = true)}>
+                      Generate audio (music / voiceover / SFX)
+                    </button>
+                  `}
               </div>
 
               <div class="shots">

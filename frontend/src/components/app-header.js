@@ -115,9 +115,9 @@ export class AppHeader extends LitElement {
                 <a href="#/timelines" class="${this._isActive(
                   "/timeline",
                 )}">Timelines</a>
-                <a href="#/movies" class="${this._isActive(
-                  "/movies",
-                )}">My Movies</a>
+                <a href="#/diagnostics" class="${this._isActive(
+                  "/diagnostics",
+                )}">Diagnostics</a>
                 <div class="user-info">
                   <span class="user-name">${this.userName}</span>
                   <button class="btn-logout" @click=${this

@@ -695,6 +695,116 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 audio endpoints", () => {
+    it("listAudioAssets builds query params from filters", async () => {
+      await api.listAudioAssets({
+        project_id: "p1",
+        asset_type: "music",
+      });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/audio/assets?project_id=p1&asset_type=music",
+      );
+    });
+
+    it("listAudioAssets with no filter omits the query string", async () => {
+      await api.listAudioAssets();
+      assertEquals(captured[0].url, "/api/v1/audio/assets");
+    });
+
+    it("generateAudio posts kind and prompt", async () => {
+      await api.generateAudio({
+        kind: "music",
+        prompt: "tense drone",
+        project_id: "p1",
+      });
+      assertEquals(captured[0].url, "/api/v1/audio/generate");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.kind, "music");
+      assertEquals(body.prompt, "tense drone");
+      assertEquals(body.project_id, "p1");
+    });
+
+    it("updateAudioAdjustments patches the adjustments subpath", async () => {
+      await api.updateAudioAdjustments("a-1", "v-1", { trim_in_s: 1.5 });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/audio/assets/a-1/versions/v-1/adjustments",
+      );
+      assertEquals(captured[0].options.method, "PATCH");
+      assertEquals(
+        JSON.parse(captured[0].options.body).trim_in_s,
+        1.5,
+      );
+    });
+
+    it("getAudioWaveform hits the waveform subpath", async () => {
+      await api.getAudioWaveform("a-1", "v-1");
+      assertEquals(
+        captured[0].url,
+        "/api/v1/audio/assets/a-1/versions/v-1/waveform",
+      );
+    });
+  });
+
+  describe("v1 diagnostics endpoints", () => {
+    it("report getters hit the report subpaths", async () => {
+      await api.getDiagnosticsHardware();
+      assertEquals(captured[0].url, "/api/v1/diagnostics/hardware");
+
+      await api.getDiagnosticsModels();
+      assertEquals(captured[1].url, "/api/v1/diagnostics/models");
+
+      await api.getDiagnosticsStorage();
+      assertEquals(captured[2].url, "/api/v1/diagnostics/storage");
+    });
+
+    it("getDiagnosticsLogs filters by category, severity, window and limit", async () => {
+      await api.getDiagnosticsLogs({
+        category: "job",
+        severity: "error",
+        since_hours: 24,
+        limit: 50,
+      });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/diagnostics/logs?category=job&severity=error&since_hours=24&limit=50",
+      );
+    });
+
+    it("exportDiagnostics posts to the export subpath", async () => {
+      await api.exportDiagnostics();
+      assertEquals(captured[0].url, "/api/v1/diagnostics/export");
+      assertEquals(captured[0].options.method, "POST");
+    });
+
+    it("backup methods hit the backups subpaths", async () => {
+      await api.createProjectBackup("p1");
+      assertEquals(captured[0].url, "/api/v1/diagnostics/backups");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).project_id, "p1");
+
+      await api.listBackups();
+      assertEquals(captured[1].url, "/api/v1/diagnostics/backups");
+
+      await api.restoreBackup("b-1", "Restored name");
+      assertEquals(
+        captured[2].url,
+        "/api/v1/diagnostics/backups/b-1/restore",
+      );
+      assertEquals(captured[2].options.method, "POST");
+      assertEquals(
+        JSON.parse(captured[2].options.body).project_name,
+        "Restored name",
+      );
+
+      await api.deleteBackup("b-1");
+      assertEquals(captured[3].url, "/api/v1/diagnostics/backups/b-1");
+      assertEquals(captured[3].options.method, "DELETE");
+    });
+  });
+
   describe("creative asset slug map", () => {
     it("maps prefix-matched slugs to asset ids", async () => {
       const rows = [
@@ -743,17 +853,6 @@ describe("ApiClient", () => {
     it("throws ApiError for failed media requests", async () => {
       globalThis.fetch = async () => jsonResponse({ error: "not found" }, 404);
       await assertRejects(() => api.fetchMediaUrl("/assets/a-1/preview"), ApiError);
-    });
-  });
-
-  describe("legacy demo endpoints", () => {
-    it("keeps movie calls on the /api base", async () => {
-      await api.getMovies();
-      await api.getMovie(7);
-      await api.createMovieScene(7, { scene_number: 1 });
-      assertEquals(captured[0].url, "/api/movies");
-      assertEquals(captured[1].url, "/api/movies/7");
-      assertEquals(captured[2].url, "/api/movies/7/scenes");
     });
   });
 

@@ -1,9 +1,17 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import "./audio-dialog.js";
 
 const SCALE = 60;
 const LABEL_W = 210;
 const TEXT_TRACK_TYPES = ["text", "subtitle"];
+const AUDIO_TRACK_TYPES = [
+  "dialogue",
+  "voiceover",
+  "music",
+  "sfx",
+  "ambience",
+];
 const TRACK_TYPES = [
   "video",
   "overlay",
@@ -292,6 +300,13 @@ export class TimelineDetail extends LitElement {
       outline-offset: 1px;
     }
 
+    .item .waveform {
+      flex: 1;
+      min-width: 24px;
+      height: 26px;
+      margin-left: 8px;
+    }
+
     .track-lane.locked .item {
       cursor: not-allowed;
       opacity: 0.65;
@@ -304,6 +319,7 @@ export class TimelineDetail extends LitElement {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      min-width: 0;
     }
 
     .playhead {
@@ -511,6 +527,8 @@ export class TimelineDetail extends LitElement {
     exports: { state: true },
     assets: { state: true },
     clipNames: { state: true },
+    waveforms: { state: true },
+    showAudioGen: { state: true },
     loading: { state: true },
     error: { state: true },
     notice: { state: true },
@@ -554,6 +572,8 @@ export class TimelineDetail extends LitElement {
     this.exports = [];
     this.assets = [];
     this.clipNames = new Map();
+    this.waveforms = new Map();
+    this.showAudioGen = false;
     this.loading = false;
     this.error = "";
     this.notice = "";
@@ -625,6 +645,7 @@ export class TimelineDetail extends LitElement {
         .listAssets({ project_id: detail.timeline.project_id })
         .catch(() => []);
       this._buildClipNames();
+      this._loadAudioWaveforms();
       if (this.placeTrackId && !this._trackById(this.placeTrackId)) {
         this.placeTrackId = this.tracks[0]?.id ?? "";
       }
@@ -660,6 +681,65 @@ export class TimelineDetail extends LitElement {
       }
     }
     this.clipNames = map;
+  }
+
+  async _loadAudioWaveforms() {
+    const versionIds = new Set();
+    for (const track of this.tracks) {
+      if (!AUDIO_TRACK_TYPES.includes(track.track_type)) continue;
+      for (const item of track.items) {
+        if (item.asset_version_id) versionIds.add(item.asset_version_id);
+      }
+    }
+    if (versionIds.size === 0) {
+      this.waveforms = new Map();
+      return;
+    }
+    // Version ids only identify the asset via the asset lists; generated
+    // audio is global-scoped, so include the audio asset list as well.
+    let versionAsset = new Map();
+    for (const asset of this.assets) {
+      if (asset.active_version_id && versionIds.has(asset.active_version_id)) {
+        versionAsset.set(asset.active_version_id, asset.id);
+      }
+    }
+    if (versionAsset.size < versionIds.size) {
+      const audioAssets = await api
+        .listAudioAssets()
+        .catch(() => []);
+      for (const asset of audioAssets) {
+        if (
+          asset.active_version_id &&
+          versionIds.has(asset.active_version_id) &&
+          !versionAsset.has(asset.active_version_id)
+        ) {
+          versionAsset.set(asset.active_version_id, asset.id);
+        }
+      }
+    }
+    const targets = [...versionAsset.entries()];
+    const results = await Promise.allSettled(
+      targets.map(([versionId, assetId]) => api.getAudioWaveform(assetId, versionId)),
+    );
+    const map = new Map();
+    for (let i = 0; i < targets.length; i++) {
+      if (results[i].status === "fulfilled" && results[i].value?.waveform) {
+        map.set(targets[i][0], results[i].value.waveform.peaks);
+      }
+    }
+    this.waveforms = map;
+  }
+
+  _waveformPath(peaks) {
+    const step = Math.ceil(peaks.length / 200);
+    const pts = [];
+    for (let i = 0; i < peaks.length; i += step) {
+      const x = (i / (peaks.length - 1)) * 100;
+      const amp = Math.max(0.6, Math.min(1, Number(peaks[i]) || 0)) * 10.5;
+      pts.push(`${x.toFixed(2)},${(12 - amp).toFixed(2)}`);
+      pts.push(`${x.toFixed(2)},${(12 + amp).toFixed(2)}`);
+    }
+    return pts.join(" ");
   }
 
   _trackById(id) {
@@ -1228,6 +1308,11 @@ export class TimelineDetail extends LitElement {
           <button
             class="btn-small"
             style="margin-left:auto;"
+            @click=${() => (this.showAudioGen = !this.showAudioGen)}>
+            ${this.showAudioGen ? "Hide audio" : "Generate audio"}
+          </button>
+          <button
+            class="btn-small"
             ?disabled=${this.busy}
             @click=${this._deleteTimeline}>
             Delete
@@ -1236,6 +1321,13 @@ export class TimelineDetail extends LitElement {
 
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
+
+        ${this.showAudioGen
+          ? html`
+            <audio-dialog
+              .projectId=${this.timeline.project_id ?? null}></audio-dialog>
+          `
+          : null}
 
         ${this._renderCanvas(width)}
 
@@ -1396,6 +1488,9 @@ export class TimelineDetail extends LitElement {
       8,
       (item.end_time - item.start_time) * SCALE,
     );
+    const peaks = item.asset_version_id ? this.waveforms.get(item.asset_version_id) : undefined;
+    const showWave = AUDIO_TRACK_TYPES.includes(track.track_type) &&
+      Array.isArray(peaks) && peaks.length > 1;
     return html`
       <div
         class="item ${this.selectedItemId === item.id ? "selected" : ""}"
@@ -1406,6 +1501,21 @@ export class TimelineDetail extends LitElement {
           item.start_time,
         )} → ${this._formatTime(item.end_time)}">
         <span class="item-label">${this._itemLabel(item)}</span>
+        ${showWave
+          ? html`
+            <svg
+              class="waveform"
+              viewBox="0 0 100 24"
+              preserveAspectRatio="none"
+              aria-hidden="true">
+              <polyline
+                points=${this._waveformPath(peaks)}
+                fill="none"
+                stroke="rgba(255,255,255,0.85)"
+                stroke-width="0.7"></polyline>
+            </svg>
+          `
+          : null}
       </div>
     `;
   }
