@@ -9,6 +9,8 @@ import "./components/asset-detail.js";
 import "./components/asset-card.js";
 import "./components/asset-form.js";
 import "./components/asset-upload.js";
+import "./components/prompt-editor.js";
+import "./components/model-manager.js";
 import "./components/movie-list.js";
 import "./components/movie-detail.js";
 
@@ -158,6 +160,18 @@ export class AppRoot extends LitElement {
       if (match) {
         this.viewParams.id = decodeURIComponent(match[1]);
       }
+    } else if (hash === "#/prompts") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "prompts";
+    } else if (hash === "#/models") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "models";
     } else if (hash === "#/movies") {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
@@ -219,6 +233,10 @@ export class AppRoot extends LitElement {
               : "#/assets"}
           ></asset-detail>
         `;
+      case "prompts":
+        return html`<prompt-editor></prompt-editor>`;
+      case "models":
+        return html`<model-manager></model-manager>`;
       case "movies":
         return html`<movie-list></movie-list>`;
       case "movie-detail":

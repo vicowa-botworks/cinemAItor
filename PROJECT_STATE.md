@@ -2,9 +2,8 @@
 
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
-phase 2 asset library shipped;
-
-remaining: skills, templates, advanced storage, audio polish, model benchmark)
+phase 3 prompt studio + model manager shipped; remaining: skills, templates, advanced storage, audio
+polish, model benchmark)
 
 The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
 removed.
@@ -110,7 +109,12 @@ removed.
 
 ### In Progress
 
-- (none)
+- [ ] Frontend phase 3 (MASTER-PLAN §15.3): prompt studio (`#/prompts`) with versioned editing per
+      scope (history view + restore, duplicate detection notice), live `@slug` / `@slug:vN`
+      reference parsing with per-token status badges, asset picker that inserts references at the
+      caret; model manager (`#/models`) with registry list/filters, hardware report + requirement
+      warnings, per-model health check + checksum verification, admin-gated install (with network
+      consent), enable/disable, and remove
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
