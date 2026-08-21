@@ -141,13 +141,20 @@ The product track follows `MASTER-PLAN.md`.
 - [x] Frontend phase 7 (MASTER-PLAN §15.3): audio generation dialog (music / voiceover / SFX prompt
       → job queue, scene-scoped in scene detail and project-scoped in timeline detail), waveform
       strips (200-bucket peaks) on audio-track timeline items, and the diagnostics & settings panel
-      (`#/diagnostics`: hardware / model health / storage reports, diagnostics log browser with
-      filters, redacted export, project backup / restore); legacy `movies` demo surface removed
-      (frontend components/routes/API + `/api/movies` backend routes + legacy CRUD)
+       (`#/diagnostics`: hardware / model health / storage reports, diagnostics log browser with
+       filters, redacted export, project backup / restore); legacy `movies` demo surface removed
+       (frontend components/routes/API + `/api/movies` backend routes + legacy CRUD)
+- [x] Audio adjustments UI (asset detail, Workstream 11 follow-up): audio assets show an
+      "Audio adjustments" section in their detail view — the active version's 200-bucket waveform
+      with the stored trim window highlighted, plus trim start/end (s) and gain (dB) inputs
+      validated against the version duration and saved per-version via the adjustments endpoint
+      (applied at render time by the fx pass); reset restores the full window and 0 dB; the
+      parse/prefill/validation logic lives in shared `frontend/src/audio-adjustments.js` with unit
+      tests
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 11 follow-ups: audio trim/gain UI (adjustments exist at the API level), basic mixer
+- [ ] Workstream 11 follow-ups: basic mixer
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners, progress
       from ffmpeg stats
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track

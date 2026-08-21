@@ -27,7 +27,7 @@ Import, generation, versioning, non-destructive trim/gain and waveform access fo
 | POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1                                 |
 | GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                          |
 | POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                                                |
-| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration)                                                                                            |
+| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration); edited from the Asset Detail "Audio adjustments" section (waveform, trim window, gain, reset)   |
 | GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                                                      |
 
 All endpoints require authentication; mutations follow asset write permissions (project scope

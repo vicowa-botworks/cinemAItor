@@ -76,6 +76,7 @@ app-root (main router)
 │   ├── asset-form (create metadata-only asset)
 │   └── asset-upload (create + multipart file upload → first version)
 ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
+│   │              audio adjustments (waveform + trim/gain for audio assets),
 │   │              tags, aliases, delete)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, history view/restore)
@@ -98,6 +99,8 @@ app-root (main router)
 ├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
 │   │             embedded in scene-detail and timeline-detail)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
+├── audio-adjustments (shared trim/gain parse/prefill/validation for the asset-detail
+│   │                  adjustments UI)
 └── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
     diagnostic bundle export, project backup/restore)
 ```

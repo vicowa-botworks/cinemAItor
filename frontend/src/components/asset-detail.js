@@ -1,5 +1,11 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import {
+  AUDIO_TYPES,
+  audioFormFromMeta,
+  parseAudioMetadata,
+  validateAudioAdjustments,
+} from "../audio-adjustments.js";
 
 const STATUS_OPTIONS = ["draft", "approved", "rejected", "archived"];
 
@@ -284,6 +290,49 @@ export class AssetDetail extends LitElement {
     .danger-zone {
       border-color: var(--color-error);
     }
+
+    .waveform-note {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      margin-bottom: 12px;
+    }
+
+    .waveform-svg {
+      display: block;
+      width: 100%;
+      height: 56px;
+      background-color: var(--color-surface-hover);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+    }
+
+    .waveform-bars {
+      fill: none;
+      stroke: var(--color-text-muted);
+    }
+
+    .waveform-dim {
+      fill: #000;
+      opacity: 0.35;
+    }
+
+    .waveform-edge {
+      stroke: var(--color-primary);
+      stroke-width: 2;
+    }
+
+    .audio-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 700px) {
+      .audio-row {
+        grid-template-columns: 1fr;
+      }
+    }
   `;
 
   static properties = {
@@ -296,6 +345,10 @@ export class AssetDetail extends LitElement {
     notice: { state: true },
     preview: { state: true },
     mediaKind: { state: true },
+    audioMeta: { state: true },
+    audioPeaks: { state: true },
+    audioForm: { state: true },
+    audioSaving: { state: true },
   };
 
   constructor() {
@@ -309,6 +362,10 @@ export class AssetDetail extends LitElement {
     this.notice = "";
     this.preview = null;
     this.mediaKind = "master";
+    this.audioMeta = null;
+    this.audioPeaks = null;
+    this.audioForm = { start: "", end: "", gain: "" };
+    this.audioSaving = false;
   }
 
   willUpdate(changed) {
@@ -329,6 +386,10 @@ export class AssetDetail extends LitElement {
     this.error = "";
     this.notice = "";
     this.preview = null;
+    this.audioMeta = null;
+    this.audioPeaks = null;
+    this.audioForm = { start: "", end: "", gain: "" };
+    this.audioSaving = false;
   }
 
   _revokePreview() {
@@ -349,6 +410,7 @@ export class AssetDetail extends LitElement {
       this.asset = asset;
       this.versions = versions;
       await this._loadPreview();
+      await this._refreshAudio();
     } catch (err) {
       this.error = err.message || "Failed to load asset";
     } finally {
@@ -391,6 +453,128 @@ export class AssetDetail extends LitElement {
     } catch (err) {
       this.error = err.message || "Failed to queue proxy";
     }
+  }
+
+  // --- audio adjustments (non-destructive trim + gain) ---
+
+  _isAudioAsset() {
+    return AUDIO_TYPES.includes(this.asset?.asset_type);
+  }
+
+  _audioDuration() {
+    const d = this.audioMeta?.duration;
+    return typeof d === "number" && d > 0 ? d : null;
+  }
+
+  async _refreshAudio() {
+    this.audioMeta = null;
+    this.audioPeaks = null;
+    this.audioForm = { start: "", end: "", gain: "" };
+    const version = this.asset?.active_version;
+    if (!this._isAudioAsset() || !version) return;
+    this.audioMeta = parseAudioMetadata(version.technical_metadata_json);
+    this._syncAudioForm();
+    try {
+      const wave = await api.getAudioWaveform(this.assetId, version.id);
+      this.audioPeaks = wave?.waveform?.peaks ?? null;
+    } catch {
+      this.audioPeaks = null;
+    }
+  }
+
+  _syncAudioForm() {
+    this.audioForm = audioFormFromMeta(this.audioMeta);
+  }
+
+  _audioFormValues() {
+    return validateAudioAdjustments(this.audioForm, this._audioDuration());
+  }
+
+  async _saveAudioAdjustments() {
+    const version = this.asset?.active_version;
+    if (!version || this.audioSaving) return;
+    const values = this._audioFormValues();
+    if (values.error) {
+      this.error = values.error;
+      this.notice = "";
+      return;
+    }
+    this.audioSaving = true;
+    this.error = "";
+    this.notice = "";
+    try {
+      const result = await api.updateAudioAdjustments(
+        this.assetId,
+        version.id,
+        values,
+      );
+      this.versions = this.versions.map((v) => v.id === result.version.id ? result.version : v);
+      this.asset = { ...this.asset, active_version: result.version };
+      this.audioMeta = result.audio ?? null;
+      this._syncAudioForm();
+      this.notice = "Adjustments saved.";
+    } catch (err) {
+      this.error = err.message || "Failed to save adjustments";
+    } finally {
+      this.audioSaving = false;
+    }
+  }
+
+  _onAudioAdjustSubmit(e) {
+    e.preventDefault();
+    this._saveAudioAdjustments();
+  }
+
+  _onAudioReset() {
+    this.audioForm = { start: "", end: "", gain: "" };
+    this._saveAudioAdjustments();
+  }
+
+  _audioWaveform() {
+    const peaks = this.audioPeaks;
+    if (!Array.isArray(peaks) || peaks.length < 2) {
+      return html`<div class="waveform-note">Waveform unavailable.</div>`;
+    }
+    const step = Math.max(1, Math.ceil(peaks.length / 300));
+    const pts = [];
+    for (let i = 0; i < peaks.length; i += step) {
+      const x = (i / (peaks.length - 1)) * 1000;
+      const amp = Math.max(0.04, Math.min(1, Number(peaks[i]) || 0)) * 19;
+      pts.push(`${x.toFixed(2)},${(22 - amp).toFixed(2)}`);
+      pts.push(`${x.toFixed(2)},${(22 + amp).toFixed(2)}`);
+    }
+    const duration = this._audioDuration() ?? 0;
+    const values = this._audioFormValues();
+    let sf = 0;
+    let ef = 1;
+    if (duration > 0 && !values.error) {
+      sf = Math.min(1, Math.max(0, values.trim.start / duration));
+      ef = Math.min(1, Math.max(0, values.trim.end / duration));
+    }
+    return html`
+      <svg class="waveform-svg" viewBox="0 0 1000 44" preserveAspectRatio="none"
+        aria-label="Audio waveform with trim selection">
+        <polyline class="waveform-bars" points=${pts.join(" ")}></polyline>
+        ${sf > 0
+          ? html`
+            <rect class="waveform-dim" x="0" y="0" width=${(sf * 1000).toFixed(
+              1,
+            )}
+              height="44"></rect>
+            <line class="waveform-edge" x1=${(sf * 1000).toFixed(1)}
+              x2=${(sf * 1000).toFixed(1)} y1="0" y2="44"></line>
+          `
+          : ""}
+        ${ef < 1
+          ? html`
+            <rect class="waveform-dim" x=${(ef * 1000).toFixed(1)} y="0"
+              width=${((1 - ef) * 1000).toFixed(1)} height="44"></rect>
+            <line class="waveform-edge" x1=${(ef * 1000).toFixed(1)}
+              x2=${(ef * 1000).toFixed(1)} y1="0" y2="44"></line>
+          `
+          : ""}
+      </svg>
+    `;
   }
 
   _onMetadataSubmit(e) {
@@ -436,6 +620,7 @@ export class AssetDetail extends LitElement {
       this.versions = await api.listAssetVersions(this.assetId);
       form.reset();
       await this._loadPreview();
+      await this._refreshAudio();
       this.notice = `Version ${result.version.version_number} uploaded.`;
     } catch (err) {
       this.error = err.message || "Upload failed";
@@ -450,6 +635,7 @@ export class AssetDetail extends LitElement {
       this.asset = result.asset;
       this.versions = await api.listAssetVersions(this.assetId);
       await this._loadPreview();
+      await this._refreshAudio();
       this.notice = `Restored to version ${version.version_number}.`;
     } catch (err) {
       this.error = err.message || "Restore failed";
@@ -517,7 +703,9 @@ export class AssetDetail extends LitElement {
 
   _renderPreview() {
     const asset = this.asset;
-    if (!asset) return html`<div class="preview-box"><span>Loading...</span></div>`;
+    if (!asset) {
+      return html`<div class="preview-box"><span>Loading...</span></div>`;
+    }
     const version = asset.active_version;
     if (!version) {
       return html`<div class="preview-box"><span>No versions yet.</span></div>`;
@@ -581,7 +769,8 @@ export class AssetDetail extends LitElement {
             </div>
           </div>
           <div class="preview-actions" style="margin-top:0;">
-            <button class="btn btn-danger" @click=${this._deleteAsset}>Delete</button>
+            <button class="btn btn-danger" @click=${this
+              ._deleteAsset}>Delete</button>
           </div>
         </div>
 
@@ -608,7 +797,8 @@ export class AssetDetail extends LitElement {
                         : html`<button class="btn btn-secondary" @click=${this._loadPreview}>View master</button>`}
                     `
                     : ""}
-                  <button class="btn btn-secondary" @click=${this._regenerateProxy}>
+                  <button class="btn btn-secondary" @click=${this
+                    ._regenerateProxy}>
                     Regenerate proxy
                   </button>
                 </div>
@@ -631,7 +821,8 @@ export class AssetDetail extends LitElement {
                     ${STATUS_OPTIONS.map(
                       (s) =>
                         html`
-                          <option value=${s} ?selected=${asset.status === s}>${s}</option>
+                          <option value=${s} ?selected=${asset.status ===
+                            s}>${s}</option>
                         `,
                     )}
                   </select>
@@ -680,6 +871,74 @@ export class AssetDetail extends LitElement {
           </div>
         </div>
 
+        ${this._isAudioAsset() && asset?.active_version
+          ? html`
+            <div class="section">
+              <h3>Audio adjustments</h3>
+              <p class="waveform-note">
+                Non-destructive: the original file is untouched. Trim and gain are
+                applied at render time, so timelines using this version pick them up
+                automatically.
+              </p>
+              ${this._audioWaveform()}
+              <form @submit=${this._onAudioAdjustSubmit}>
+                <div class="audio-row">
+                  <div class="field">
+                    <label for="a-start">Trim start (s)</label>
+                    <input id="a-start" type="number" step="0.01" min="0" placeholder="0"
+                      .value=${this.audioForm.start}
+                      @input=${(
+                        e,
+                      ) => (this.audioForm = {
+                        ...this.audioForm,
+                        start: e.target.value,
+                      })} />
+                  </div>
+                  <div class="field">
+                    <label for="a-end">Trim end (s)</label>
+                    <input id="a-end" type="number" step="0.01" min="0"
+                      placeholder=${this._audioDuration()?.toFixed(2) ?? "full"}
+                      .value=${this.audioForm.end}
+                      @input=${(
+                        e,
+                      ) => (this.audioForm = {
+                        ...this.audioForm,
+                        end: e.target.value,
+                      })} />
+                    ${this._audioDuration()
+                      ? html`<div class="waveform-note">
+                          duration ${this._audioDuration().toFixed(2)} s — leave end
+                          empty for the full length</div>`
+                      : ""}
+                  </div>
+                  <div class="field">
+                    <label for="a-gain">Gain (dB)</label>
+                    <input id="a-gain" type="number" step="0.5" min="-60" max="24"
+                      placeholder="0"
+                      .value=${this.audioForm.gain}
+                      @input=${(
+                        e,
+                      ) => (this.audioForm = {
+                        ...this.audioForm,
+                        gain: e.target.value,
+                      })} />
+                  </div>
+                </div>
+                <div class="preview-actions" style="margin-top:2px;">
+                  <button type="submit" class="btn" ?disabled=${this
+                    .audioSaving}>
+                    ${this.audioSaving ? "Saving..." : "Save adjustments"}
+                  </button>
+                  <button type="button" class="btn btn-secondary"
+                    ?disabled=${this.audioSaving} @click=${this._onAudioReset}>
+                    Reset (full window, 0 dB)
+                  </button>
+                </div>
+              </form>
+            </div>
+          `
+          : ""}
+
         <div class="grid-2">
           <div class="section">
             <h3>Versions</h3>
@@ -691,7 +950,9 @@ export class AssetDetail extends LitElement {
                       <div class="version ${version?.id === v.id ? "active" : ""}">
                         <span class="version-id">v${v.version_number}</span>
                         <span class="version-info">
-                          ${v.format ?? "?"} &middot; ${formatBytes(v.file_size)} &middot;
+                          ${v.format ?? "?"} &middot; ${formatBytes(
+                            v.file_size,
+                          )} &middot;
                           ${v.proxy_path ? "proxy ready" : "no proxy"} &middot;
                           ${v.created_at ? new Date(v.created_at).toLocaleDateString() : ""}
                         </span>
