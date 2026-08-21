@@ -25,10 +25,10 @@ class ApiClient {
   }
 
   async request(path, options = {}, base = V1_BASE) {
-    const headers = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
+    const headers = { ...options.headers };
+    if (options.body !== undefined && !(options.body instanceof FormData)) {
+      headers["Content-Type"] = "application/json";
+    }
 
     if (this.#token) {
       headers["Authorization"] = `Bearer ${this.#token}`;
@@ -51,6 +51,30 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  /**
+   * Fetch a media endpoint (preview/proxy streams) and resolve it to a
+   * blob: object URL plus the blob's MIME type. The caller owns the URL
+   * and must call URL.revokeObjectURL() when done.
+   */
+  async fetchMediaUrl(v1Path) {
+    const headers = {};
+    if (this.#token) {
+      headers["Authorization"] = `Bearer ${this.#token}`;
+    }
+
+    const response = await fetch(`${V1_BASE}${v1Path}`, { headers });
+
+    if (!response.ok) {
+      const error = await response
+        .json()
+        .catch(() => ({ error: response.statusText }));
+      throw new ApiError(error.error || "Request failed", response.status);
+    }
+
+    const blob = await response.blob();
+    return { url: URL.createObjectURL(blob), type: blob.type };
   }
 
   // --- v1 auth ---
@@ -105,6 +129,110 @@ class ApiClient {
     return this.request(`/projects/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  }
+
+  // --- v1 assets ---
+
+  listAssets(filter = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return this.request(`/assets${query ? `?${query}` : ""}`);
+  }
+
+  getAsset(id) {
+    return this.request(`/assets/${encodeURIComponent(id)}`);
+  }
+
+  createAsset(data) {
+    return this.request("/assets", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updateAsset(id, data) {
+    return this.request(`/assets/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteAsset(id) {
+    return this.request(`/assets/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async uploadAsset(id, file, notes) {
+    const form = new FormData();
+    form.append("file", file);
+    if (notes) {
+      form.append("notes", notes);
+    }
+    return this.request(`/assets/${encodeURIComponent(id)}/upload`, {
+      method: "POST",
+      body: form,
+    });
+  }
+
+  listAssetVersions(id) {
+    return this.request(`/assets/${encodeURIComponent(id)}/versions`);
+  }
+
+  restoreAssetVersion(id, versionId) {
+    return this.request(
+      `/assets/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/restore`,
+      { method: "POST" },
+    );
+  }
+
+  addAssetAlias(id, aliasSlug) {
+    return this.request(`/assets/${encodeURIComponent(id)}/aliases`, {
+      method: "POST",
+      body: JSON.stringify({ alias_slug: aliasSlug }),
+    });
+  }
+
+  removeAssetAlias(id, aliasSlug) {
+    return this.request(
+      `/assets/${encodeURIComponent(id)}/aliases/${encodeURIComponent(aliasSlug)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  addAssetTag(id, tag) {
+    return this.request(`/assets/${encodeURIComponent(id)}/tags`, {
+      method: "POST",
+      body: JSON.stringify({ tag }),
+    });
+  }
+
+  removeAssetTag(id, tag) {
+    return this.request(`/assets/${encodeURIComponent(id)}/tags/${encodeURIComponent(tag)}`, {
+      method: "DELETE",
+    });
+  }
+
+  getAssetPreviewUrl(id) {
+    return this.fetchMediaUrl(`/assets/${encodeURIComponent(id)}/preview`);
+  }
+
+  getAssetProxyUrl(id, versionId) {
+    return this.fetchMediaUrl(
+      `/assets/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/proxy`,
+    );
+  }
+
+  regenerateAssetProxy(id, versionId) {
+    return this.request(
+      `/assets/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/proxy`,
+      { method: "POST" },
+    );
   }
 
   // --- legacy demo API (kept until the legacy surface is removed) ---

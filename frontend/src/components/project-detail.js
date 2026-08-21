@@ -153,6 +153,10 @@ export class ProjectDetail extends LitElement {
     window.location.hash = "#/projects";
   }
 
+  _gotoAssets() {
+    window.location.hash = `#/project/${encodeURIComponent(this.projectId)}/assets`;
+  }
+
   _toggleEdit() {
     this.editing = !this.editing;
     this.error = "";
@@ -232,6 +236,9 @@ export class ProjectDetail extends LitElement {
           <div class="actions">
             <button class="btn-edit" @click=${this._toggleEdit}>
               ${this.editing ? "Close" : "Edit settings"}
+            </button>
+            <button class="btn-edit" @click=${this._gotoAssets}>
+              View assets
             </button>
             <button class="btn-delete" ?disabled=${this.deleting}
               @click=${this._deleteProject}>
