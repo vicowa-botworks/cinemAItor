@@ -369,6 +369,48 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 job endpoints", () => {
+    it("listJobs builds the query from the filter", async () => {
+      await api.listJobs({
+        status: "running",
+        job_type: "text_to_image",
+        project_id: "p1",
+        limit: 50,
+      });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/jobs?status=running&job_type=text_to_image&project_id=p1&limit=50",
+      );
+    });
+
+    it("listJobs omits empty filter values", async () => {
+      await api.listJobs({ status: "", job_type: undefined });
+      assertEquals(captured[0].url, "/api/v1/jobs");
+    });
+
+    it("getJob requests /api/v1/jobs/:id", async () => {
+      await api.getJob("job-1");
+      assertEquals(captured[0].url, "/api/v1/jobs/job-1");
+    });
+
+    it("cancelJob posts to the cancel subpath", async () => {
+      await api.cancelJob("job 1");
+      assertEquals(captured[0].url, "/api/v1/jobs/job%201/cancel");
+      assertEquals(captured[0].options.method, "POST");
+    });
+
+    it("retryJob posts to the retry subpath", async () => {
+      await api.retryJob("job-1");
+      assertEquals(captured[0].url, "/api/v1/jobs/job-1/retry");
+      assertEquals(captured[0].options.method, "POST");
+    });
+
+    it("listJobEvents requests the events subpath", async () => {
+      await api.listJobEvents("job-1");
+      assertEquals(captured[0].url, "/api/v1/jobs/job-1/events");
+    });
+  });
+
   describe("fetchMediaUrl", () => {
     it("resolves a blob url and the content type", async () => {
       const blob = new Blob(["img"], { type: "image/png" });
