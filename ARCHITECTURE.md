@@ -98,12 +98,19 @@ app-root (main router)
 ├── timeline-detail (tracks with lock/mute + swap reorder, clip/text placement via
 │   │               picker + move/resize + speed/volume/fades/transition/color-grade
 │   │               fx panel, waveform strip on audio items, markers, snapshots/restore,
-│   │               render presets + queue + exports with job log)
+│   │               render presets + queue + exports with job log, in-browser playback preview
+│   │               above the canvas — see timeline-preview; ruler click + drag-scrub)
+├── timeline-preview (browser-side timeline playback: play/pause/stop, 0.25×–2× rate, in/out
+│   │             loop range; proxy-first media with master fallback, render-source track
+│   │             selection, per-clip speed/fades, CSS-approximated color grade, audio mix from
+│   │             version gain/trim + fades, text/subtitle overlays)
 ├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
 │   │             embedded in scene-detail and timeline-detail)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
 ├── audio-adjustments (shared trim/gain parse/prefill/validation for the asset-detail
 │   │                  adjustments UI)
+├── timeline-playback (shared pure playback math: active visual/audio/text at time, source time,
+│   │                  fade factors, grade→CSS filter mapping, in/out range — unit-tested)
 └── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
     diagnostic bundle export, project backup/restore)
 ```

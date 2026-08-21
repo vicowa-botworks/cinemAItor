@@ -172,12 +172,27 @@ The product track follows `MASTER-PLAN.md`.
       refreshes on status, timeline render panel does the same for the active render; 2-3s polling
       is kept as a fallback so the UI degrades to the previous behavior when the socket cannot
       connect
+- [x] Timeline playback preview (TIM-010 / Workstream 10 follow-up): browser-side preview of a
+      timeline in the editor — `<timeline-preview>` above the canvas with play/pause/stop, 0.25×–2×
+      rate, and in/out loop range. Video comes from the same source selection as the render runner
+      (unlocked video/overlay tracks, top track wins): proxy-first media resolution with master
+      fallback for the active/preview version, per-clip speed/fade-in-fade-out (applied to
+      playbackRate, opacity, and audio volume), and CSS-filter approximations of the stored color
+      grade + temperature. Audio-track items are mixed from a small pool of `<audio>` elements with
+      the version-level gain and trim window (gated to the active/preview version, whose
+      server-fetched master already has adjustments applied) plus item fades; text/subtitle items
+      render as positioned overlays. The pure geometry (active-visual/audio/text selection, source
+      time at timeline time, fade factors, grade → filter mapping, in/out range) lives in
+      `frontend/src/timeline-playback.js` with unit tests; the component drives it from a
+      requestAnimationFrame loop and emits `playheadchange` (~10 Hz) which the ruler playhead
+      follows. The ruler now also drag-scrubs (pointer capture) in addition to click-to-set.
+      Grades/mixes are preview approximations — the render pipeline remains the source of truth
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 11 follow-ups: basic mixer
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
-- [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
+- [ ] Workstream 10 follow-ups: undo/redo, basic audio track (playback preview shipped above)
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Thumbnails in the timeline view (STO-007..008) — waveforms now ship with phase 7, asset
       proxies with the proxy workflow above
@@ -217,3 +232,4 @@ The product track follows `MASTER-PLAN.md`.
 - Frontend phase 6 (timeline editor + render/export UI, MASTER-PLAN §15.3): Fri Aug 21 2026
 - Frontend phase 7 (audio generation dialog + waveforms, diagnostics panel, legacy movies removal,
   MASTER-PLAN §15.3): Fri Aug 21 2026
+- Timeline playback preview (TIM-010): Fri Aug 21 2026

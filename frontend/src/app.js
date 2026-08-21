@@ -19,6 +19,7 @@ import "./components/scene-detail.js";
 import "./components/review-board.js";
 import "./components/timeline-list.js";
 import "./components/timeline-detail.js";
+import "./components/timeline-preview.js";
 import "./components/audio-dialog.js";
 import "./components/diagnostics-panel.js";
 
