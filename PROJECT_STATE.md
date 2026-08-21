@@ -2,11 +2,11 @@
 
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
-phase 4 job monitor shipped; remaining: skills, templates, advanced storage, audio polish, model
-benchmark)
+phase 6 timeline/render UI shipped; frontend phase 7 (audio generation + waveforms, diagnostics
+panel, legacy movies removal) in flight; remaining: skills, templates, advanced storage, audio
+polish, model benchmark)
 
-The product track follows `MASTER-PLAN.md`. The legacy demo API (movies/scenes) remains until it is
-removed.
+The product track follows `MASTER-PLAN.md`.
 
 ### Completed
 
@@ -133,15 +133,20 @@ removed.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 11 follow-ups: audio trim/gain rendering, waveforms in the timeline, basic mixer
+- [ ] Frontend phase 7 (MASTER-PLAN §15.3, in flight): audio generation dialog (music / voiceover /
+      SFX) shared by scene detail and timeline, waveform strips on audio timeline items, diagnostics
+      & settings panel (`#/diagnostics`: hardware / model health / storage reports, diagnostics log
+      browser, redacted export, project backup / restore), and removal of the legacy `movies` demo
+      surface (frontend routes/components + `/api/movies` backend routes)
+- [ ] Workstream 11 follow-ups: audio trim/gain UI (adjustments exist at the API level), basic mixer
 - [ ] Workstream 12 follow-ups: per-item source trimming in the ffmpeg engine, audio track placement
       in renders (fx pass is video-only), frame-accurate cuts, render farm / multiple render
       runners, progress from ffmpeg stats
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)
-- [ ] Thumbnails/waveforms in the timeline view via FFmpeg (STO-007..009) — asset proxies now ship
-      with the proxy workflow above
+- [ ] Thumbnails in the timeline view (STO-007..008) — waveforms now ship with phase 7, asset
+      proxies with the proxy workflow above
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
@@ -153,7 +158,6 @@ removed.
 
 - [ ] Upload bodies are buffered by the runtime parser (no chunked streaming yet)
 - [ ] No rate limiting on auth endpoints
-- [ ] Frontend still uses the legacy `movies` API surface for the demo views
 
 ### Version
 
@@ -177,3 +181,5 @@ removed.
 - Frontend phase 4 (job queue monitor, MASTER-PLAN §15.3): Thu Aug 20 2026
 - Frontend phase 5 (creative screens, MASTER-PLAN §15.3): Fri Aug 21 2026
 - Frontend phase 6 (timeline editor + render/export UI, MASTER-PLAN §15.3): Fri Aug 21 2026
+- Frontend phase 7 (audio generation dialog + waveforms, diagnostics panel, legacy movies removal,
+  MASTER-PLAN §15.3): Fri Aug 21 2026

@@ -88,17 +88,18 @@ app-root (main router)
 │   │                 live preview polling)
 ├── scene-list (scene list + create; project/storyboard filters)
 ├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
-│   │            clip playback)
+│   │            clip playback, embedded audio generation)
 ├── review-board (job candidate comparison; approve / reject / shortlist + notes)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
 ├── timeline-detail (tracks with lock/mute + swap reorder, clip/text placement via
 │   │               picker + move/resize + speed/volume/fades/transition/color-grade
-│   │               fx panel, markers, snapshots/restore, render presets + queue +
-│   │               exports with job log)
+│   │               fx panel, waveform strip on audio items, markers, snapshots/restore,
+│   │               render presets + queue + exports with job log)
+├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
+│   │             embedded in scene-detail and timeline-detail)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
-├── movie-list (legacy demo, removed in frontend phase 7)
-│   └── movie-card (individual item)
-└── movie-detail (legacy demo, removed in frontend phase 7)
+└── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
+    diagnostic bundle export, project backup/restore)
 ```
 
 **Key design decisions:**
@@ -187,7 +188,8 @@ server.ts (entry point)
   │   │   POST /backups/:id/restore, DELETE /backups/:id
   │   ├── Logger sink mirrors warn/error into the durable `diagnostics` table (DIA-003)
   │   └── (see docs/diagnostics.md)
-  └── Legacy demo routes (/api/auth/*, /api/movies/*)
+   └── Legacy auth routes (/api/auth/register, /api/auth/login, /api/auth/me —
+       multi-user test helper; the /api/movies demo routes were removed in phase 7)
 ```
 
 **Database layer:**
@@ -249,36 +251,11 @@ Authenticated Request:
 - `role` (TEXT, default: 'user')
 - `created_at`, `updated_at` (TEXT, datetime)
 
-**Movie:**
-
-- `id` (INTEGER, PK, AUTOINCREMENT)
-- `title` (TEXT)
-- `description`, `genre` (TEXT, nullable)
-- `year`, `runtime_minutes` (INTEGER, nullable)
-- `poster_url`, `backdrop_url` (TEXT, nullable)
-- `rating` (REAL, default: 0)
-- `user_id` (INTEGER, FK -> users)
-- `created_at`, `updated_at`
-
-**Scene:**
-
-- `id` (INTEGER, PK, AUTOINCREMENT)
-- `movie_id` (INTEGER, FK -> movies)
-- `scene_number` (INTEGER)
-- `description` (TEXT)
-- `dialogue`, `visual_description` (TEXT, nullable)
-- `duration_seconds` (INTEGER, nullable)
-- `user_id` (INTEGER, FK -> users)
-- `created_at`, `updated_at`
-
-**Prompt:**
-
-- `id` (INTEGER, PK, AUTOINCREMENT)
-- `movie_id`, `scene_id` (INTEGER, nullable FKs)
-- `user_id` (INTEGER, FK -> users)
-- `role` (TEXT) - e.g., 'system', 'user', 'assistant'
-- `content` (TEXT)
-- `created_at`
+**Legacy demo tables (unused):** The `movies`, `scenes` (movie scenes), and v0 `prompts` tables were
+created by migration `0001_init.sql`. After frontend phase 7 their routes and CRUD functions are
+gone; the tables remain for backward compatibility of existing databases. v1 prompt data lives in
+`prompt_versions` / creative objects (storyboard panels, scenes, shots), and v1 creative
+`scenes`/`shots` are defined in `0007_storyboard.sql`.
 
 ### Security
 
@@ -286,7 +263,8 @@ Authenticated Request:
 - **JWT**: HMAC-SHA256, 7-day expiry, stored in localStorage
 - **SQL**: All queries use parameterized statements (no string concatenation)
 - **CORS**: Restricted to `http://localhost:8124` in development
-- **Data isolation**: All movie/scene queries filter by `user_id` (ownership enforcement)
+- **Data isolation**: All v1 queries are permission-gated (see Authorization above), enforced in the
+  repository layer (`projects.ts`, `assets.ts`, creative repos)
 
 ### Dependencies
 

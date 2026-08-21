@@ -19,8 +19,8 @@ import "./components/scene-detail.js";
 import "./components/review-board.js";
 import "./components/timeline-list.js";
 import "./components/timeline-detail.js";
-import "./components/movie-list.js";
-import "./components/movie-detail.js";
+import "./components/audio-dialog.js";
+import "./components/diagnostics-panel.js";
 
 export class AppRoot extends LitElement {
   static styles = css`
@@ -244,28 +244,12 @@ export class AppRoot extends LitElement {
       if (match) {
         this.viewParams.id = decodeURIComponent(match[1]);
       }
-    } else if (hash === "#/movies") {
+    } else if (hash === "#/diagnostics") {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
         return;
       }
-      this.currentView = "movies";
-    } else if (hash.startsWith("#/movie/")) {
-      if (!this.loggedIn) {
-        window.location.hash = "#/login";
-        return;
-      }
-      this.currentView = "movie-detail";
-      const match = hash.match(/\/movie\/(\d+)/);
-      if (match) {
-        this.viewParams.id = Number(match[1]);
-      }
-    } else if (hash === "#/create") {
-      if (!this.loggedIn) {
-        window.location.hash = "#/login";
-        return;
-      }
-      this.currentView = "create";
+      this.currentView = "diagnostics";
     } else {
       this.currentView = "login";
     }
@@ -331,16 +315,8 @@ export class AppRoot extends LitElement {
         return html`
           <timeline-detail .timelineId=${this.viewParams.id}></timeline-detail>
         `;
-      case "movies":
-        return html`<movie-list></movie-list>`;
-      case "movie-detail":
-        return html`<movie-detail></movie-detail>`;
-      case "create":
-        return html`
-          <div style="text-align:center; padding:60px; color:var(--color-text-muted);">
-            <p>Create Movie - Coming Soon</p>
-          </div>
-        `;
+      case "diagnostics":
+        return html`<diagnostics-panel></diagnostics-panel>`;
       default:
         return html`<login-form></login-form>`;
     }

@@ -10,7 +10,6 @@ import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
-import { movieRouter } from "@cinemaItor/routes/movies.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
 import { promptRouter } from "@cinemaItor/routes/prompts.ts";
 import { referenceRouter } from "@cinemaItor/routes/references.ts";
@@ -89,7 +88,6 @@ export function createApp(
   app.use(errorHandler(logger));
   app.use(healthRouter.routes());
   app.use(authRouter.routes());
-  app.use(movieRouter.routes());
   app.use(projectRouter.routes());
   app.use(assetRouter.routes());
   app.use(audioRouter.routes());
@@ -105,7 +103,6 @@ export function createApp(
   app.use(referenceRouter.routes());
   app.use(healthRouter.allowedMethods());
   app.use(authRouter.allowedMethods());
-  app.use(movieRouter.allowedMethods());
   app.use(projectRouter.allowedMethods());
   app.use(assetRouter.allowedMethods());
   app.use(audioRouter.allowedMethods());

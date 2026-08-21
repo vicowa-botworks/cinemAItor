@@ -1,5 +1,4 @@
 const V1_BASE = "/api/v1";
-const LEGACY_BASE = "/api";
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -752,45 +751,87 @@ class ApiClient {
     return this.request(`/exports${this._query(filter)}`);
   }
 
-  // --- legacy demo API (kept until the legacy surface is removed) ---
+  // --- audio (generation, waveform) ---
 
-  getMovies() {
-    return this.request("/movies", {}, LEGACY_BASE);
-  }
-
-  getMovie(id) {
-    return this.request(`/movies/${id}`, {}, LEGACY_BASE);
-  }
-
-  createMovie(data) {
-    return this.request("/movies", {
+  generateAudio(options) {
+    return this.request("/audio/generate", {
       method: "POST",
-      body: JSON.stringify(data),
-    }, LEGACY_BASE);
+      body: JSON.stringify(options),
+    });
   }
 
-  updateMovie(id, data) {
-    return this.request(`/movies/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }, LEGACY_BASE);
+  listAudioAssets(filter = {}) {
+    return this.request(`/audio/assets${this._query(filter)}`);
   }
 
-  deleteMovie(id) {
-    return this.request(`/movies/${id}`, {
-      method: "DELETE",
-    }, LEGACY_BASE);
+  getAudioWaveform(assetId, versionId) {
+    return this.request(
+      `/audio/assets/${encodeURIComponent(assetId)}/versions/${
+        encodeURIComponent(versionId)
+      }/waveform`,
+    );
   }
 
-  getMovieScenes(movieId) {
-    return this.request(`/movies/${movieId}/scenes`, {}, LEGACY_BASE);
+  updateAudioAdjustments(assetId, versionId, adjustments) {
+    return this.request(
+      `/audio/assets/${encodeURIComponent(assetId)}/versions/${
+        encodeURIComponent(versionId)
+      }/adjustments`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(adjustments),
+      },
+    );
   }
 
-  createMovieScene(movieId, data) {
-    return this.request(`/movies/${movieId}/scenes`, {
+  // --- diagnostics / ops ---
+
+  getDiagnosticsHardware() {
+    return this.request("/diagnostics/hardware");
+  }
+
+  getDiagnosticsModels() {
+    return this.request("/diagnostics/models");
+  }
+
+  getDiagnosticsStorage() {
+    return this.request("/diagnostics/storage");
+  }
+
+  getDiagnosticsLogs(filter = {}) {
+    return this.request(`/diagnostics/logs${this._query(filter)}`);
+  }
+
+  exportDiagnostics() {
+    return this.request("/diagnostics/export", { method: "POST" });
+  }
+
+  createProjectBackup(projectId) {
+    return this.request("/diagnostics/backups", {
       method: "POST",
-      body: JSON.stringify(data),
-    }, LEGACY_BASE);
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  }
+
+  listBackups() {
+    return this.request("/diagnostics/backups");
+  }
+
+  restoreBackup(backupId, projectName) {
+    return this.request(
+      `/diagnostics/backups/${encodeURIComponent(backupId)}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify(projectName ? { project_name: projectName } : {}),
+      },
+    );
+  }
+
+  deleteBackup(backupId) {
+    return this.request(
+      `/diagnostics/backups/${encodeURIComponent(backupId)}`,
+      { method: "DELETE" },
+    );
   }
 }
 
