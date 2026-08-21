@@ -4,7 +4,7 @@
     "dev:backend": "cd backend && deno run --watch --env-file=.env --allow-net --allow-env --allow-read --allow-write --allow-ffi src/server.ts",
     "dev:frontend": "cd frontend && deno run --allow-net --allow-env --allow-read src/server.js",
     "dev": "deno run -A dev.ts",
-    "test:backend": "cd backend && deno test --allow-net --allow-env --allow-read --allow-write --allow-ffi",
+    "test:backend": "cd backend && deno test --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run",
     "test:frontend": "cd frontend && deno test --allow-net --allow-env",
     "test": "deno task test:backend && deno task test:frontend",
     "lint": "deno task lint:backend && deno task lint:frontend",

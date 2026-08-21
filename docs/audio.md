@@ -9,8 +9,8 @@ Import, generation, versioning, non-destructive trim/gain and waveform access fo
   (`audio | music | sfx | voiceover | ambience`); versions are immutable, content-addressed files
   (wav/mp3/flac/ogg/m4a/aac).
 - **Technical metadata** lives in `asset_versions.technical_metadata_json` under the `audio` key:
-  - `duration`, `sample_rate`, `channels`, `bit_rate` — from ffprobe when the configured ffmpeg
-    binary is available.
+  - `duration`, `sample_rate`, `channels`, `bit_rate` — from ffprobe (`FFPROBE_PATH`, default
+    `ffprobe`) when it is available.
   - `waveform` — 200 peak-amplitude buckets (0..1) computed by decoding to mono s16le at 8 kHz.
   - `analysis_status` — `analyzed | unavailable | failed`; uploads never require ffmpeg (metadata
     stays null until analysis succeeds).

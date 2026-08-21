@@ -70,6 +70,13 @@ export async function isFfmpegAvailable(): Promise<boolean> {
   }
 }
 
+/** Target proxy output format per media kind. */
+export const PROXY_OUTPUT = {
+  video: { extension: "mp4", mime_type: "video/mp4" },
+  audio: { extension: "mp3", mime_type: "audio/mpeg" },
+  image: { extension: "jpg", mime_type: "image/jpeg" },
+} as const;
+
 /** Build the ffmpeg args for a proxy transcode (also used by tests). */
 export function ffmpegArgs(
   kind: ProxyMediaKind,
@@ -114,11 +121,7 @@ function mockProxy(seed: string, kind: ProxyMediaKind): {
   extension: string;
   mime_type: string;
 } {
-  const meta = {
-    video: { extension: "mp4", mime_type: "video/mp4" },
-    audio: { extension: "mp3", mime_type: "audio/mpeg" },
-    image: { extension: "jpg", mime_type: "image/jpeg" },
-  }[kind];
+  const meta = PROXY_OUTPUT[kind];
   const marker = new TextEncoder().encode(
     `MOCKPROXY:${kind}:${seed}`.slice(0, 64),
   );
@@ -176,13 +179,16 @@ export async function generateProxyMedia(
   Deno.unrefTimer(timer);
   Deno.unrefTimer(poll);
 
-  void new Response(child.stderr).arrayBuffer().catch(() => {});
+  const stderrPromise = new Response(child.stderr).arrayBuffer().catch(() => new Uint8Array());
 
   try {
     const status = await child.status;
     if (hooks.isCancelled()) throw new Error("Proxy generation cancelled");
     if (!status.success) {
-      throw new Error(`ffmpeg proxy generation failed (exit ${status.code})`);
+      const stderrText = new TextDecoder().decode(await stderrPromise).trim().slice(0, 400);
+      throw new Error(
+        `ffmpeg proxy generation failed (exit ${status.code}): ${stderrText}`,
+      );
     }
     await Deno.stat(outPath);
   } finally {
@@ -190,11 +196,7 @@ export async function generateProxyMedia(
     clearInterval(poll);
   }
 
-  const meta = {
-    video: { extension: "mp4", mime_type: "video/mp4" },
-    audio: { extension: "mp3", mime_type: "audio/mpeg" },
-    image: { extension: "jpg", mime_type: "image/jpeg" },
-  }[kind];
+  const meta = PROXY_OUTPUT[kind];
   hooks.onProgress(100, "Proxy generated");
   return { extension: meta.extension, mime_type: meta.mime_type, engine: "ffmpeg" };
 }

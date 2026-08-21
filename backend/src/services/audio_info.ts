@@ -32,7 +32,7 @@ interface ProbeInfo {
 async function runFfprobe(filePath: string): Promise<ProbeInfo | null> {
   const config = loadConfig();
   try {
-    const child = new Deno.Command(config.ffmpegPath, {
+    const child = new Deno.Command(config.ffprobePath, {
       args: [
         "-v",
         "error",

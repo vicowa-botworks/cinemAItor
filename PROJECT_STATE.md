@@ -150,12 +150,21 @@ The product track follows `MASTER-PLAN.md`.
       the version duration and saved per-version via the adjustments endpoint (applied at render
       time by the fx pass); reset restores the full window and 0 dB; the parse/prefill/validation
       logic lives in shared `frontend/src/audio-adjustments.js` with unit tests
+- [x] Render progress from ffmpeg stats (Workstream 12 follow-up): the ffmpeg render engine runs
+      with `-nostats -progress pipe:1` and maps the reported `out_time` onto job progress (concat
+      path 20 → 90, fx path 10 → 90; 100 after the output is stat-verified), so the job queue and
+      render panel show live percent while a render executes; the progress read loop races against
+      process exit, and a 250 ms poller kills ffmpeg on cancellation so it never waits on ffmpeg
+      output. Enabling `--allow-run` for the engine tests also surfaced two latent ffmpeg-path bugs,
+      fixed here: proxy scratch output now carries the target extension (ffmpeg infers the output
+      format from the file name) and failed transcodes include ffmpeg's stderr in the job error, and
+      audio analysis probes with ffprobe (`FFPROBE_PATH`, default `ffprobe`) instead of passing
+      ffprobe-only flags to ffmpeg
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 11 follow-ups: basic mixer
-- [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners, progress
-      from ffmpeg stats
+- [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
 - [ ] Workstream 10 follow-ups: playback engine, undo/redo, basic audio track
 - [ ] Milestone 3 follow-up: WebSocket `/ws/v1/jobs` live updates; real model adapters
       (ComfyUI/local CLI)

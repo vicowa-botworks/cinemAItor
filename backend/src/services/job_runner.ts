@@ -24,7 +24,7 @@ import { setPanelPreview } from "../db/storyboards.ts";
 import { setShotGenerated } from "../db/scenes.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import { CancelledError, getAdapter, randomSeed } from "./adapters.ts";
-import { generateProxyMedia, proxyKindFor } from "./media_proxy.ts";
+import { generateProxyMedia, PROXY_OUTPUT, proxyKindFor } from "./media_proxy.ts";
 
 export interface JobRunnerOptions {
   pollMs?: number;
@@ -150,7 +150,9 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
 
       const store = getContentStore();
       await Deno.mkdir(store.layout.cache, { recursive: true });
-      const tempPath = `${store.layout.cache}/.proxygen-${job.id}`;
+      // ffmpeg infers the output format from the file extension, so the
+      // scratch path must carry the target kind's extension.
+      const tempPath = `${store.layout.cache}/.proxygen-${job.id}.${PROXY_OUTPUT[kind].extension}`;
       const hooks = {
         onProgress(progress: number, message: string | null): void {
           updateJobProgress(jobId, progress);

@@ -134,6 +134,65 @@ function checkCancelled(hooks: RenderHooks): void {
 }
 
 // ---------------------------------------------------------------------------
+// ffmpeg machine-readable progress (`-progress pipe:1`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse state for ffmpeg `-progress pipe:1` output. `out_time_us` (ffmpeg
+ * >= 5.1) is preferred over the coarser `out_time_ms`; the committed
+ * `out_time_sec` updates at each block boundary (`progress=continue|end`).
+ */
+export interface FfmpegProgressState {
+  out_time_sec: number;
+  done: boolean;
+  block_us: number | null;
+  block_ms: number | null;
+}
+
+export function newFfmpegProgressState(): FfmpegProgressState {
+  return { out_time_sec: 0, done: false, block_us: null, block_ms: null };
+}
+
+/** Consume one line of `-progress pipe:1` output into the state. */
+export function consumeFfmpegProgressLine(state: FfmpegProgressState, line: string): void {
+  const eq = line.indexOf("=");
+  if (eq <= 0) return;
+  const key = line.slice(0, eq);
+  const value = line.slice(eq + 1);
+  if (key === "out_time_us") {
+    state.block_us = Number(value);
+  } else if (key === "out_time_ms") {
+    state.block_ms = Number(value);
+  } else if (key === "progress") {
+    if (value === "end") state.done = true;
+    if (state.block_us !== null) {
+      state.out_time_sec = state.block_us / 1e6;
+    } else if (state.block_ms !== null) {
+      state.out_time_sec = state.block_ms / 1e3;
+    }
+    state.block_us = null;
+    state.block_ms = null;
+  }
+}
+
+/**
+ * Map ffmpeg's out_time into the band reserved for the child process:
+ * [base, 90]. `base` is the milestone reported before spawn; 90/100 are the
+ * post-completion milestones (output stat + finish). Returns null while
+ * there is nothing to report yet (no out_time or no usable estimate).
+ */
+export function mapFfmpegProgress(
+  outTimeSec: number,
+  estimatedDurationSec: number,
+  base: number,
+): number | null {
+  if (!Number.isFinite(outTimeSec) || outTimeSec <= 0) return null;
+  if (!Number.isFinite(estimatedDurationSec) || estimatedDurationSec <= 0) return null;
+  const frac = Math.min(1, outTimeSec / estimatedDurationSec);
+  return base + frac * (90 - base);
+}
+
+// ---------------------------------------------------------------------------
 // ffmpeg engine: concat of the timeline's video items (-c copy)
 // ---------------------------------------------------------------------------
 
@@ -362,8 +421,8 @@ export class FfmpegRenderEngine implements RenderEngine {
       checkCancelled(hooks);
       hooks.onProgress(20);
 
-      const child = new Deno.Command(this.binary, {
-        args: [
+      await this.runFfmpeg(
+        [
           "-v",
           "error",
           "-y",
@@ -377,25 +436,11 @@ export class FfmpegRenderEngine implements RenderEngine {
           "copy",
           plan.output_path,
         ],
-        stdout: "null",
-        stderr: "piped",
-      }).spawn();
-      const timer = setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // already exited
-        }
-      }, 300_000);
-      const stderr = await new Response(child.stderr).text();
-      const status = await child.status;
-      clearTimeout(timer);
+        plan.total_duration,
+        20,
+        hooks,
+      );
       checkCancelled(hooks);
-      if (!status.success) {
-        throw new RenderFailedError(
-          `ffmpeg exited with ${status.code}: ${stderr.slice(0, 500)}`,
-        );
-      }
       hooks.onProgress(90);
       const stat = await Deno.stat(plan.output_path);
       hooks.onProgress(100);
@@ -415,36 +460,113 @@ export class FfmpegRenderEngine implements RenderEngine {
   ): Promise<RenderResult> {
     checkCancelled(hooks);
     hooks.onProgress(10);
+    const args = buildFxArgs(
+      plan.items,
+      plan.text_overlays,
+      plan.output_path,
+      plan.audio_items ?? [],
+    );
+    await this.runFfmpeg(args, plan.total_duration, 10, hooks);
+    checkCancelled(hooks);
+    hooks.onProgress(90);
+    const stat = await Deno.stat(plan.output_path);
+    hooks.onProgress(100);
+    return { output_path: plan.output_path, file_size: stat.size, ticks: 3 };
+  }
+
+  /**
+   * Spawn ffmpeg with machine-readable progress (`-progress pipe:1`), stream
+   * the output into `hooks.onProgress` mapped into [base, 90], poll
+   * cancellation per output chunk (killing the process when set) and enforce
+   * the 5-minute watchdog. Throws RenderFailedError on a non-zero exit.
+   */
+  private async runFfmpeg(
+    args: string[],
+    estimatedDurationSec: number,
+    base: number,
+    hooks: RenderHooks,
+  ): Promise<void> {
     const child = new Deno.Command(this.binary, {
-      args: buildFxArgs(
-        plan.items,
-        plan.text_overlays,
-        plan.output_path,
-        plan.audio_items ?? [],
-      ),
-      stdout: "null",
+      args: ["-nostats", "-progress", "pipe:1", ...args],
+      stdout: "piped",
       stderr: "piped",
     }).spawn();
-    const timer = setTimeout(() => {
+    const watchdog = setTimeout(() => {
       try {
         child.kill("SIGKILL");
       } catch {
         // already exited
       }
     }, 300_000);
-    const stderr = await new Response(child.stderr).text();
-    const status = await child.status;
-    clearTimeout(timer);
-    checkCancelled(hooks);
-    if (!status.success) {
-      throw new RenderFailedError(
-        `ffmpeg exited with ${status.code}: ${stderr.slice(0, 500)}`,
-      );
+    // Cancellation poll: kill the process promptly even when ffmpeg produces
+    // no further stdout (the read loop below only advances on chunks).
+    const cancelPoller = setInterval(() => {
+      if (hooks.isCancelled()) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already exited
+        }
+      }
+    }, 250);
+    const stderrPromise = new Response(child.stderr).text();
+    const statusPromise = child.status;
+    const state = newFfmpegProgressState();
+    let lastReported = base;
+    const reader = child.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    // Race the read against process exit: a killed ffmpeg may have spawned
+    // helpers that keep the stdout pipe open, so EOF would never arrive on
+    // its own.
+    type Settled =
+      | { kind: "chunk"; value: Uint8Array }
+      | { kind: "end" }
+      | { kind: "read-error"; error: unknown }
+      | { kind: "exit" };
+    try {
+      for (;;) {
+        const settled: Settled = await Promise.race([
+          reader.read().then(
+            (r): Settled => (r.done ? { kind: "end" } : { kind: "chunk", value: r.value }),
+            (error: unknown): Settled => ({ kind: "read-error", error }),
+          ),
+          statusPromise.then((): Settled => ({ kind: "exit" })),
+        ]);
+        if (settled.kind === "read-error") throw settled.error;
+        if (settled.kind !== "chunk") break;
+        buffer += decoder.decode(settled.value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 1);
+          consumeFfmpegProgressLine(state, line);
+          const mapped = mapFfmpegProgress(state.out_time_sec, estimatedDurationSec, base);
+          if (mapped !== null) {
+            const pct = Math.min(90, Math.floor(mapped));
+            if (pct > lastReported) {
+              lastReported = pct;
+              hooks.onProgress(pct);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
     }
-    hooks.onProgress(90);
-    const stat = await Deno.stat(plan.output_path);
-    hooks.onProgress(100);
-    return { output_path: plan.output_path, file_size: stat.size, ticks: 3 };
+    try {
+      const status = await statusPromise;
+      const stderr = await stderrPromise;
+      if (hooks.isCancelled()) throw new RenderCancelledError();
+      if (!status.success) {
+        throw new RenderFailedError(
+          `ffmpeg exited with ${status.code}: ${stderr.slice(0, 500)}`,
+        );
+      }
+    } finally {
+      clearTimeout(watchdog);
+      clearInterval(cancelPoller);
+    }
   }
 
   render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
