@@ -302,14 +302,23 @@ The product track follows `MASTER-PLAN.md`.
       per-music-track duck slider on the track row, and the browser preview attenuates music clips
       by the same factor while audible dialogue plays (`duckGainAt` in `timeline-playback.js`,
       unit-tested) — preview and render match
+- [x] Project templates (Workstream 14): global, read-only starting structures. Migration
+      `0018_project_templates.sql` seeds the `templates` table with `tpl-blank`, `tpl-short-film`
+      and `tpl-podcast` (each a `{ timeline_name, tracks: [{ name, track_type }] }` JSON structure).
+      `GET /api/v1/templates` lists them; `POST /api/v1/projects` accepts an optional `template_id`
+      (unknown ids 400 before the row is written), records it on the project, and materializes the
+      structure — the named timeline is created with its tracks in order, with compensation that
+      removes the half-built timeline (and the project) if materialization fails. The create form
+      offers a template picker (create-mode only) and the project detail page shows the project's
+      template name; 9 new backend test steps
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
-      project templates, advanced storage management, audio cleanup, subtitle generation from
-      dialogue/voiceover, A/B + version comparison improvements, model benchmark
+      advanced storage management, audio cleanup, subtitle generation from dialogue/voiceover, A/B +
+      version comparison improvements, model benchmark
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues
@@ -345,3 +354,4 @@ The product track follows `MASTER-PLAN.md`.
 - Basic mixer (AUD-007, track gain in preview + renders): Fri Aug 21 2026
 - MVP acceptance flow (E2E over HTTP) + backup text-overlay restore fix: Sat Aug 22 2026
 - Ducking (AUD-013, music lowers under dialogue in preview + renders): Sat Aug 22 2026
+- Project templates (global starting structures applied at project creation): Sat Aug 22 2026

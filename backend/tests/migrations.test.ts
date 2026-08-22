@@ -82,6 +82,7 @@ describe("migrations", () => {
         "0015_proxy_workflow.sql",
         "0016_track_gain.sql",
         "0017_track_ducking.sql",
+        "0018_project_templates.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -104,12 +105,13 @@ describe("migrations", () => {
         "0015_proxy_workflow.sql",
         "0016_track_gain.sql",
         "0017_track_ducking.sql",
+        "0018_project_templates.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        17,
+        18,
       );
     } finally {
       db.close();
@@ -138,6 +140,7 @@ describe("migrations", () => {
       "0015_proxy_workflow.sql",
       "0016_track_gain.sql",
       "0017_track_ducking.sql",
+      "0018_project_templates.sql",
     ]);
   });
 
