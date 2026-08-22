@@ -278,6 +278,18 @@ The product track follows `MASTER-PLAN.md`.
       media against the content store as before; the response gains a
       `media: { restored, reused, corrupted }` summary. Pre-bundle single-file backups remain
       restorable; deleting a backup removes the bundle too
+- [x] MVP acceptance flow test (Milestone 6 exit criterion): `backend/tests/mvp_acceptance.test.ts`
+      exercises the entire studio journey over live HTTP with the mock render engine — bootstrap +
+      multi-user (admin/collaborator/viewer), model register + enable, project, media uploads
+      (image/video/audio) with versions, versioned prompt with @alias reference audit, storyboard
+      panel t2i preview job, scene + shots with panel-link and i2v batch clip job, review approval,
+      multi-track timeline (video + music + text overlay) with marker/snapshot, snapshot restore via
+      the atomic state endpoint, wav render + export, diagnostics endpoints, project backup with
+      media bundle → restore → delete, and non-admin isolation (404s over the HTTP surface). Also
+      fixed the gap it exposed: text overlay items (null `asset_version_id`) were silently dropped
+      on backup restore and `item_text`/`text_style` were never captured — the backup payload now
+      carries both and restore keeps versionless items (media items with a missing version are still
+      dropped + reported, including inside restored snapshots)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -286,7 +298,7 @@ The product track follows `MASTER-PLAN.md`.
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
       project templates, advanced storage management, ducking, audio cleanup, subtitle generation
       from dialogue/voiceover, A/B + version comparison improvements, model benchmark
-- [ ] E2E tests, Docker packaging, production hardening
+- [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues
 
@@ -319,3 +331,4 @@ The product track follows `MASTER-PLAN.md`.
   MASTER-PLAN §15.3): Fri Aug 21 2026
 - Timeline playback preview (TIM-010): Fri Aug 21 2026
 - Basic mixer (AUD-007, track gain in preview + renders): Fri Aug 21 2026
+- MVP acceptance flow (E2E over HTTP) + backup text-overlay restore fix: Sat Aug 22 2026
