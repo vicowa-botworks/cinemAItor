@@ -100,6 +100,8 @@ export interface BackupTimelineData {
     effect_chain_json: string | null;
     color_grade_json: string | null;
     audio_settings_json: string | null;
+    item_text: string | null;
+    text_style_json: string | null;
     notes: string | null;
     status: string;
     created_at: string;
@@ -395,6 +397,8 @@ export function buildProjectBackupData(projectId: string): ProjectBackupData {
       effect_chain_json: asString(i.effect_chain_json),
       color_grade_json: asString(i.color_grade_json),
       audio_settings_json: asString(i.audio_settings_json),
+      item_text: asString(i.item_text),
+      text_style_json: asString(i.text_style_json),
       notes: asString(i.notes),
       status: asString(i.status) ?? "active",
       created_at: asString(i.created_at) ?? "",
@@ -858,8 +862,15 @@ function remapSnapshotData(
     .map((i): Record<string, unknown> | null => {
       const id = lookup(itemMap, i.id);
       const trackId = lookup(trackMap, i.track_id);
-      const versionId = i.asset_version_id ? lookup(versionMap, i.asset_version_id) : undefined;
-      if (!id || !trackId || !trackIds.has(trackId) || !versionId) {
+      const rawVersion = (typeof i.asset_version_id === "string" ? i.asset_version_id : null) as
+        | string
+        | null;
+      const versionId = rawVersion ? lookup(versionMap, rawVersion) ?? null : null;
+      // Text/subtitle items carry no version and restore as-is; media items
+      // whose version was not restored are dropped.
+      if (
+        !id || !trackId || !trackIds.has(trackId) || (rawVersion !== null && versionId === null)
+      ) {
         dropped.items++;
         return null;
       }
@@ -1384,9 +1395,9 @@ export function restoreProjectBackup(
       `INSERT INTO timeline_items (
         id, timeline_id, track_id, asset_version_id, start_time, end_time,
         source_offset, speed, transform_json, fade_in, fade_out, transition,
-        effect_chain_json, color_grade_json, audio_settings_json, notes,
-        status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        effect_chain_json, color_grade_json, audio_settings_json, item_text,
+        text_style_json, notes, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertMarker = db.prepare(
       `INSERT INTO timeline_markers (id, timeline_id, time, label, notes, created_at)
@@ -1438,20 +1449,13 @@ export function restoreProjectBackup(
           );
           continue;
         }
-        const newVersionId = item.asset_version_id
-          ? versionMap.get(item.asset_version_id)
-          : undefined;
+        const newVersionId = item.asset_version_id ? versionMap.get(item.asset_version_id) : null;
         if (item.asset_version_id && !newVersionId) {
-          // timeline_items.asset_version_id is NOT NULL — the item cannot be
-          // restored without its media version.
+          // The item's media version was not part of this backup — the item
+          // cannot be restored without it. Items with a null version
+          // (text/subtitle overlays) restore as-is.
           issues.push(
             `item at ${item.start_time}s in timeline "${timeline.name}": media version not restored`,
-          );
-          continue;
-        }
-        if (!newVersionId) {
-          issues.push(
-            `item at ${item.start_time}s in timeline "${timeline.name}": had no media version`,
           );
           continue;
         }
@@ -1473,6 +1477,8 @@ export function restoreProjectBackup(
           item.effect_chain_json,
           item.color_grade_json,
           item.audio_settings_json,
+          item.item_text,
+          item.text_style_json,
           item.notes,
           item.status,
           item.created_at || now,

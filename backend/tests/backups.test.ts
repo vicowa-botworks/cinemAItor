@@ -751,6 +751,59 @@ describe("project backup and restore", () => {
     assertEquals(snapData.items.length, 0);
     assertEquals(snapData.markers.length, 1);
   });
+
+  it("preserves text overlay items (no media version) across restore", () => {
+    const textTrackId = createTrack(owner, timelineId, {
+      track_type: "text",
+      name: "T1",
+    }).id;
+    createItem(owner, timelineId, {
+      track_id: textTrackId,
+      asset_version_id: null,
+      start_time: 1,
+      end_time: 3,
+      text: "hello world",
+      text_style: { font_size: 24 },
+    });
+    // Snapshot taken after the text item exists embeds it in its payload.
+    createSnapshot(owner, timelineId, { name: "snap-text" });
+
+    const data = buildProjectBackupData(projectId);
+    const result = restoreProjectBackup(data, {
+      userId: collaborator,
+      resolveContent: (h) => getContentStore().resolveExisting(h),
+    });
+    assertEquals(result.issues, []);
+
+    const rows = getDb()
+      .prepare(
+        `SELECT i.item_text, i.text_style_json, i.asset_version_id
+           FROM timeline_items i
+           JOIN timelines t ON t.id = i.timeline_id
+           WHERE t.project_id = ? ORDER BY i.start_time`,
+      )
+      .all(result.project_id) as Record<string, unknown>[];
+    assertEquals(rows.length, 2);
+    assertEquals(rows[1].item_text, "hello world");
+    assertEquals(JSON.parse(String(rows[1].text_style_json)), {
+      font_size: 24,
+    });
+    assertEquals(rows[1].asset_version_id, null);
+
+    // The snapshot restore must keep the versionless text item too.
+    const snapRow = getDb()
+      .prepare(
+        `SELECT s.snapshot_data_json
+           FROM timeline_snapshots s
+           JOIN timelines t ON t.id = s.timeline_id
+           WHERE t.project_id = ? AND s.name = 'snap-text'`,
+      )
+      .get(result.project_id) as Record<string, unknown>;
+    const snapData = JSON.parse(String(snapRow.snapshot_data_json)) as {
+      items: number[] | unknown[];
+    };
+    assertEquals(snapData.items.length, 2);
+  });
 });
 
 function removeDir(path: string): void {
