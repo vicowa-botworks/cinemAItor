@@ -1,9 +1,23 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 
-const ASPECT_RATIOS = ["16:9", "9:16", "1:1", "2.39:1"];
-const FRAME_RATES = [24, 25, 30, 48, 60];
-const AUDIO_SAMPLE_RATES = [48000, 44100];
+const ASPECT_RATIOS = [
+  { value: "16:9", label: "16:9 (TV / YouTube, landscape)" },
+  { value: "9:16", label: "9:16 (TikTok / Reels, vertical)" },
+  { value: "1:1", label: "1:1 (square social posts)" },
+  { value: "2.39:1", label: "2.39:1 (cinematic film, widescreen)" },
+];
+const FRAME_RATES = [
+  { value: 24, label: "24 fps (film look, cinematic)" },
+  { value: 25, label: "25 fps (European broadcast standard)" },
+  { value: 30, label: "30 fps (web video standard)" },
+  { value: 48, label: "48 fps (high speed, slow motion)" },
+  { value: 60, label: "60 fps (very smooth, sports / gaming)" },
+];
+const AUDIO_SAMPLE_RATES = [
+  { value: 48000, label: "48 kHz (video production standard)" },
+  { value: 44100, label: "44.1 kHz (music / CD standard)" },
+];
 const RESOLUTIONS = [
   { label: "1920 x 1080 (HD)", width: 1920, height: 1080 },
   { label: "1280 x 720 (SD)", width: 1280, height: 720 },
@@ -210,8 +224,8 @@ export class ProjectForm extends LitElement {
               ${ASPECT_RATIOS.map(
                 (r) =>
                   html`
-                    <option value=${r} ?selected=${r ===
-                      this.aspectRatio}>${r}</option>
+                    <option value=${r.value} ?selected=${r.value ===
+                      this.aspectRatio}>${r.label}</option>
                   `,
               )}
             </select>
@@ -224,9 +238,8 @@ export class ProjectForm extends LitElement {
               ${FRAME_RATES.map(
                 (f) =>
                   html`
-                    <option value=${f} ?selected=${f ===
-                      Number(this.frameRate)}>${f}
-                    fps</option>
+                    <option value=${f.value} ?selected=${f.value ===
+                      Number(this.frameRate)}>${f.label}</option>
                   `,
               )}
             </select>
@@ -254,9 +267,8 @@ export class ProjectForm extends LitElement {
               ${AUDIO_SAMPLE_RATES.map(
                 (s) =>
                   html`
-                    <option value=${s} ?selected=${s ===
-                      Number(this.sampleRate)}>${(s / 1000)
-                      .toFixed(1)} kHz</option>
+                    <option value=${s.value} ?selected=${s.value ===
+                      Number(this.sampleRate)}>${s.label}</option>
                   `,
               )}
             </select>
