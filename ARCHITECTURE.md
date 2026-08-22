@@ -98,12 +98,16 @@ app-root (main router)
 ├── timeline-detail (tracks with lock/mute + mixer gain + swap reorder, clip/text placement via
 │   │               picker + move/resize + speed/volume/fades/transition/color-grade
 │   │               fx panel, waveform strip on audio items, markers, snapshots/restore,
+│   │               undo/redo (in-memory history replayed through the atomic full-state
+│   │               restore endpoint),
 │   │               render presets + queue + exports with job log, in-browser playback preview
 │   │               above the canvas — see timeline-preview; ruler click + drag-scrub)
 ├── timeline-preview (browser-side timeline playback: play/pause/stop, 0.25×–2× rate, in/out
 │   │             loop range; proxy-first media with master fallback, render-source track
 │   │             selection, per-clip speed/fades, CSS-approximated color grade, audio mix from
 │   │             track + version gain/trim + fades, text/subtitle overlays)
+├── undo-history (bounded in-memory undo/redo stack + detail→state flatten, unit-tested;
+│   │             consumed by timeline-detail)
 ├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
 │   │             embedded in scene-detail and timeline-detail)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
@@ -184,8 +188,11 @@ server.ts (entry point)
   │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db) + placed items (move/trim/
  │   │   speed/transform/fades/transitions/color grade), text overlays (text/subtitle
  │   │   tracks), item duplicate, duration recompute, markers
-  │   ├── Full-state snapshots with restore
-  │   └── (see docs/timelines.md)
+   │   ├── Full-state snapshots with restore
+   │   ├── Atomic full-state restore `POST /:id/state` (duration/settings/tracks/items/markers in
+   │   │   one transaction; per-row validation like the item routes; duplicate ids rejected) —
+   │   │   backs the editor's undo/redo
+   │   └── (see docs/timelines.md)
   ├── Render routes (/api/v1/render-presets, /api/v1/renders/*, /api/v1/exports,
   │   auth middleware, project-permission gated; preset writes admin-only)
   │   ├── Durable render queue (leases, stale recovery) + in-process render runner

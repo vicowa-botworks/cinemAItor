@@ -7,11 +7,14 @@ import {
   createSnapshot,
   createTimeline,
   createTrack,
+  DEFAULT_TRANSITION_DURATION,
   deleteItem,
   deleteMarker,
   deleteTimeline,
   deleteTrack,
   duplicateItem,
+  GAIN_DB_MAX,
+  GAIN_DB_MIN,
   getTimeline,
   type ItemInput,
   listItems,
@@ -19,11 +22,22 @@ import {
   listSnapshots,
   listTimelines,
   listTracks,
+  MAX_ITEMS_PER_TIMELINE,
+  MAX_TRACKS,
+  replaceTimelineState,
   restoreSnapshot,
+  type SnapshotData,
+  type TimelineItem,
+  type TimelineMarker,
+  type Track,
+  TRACK_TYPES,
   type TrackInput,
   updateItem,
   updateTimeline,
   updateTrack,
+  validateItemFx,
+  validatePlacement,
+  validateTextOverlay,
 } from "@cinemaItor/db/timelines.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
@@ -180,6 +194,200 @@ function requireTimeline(id: string, userId: number, required: "read" | "write" 
   const timeline = getTimeline(id, userId, required);
   if (!timeline) throw notFound("Timeline not found");
   return timeline;
+}
+
+// ---------------------------------------------------------------------------
+// Full-state restore (undo/redo + external editors)
+// ---------------------------------------------------------------------------
+
+function asRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw badRequest(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireString(o: Record<string, unknown>, key: string, label: string): string {
+  const value = o[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw badRequest(`${label}.${key} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requireNumber(o: Record<string, unknown>, key: string, label: string): number {
+  const value = o[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw badRequest(`${label}.${key} must be a finite number`);
+  }
+  return value;
+}
+
+function requireBool(o: Record<string, unknown>, key: string, label: string): boolean {
+  const value = o[key];
+  if (typeof value !== "boolean") throw badRequest(`${label}.${key} must be a boolean`);
+  return value;
+}
+
+const ITEM_STATUSES = ["active", "muted", "archived"] as const;
+
+function parseStateTrack(
+  row: unknown,
+  index: number,
+  timelineId: string,
+): Track {
+  const o = asRecord(row, `tracks[${index}]`);
+  const trackType = requireString(o, "track_type", `tracks[${index}]`);
+  if (!(TRACK_TYPES as readonly string[]).includes(trackType)) {
+    throw badRequest(`tracks[${index}].track_type must be one of: ${TRACK_TYPES.join(", ")}`);
+  }
+  const gainDb = optionalNumber(o, "gain_db") ?? 0;
+  if (gainDb < GAIN_DB_MIN || gainDb > GAIN_DB_MAX) {
+    throw badRequest(
+      `tracks[${index}].gain_db must be a number between ${GAIN_DB_MIN} and ${GAIN_DB_MAX}`,
+    );
+  }
+  return {
+    id: requireString(o, "id", `tracks[${index}]`),
+    timeline_id: timelineId,
+    track_type: trackType,
+    name: optionalString(o, "name") ?? trackType,
+    track_order: requireNumber(o, "track_order", `tracks[${index}]`),
+    locked: requireBool(o, "locked", `tracks[${index}]`),
+    muted: requireBool(o, "muted", `tracks[${index}]`),
+    gain_db: gainDb,
+  };
+}
+
+function parseStateItem(
+  row: unknown,
+  index: number,
+  timelineId: string,
+  trackById: Map<string, Track>,
+): TimelineItem {
+  const label = `items[${index}]`;
+  const o = asRecord(row, label);
+  const trackId = requireString(o, "track_id", label);
+  const track = trackById.get(trackId);
+  if (!track) throw badRequest(`${label}.track_id references an unknown track`);
+  const start_time = requireNumber(o, "start_time", label);
+  const end_time = requireNumber(o, "end_time", label);
+  const source_offset = optionalNumber(o, "source_offset") ?? 0;
+  const speed = optionalNumber(o, "speed") ?? 1;
+  validatePlacement({ start_time, end_time, source_offset, speed });
+
+  const transition = optionalNullableString(o, "transition");
+  const transition_duration = optionalNullableNumber(o, "transition_duration");
+  const fade_in = optionalNullableNumber(o, "fade_in");
+  const fade_out = optionalNullableNumber(o, "fade_out");
+  const color_grade = optionalNullableJsonObject(o, "color_grade");
+  validateItemFx(
+    { transition, transition_duration, fade_in, fade_out, color_grade },
+    end_time - start_time,
+  );
+
+  const item_text = optionalNullableString(o, "item_text");
+  const text_style = optionalNullableJsonObject(o, "text_style");
+  // `text`/`text_style` must be absent (not null) on media tracks, matching
+  // the single-item create/update validation contract.
+  validateTextOverlay(track, {
+    text: item_text === null ? undefined : item_text,
+    text_style: text_style === null ? undefined : text_style,
+  });
+
+  const status = optionalString(o, "status") ?? "active";
+  if (!(ITEM_STATUSES as readonly string[]).includes(status)) {
+    throw badRequest(`${label}.status must be one of: ${ITEM_STATUSES.join(", ")}`);
+  }
+  return {
+    id: requireString(o, "id", label),
+    timeline_id: timelineId,
+    track_id: trackId,
+    asset_version_id: optionalNullableString(o, "asset_version_id") ?? null,
+    item_text: item_text ?? null,
+    text_style: text_style ?? null,
+    start_time,
+    end_time,
+    source_offset,
+    speed,
+    transform: optionalNullableJsonObject(o, "transform") ?? null,
+    fade_in: fade_in ?? null,
+    fade_out: fade_out ?? null,
+    transition: transition ?? null,
+    transition_duration: transition_duration ?? DEFAULT_TRANSITION_DURATION,
+    effect_chain: optionalNullableJsonArray(o, "effect_chain") ?? null,
+    color_grade: color_grade ?? null,
+    audio_settings: optionalNullableJsonObject(o, "audio_settings") ?? null,
+    notes: optionalNullableString(o, "notes") ?? null,
+    status,
+    created_at: optionalString(o, "created_at") ?? new Date().toISOString(),
+    updated_at: optionalString(o, "updated_at") ?? new Date().toISOString(),
+  };
+}
+
+function parseStateMarker(row: unknown, index: number, timelineId: string): TimelineMarker {
+  const label = `markers[${index}]`;
+  const o = asRecord(row, label);
+  const time = requireNumber(o, "time", label);
+  if (time < 0) throw badRequest(`${label}.time must be >= 0`);
+  return {
+    id: requireString(o, "id", label),
+    timeline_id: timelineId,
+    time,
+    label: optionalNullableString(o, "label") ?? null,
+    notes: optionalNullableString(o, "notes") ?? null,
+    created_at: optionalString(o, "created_at") ?? new Date().toISOString(),
+  };
+}
+
+function timelineStateFromBody(body: Record<string, unknown>, timelineId: string): SnapshotData {
+  const tracksRaw = body["tracks"];
+  const itemsRaw = body["items"];
+  const markersRaw = body["markers"];
+  if (!Array.isArray(tracksRaw)) throw badRequest("tracks must be an array");
+  if (!Array.isArray(itemsRaw)) throw badRequest("items must be an array");
+  if (!Array.isArray(markersRaw)) throw badRequest("markers must be an array");
+  if (tracksRaw.length > MAX_TRACKS) {
+    throw badRequest(`A timeline can hold at most ${MAX_TRACKS} tracks`);
+  }
+  if (itemsRaw.length > MAX_ITEMS_PER_TIMELINE) {
+    throw badRequest(`A timeline can hold at most ${MAX_ITEMS_PER_TIMELINE} items`);
+  }
+
+  const duration = optionalNumber(body, "duration") ?? 0;
+  if (duration < 0) throw badRequest("duration must be >= 0");
+
+  const tracks = tracksRaw.map((row, i) => parseStateTrack(row, i, timelineId));
+  const trackById = new Map<string, Track>();
+  for (const track of tracks) {
+    if (trackById.has(track.id)) {
+      throw badRequest(`tracks contain duplicate track id "${track.id}"`);
+    }
+    trackById.set(track.id, track);
+  }
+  const items = itemsRaw.map((row, i) => parseStateItem(row, i, timelineId, trackById));
+  const itemIds = new Set<string>();
+  for (const item of items) {
+    if (itemIds.has(item.id)) {
+      throw badRequest(`items contain duplicate item id "${item.id}"`);
+    }
+    itemIds.add(item.id);
+  }
+  const markers = markersRaw.map((row, i) => parseStateMarker(row, i, timelineId));
+  const markerIds = new Set<string>();
+  for (const marker of markers) {
+    if (markerIds.has(marker.id)) {
+      throw badRequest(`markers contain duplicate marker id "${marker.id}"`);
+    }
+    markerIds.add(marker.id);
+  }
+  return {
+    duration,
+    settings: optionalNullableJsonObject(body, "settings") ?? null,
+    tracks,
+    items,
+    markers,
+  };
 }
 
 function timelineDetail(timelineId: string, userId: number) {
@@ -399,6 +607,14 @@ export const timelineRouter = new Router()
       ctx.response.body = { deleted: true };
     },
   )
+  .post("/api/v1/timelines/:id/state", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const body = await readJsonBody(ctx);
+    const timelineId = param(ctx as ParamsContext, "id");
+    requireTimeline(timelineId, userId);
+    replaceTimelineState(timelineId, userId, timelineStateFromBody(body, timelineId));
+    ctx.response.body = timelineDetail(timelineId, userId);
+  })
   .post("/api/v1/timelines/:id/snapshots", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
     const body = await readJsonBody(ctx);

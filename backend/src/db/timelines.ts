@@ -519,7 +519,7 @@ function requireWritableTrack(
   return track;
 }
 
-function validatePlacement(
+export function validatePlacement(
   p: { start_time: number; end_time: number; source_offset: number; speed: number },
 ): void {
   for (const [key, value] of Object.entries(p)) {
@@ -666,7 +666,7 @@ const TEXT_COLORS = new Set([
   "magenta",
 ]);
 
-function validateTextOverlay(
+export function validateTextOverlay(
   track: Track,
   input: { text?: string | null; text_style?: Record<string, unknown> | null },
 ): void {
@@ -1019,7 +1019,7 @@ export function deleteMarker(
 // Snapshots
 // ---------------------------------------------------------------------------
 
-interface SnapshotData {
+export interface SnapshotData {
   duration: number;
   settings: Record<string, unknown> | null;
   tracks: Track[];
@@ -1089,29 +1089,19 @@ export function createSnapshot(
   };
 }
 
-export function restoreSnapshot(
-  userId: number,
+/**
+ * Full in-timeline state replacement. Original row ids are preserved so the
+ * provided data stays self-consistent even if it predates other edits.
+ */
+export function replaceTimelineState(
   timelineId: string,
-  snapshotId: string,
+  userId: number,
+  data: SnapshotData,
 ): Timeline {
   const timeline = getTimeline(timelineId, userId, "write");
   if (!timeline) throw notFound("Timeline not found");
   const db = getDb();
-  const row = db.prepare(
-    "SELECT * FROM timeline_snapshots WHERE id = ? AND timeline_id = ?",
-  ).get(snapshotId, timelineId) as Record<string, unknown> | undefined;
-  if (!row) throw notFound("Snapshot not found");
 
-  const data = parseJson<SnapshotData>(row.snapshot_data_json, {
-    duration: 0,
-    settings: null,
-    tracks: [],
-    items: [],
-    markers: [],
-  });
-
-  // Full replacement within the timeline; original row ids are preserved so
-  // snapshot data stays self-consistent even if it predates other edits.
   (db.prepare(
     "DELETE FROM timeline_items WHERE timeline_id = ?",
   ).run as (...params: unknown[]) => unknown)(timelineId);
@@ -1123,7 +1113,7 @@ export function restoreSnapshot(
   for (const track of data.tracks) {
     (db.prepare(
       `INSERT OR IGNORE INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run as (...params: unknown[]) => unknown)(
       track.id,
       timelineId,
@@ -1138,17 +1128,20 @@ export function restoreSnapshot(
   for (const item of data.items) {
     (db.prepare(
       `INSERT OR IGNORE INTO timeline_items (
-        id, timeline_id, track_id, asset_version_id, start_time, end_time,
+        id, timeline_id, track_id, asset_version_id, item_text, text_style_json,
+        start_time, end_time,
         source_offset, speed, transform_json, fade_in, fade_out, transition,
         transition_duration,
         effect_chain_json, color_grade_json, audio_settings_json, notes, status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run as (...params: unknown[]) => unknown)(
       item.id,
       timelineId,
       item.track_id,
       item.asset_version_id,
+      item.item_text ?? null,
+      item.text_style ? JSON.stringify(item.text_style) : null,
       item.start_time,
       item.end_time,
       item.source_offset,
@@ -1170,7 +1163,7 @@ export function restoreSnapshot(
   for (const marker of data.markers) {
     (db.prepare(
       `INSERT OR IGNORE INTO timeline_markers (id, timeline_id, time, label, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run as (...params: unknown[]) => unknown)(
       marker.id,
       timelineId,
@@ -1189,6 +1182,35 @@ export function restoreSnapshot(
     timelineId,
   );
   recomputeTimelineDuration(timelineId);
+  logAudit(userId, "state.replace", timelineId, {
+    tracks: data.tracks.length,
+    items: data.items.length,
+    markers: data.markers.length,
+  });
+  return getTimeline(timelineId, userId) as Timeline;
+}
+
+export function restoreSnapshot(
+  userId: number,
+  timelineId: string,
+  snapshotId: string,
+): Timeline {
+  const timeline = getTimeline(timelineId, userId, "write");
+  if (!timeline) throw notFound("Timeline not found");
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT * FROM timeline_snapshots WHERE id = ? AND timeline_id = ?",
+  ).get(snapshotId, timelineId) as Record<string, unknown> | undefined;
+  if (!row) throw notFound("Snapshot not found");
+
+  const data = parseJson<SnapshotData>(row.snapshot_data_json, {
+    duration: 0,
+    settings: null,
+    tracks: [],
+    items: [],
+    markers: [],
+  });
+  replaceTimelineState(timelineId, userId, data);
   logAudit(userId, "snapshot.restore", timelineId, { snapshot_id: snapshotId });
   return getTimeline(timelineId, userId) as Timeline;
 }
