@@ -3,11 +3,16 @@ import { getDb } from "../db/database.ts";
 // ---------------------------------------------------------------------------
 // DIA-006 / DIA-007: project backup and restore
 //
-// A backup is a JSON snapshot of one project's asset and timeline subtree.
-// Media binaries are never copied: versions keep their content hash, so a
-// restore can verify which files are still in the content store and report
-// the ones that are missing. Snapshots are intentionally not restored
-// (their serialized state embeds the old ids) and are counted as an issue.
+// A backup is a JSON snapshot of one project's subtree: assets, timelines,
+// and creative objects (storyboards, panels, scenes, shots) with their
+// prompt version history and resolved references. Media binaries are never
+// copied: versions keep their content hash, so a restore can verify which
+// files are still in the content store and report the ones that are missing.
+// Snapshots are intentionally not restored (their serialized state embeds
+// the old ids) and are counted as an issue.
+//
+// Schema 2 adds the creative-object sections; schema 1 backups restore with
+// empty creative sections.
 // ---------------------------------------------------------------------------
 
 export interface BackupProjectData {
@@ -98,12 +103,108 @@ export interface BackupTimelineData {
   snapshots: number; // count only — snapshots embed old ids and are not restored
 }
 
+export interface BackupShotData {
+  id: string;
+  scene_id: string;
+  shot_order: number;
+  name: string | null;
+  prompt_version_id: string | null;
+  duration: number | null;
+  camera_settings_json: string | null;
+  status: string;
+  generated_asset_version_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupSceneData {
+  id: string;
+  storyboard_id: string | null;
+  name: string;
+  description: string | null;
+  prompt_version_id: string | null;
+  status: string;
+  target_duration: number | null;
+  aspect_ratio_override: string | null;
+  frame_rate_override: number | null;
+  notes: string | null;
+  audio_plan_json: string | null;
+  created_at: string;
+  updated_at: string;
+  shots: BackupShotData[];
+}
+
+export interface BackupPanelData {
+  id: string;
+  panel_order: number;
+  shot_number: string | null;
+  description: string | null;
+  prompt_version_id: string | null;
+  duration: number | null;
+  camera_settings_json: string | null;
+  mood: string | null;
+  lighting: string | null;
+  time_of_day: string | null;
+  dialogue: string | null;
+  voiceover: string | null;
+  music_cue: string | null;
+  sfx: string | null;
+  transition: string | null;
+  notes: string | null;
+  status: string;
+  preview_asset_version_id: string | null;
+  generated_clip_asset_version_id: string | null;
+  linked_scene_id: string | null;
+  linked_shot_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupStoryboardData {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  panels: BackupPanelData[];
+}
+
+export interface BackupPromptVersionData {
+  id: string;
+  scope_type: string;
+  scope_id: string;
+  version_number: number;
+  content: string;
+  content_hash: string;
+  parent_prompt_id: string | null;
+  created_at: string;
+}
+
+export interface BackupReferenceData {
+  id: string;
+  source_type: string;
+  source_id: string;
+  asset_id: string | null;
+  asset_version_id: string | null;
+  role: string | null;
+  raw_text: string;
+  start_index: number | null;
+  end_index: number | null;
+  status: string;
+  notes: string | null;
+}
+
 export interface ProjectBackupData {
-  schema: 1;
+  schema: 1 | 2;
   created_at: string;
   project: BackupProjectData;
   assets: BackupAssetData[];
   timelines: BackupTimelineData[];
+  storyboards: BackupStoryboardData[];
+  scenes: BackupSceneData[];
+  prompts: BackupPromptVersionData[];
+  references: BackupReferenceData[];
 }
 
 export interface BackupCounts {
@@ -116,6 +217,12 @@ export interface BackupCounts {
   items: number;
   markers: number;
   snapshots_skipped: number;
+  storyboards: number;
+  panels: number;
+  scenes: number;
+  shots: number;
+  prompts: number;
+  references: number;
 }
 
 export interface BackupFileManifest {
@@ -297,12 +404,176 @@ export function buildProjectBackupData(projectId: string): ProjectBackupData {
     });
   }
 
+  const storyboards: BackupStoryboardData[] = [];
+  const scenes: BackupSceneData[] = [];
+  const panelScopeIds: string[] = [];
+  const shotScopeIds: string[] = [];
+  const sceneScopeIds: string[] = [];
+  const storyboardRows = db
+    .prepare("SELECT * FROM storyboards WHERE project_id = ? ORDER BY created_at")
+    .all(projectId) as unknown as Row[];
+  for (const sRow of storyboardRows) {
+    const storyboardId = asString(sRow.id) as string;
+    const panels = (
+      db
+        .prepare(
+          "SELECT * FROM storyboard_panels WHERE storyboard_id = ? ORDER BY panel_order",
+        )
+        .all(storyboardId) as unknown as Row[]
+    ).map((p) => {
+      const panel: BackupPanelData = {
+        id: asString(p.id) as string,
+        panel_order: Number(p.panel_order ?? 0),
+        shot_number: asString(p.shot_number),
+        description: asString(p.description),
+        prompt_version_id: asString(p.prompt_version_id),
+        duration: asNumber(p.duration),
+        camera_settings_json: asString(p.camera_settings_json),
+        mood: asString(p.mood),
+        lighting: asString(p.lighting),
+        time_of_day: asString(p.time_of_day),
+        dialogue: asString(p.dialogue),
+        voiceover: asString(p.voiceover),
+        music_cue: asString(p.music_cue),
+        sfx: asString(p.sfx),
+        transition: asString(p.transition),
+        notes: asString(p.notes),
+        status: asString(p.status) ?? "draft",
+        preview_asset_version_id: asString(p.preview_asset_version_id),
+        generated_clip_asset_version_id: asString(p.generated_clip_asset_version_id),
+        linked_scene_id: asString(p.linked_scene_id),
+        linked_shot_id: asString(p.linked_shot_id),
+        created_at: asString(p.created_at) ?? "",
+        updated_at: asString(p.updated_at) ?? "",
+      };
+      panelScopeIds.push(panel.id);
+      return panel;
+    });
+    storyboards.push({
+      id: storyboardId,
+      name: asString(sRow.name) ?? "Storyboard",
+      status: asString(sRow.status) ?? "draft",
+      created_at: asString(sRow.created_at) ?? "",
+      updated_at: asString(sRow.updated_at) ?? "",
+      panels,
+    });
+  }
+  const sceneRows = db
+    .prepare("SELECT * FROM scenes WHERE project_id = ? ORDER BY created_at")
+    .all(projectId) as unknown as Row[];
+  for (const scRow of sceneRows) {
+    const sceneId = asString(scRow.id) as string;
+    sceneScopeIds.push(sceneId);
+    const shots = (
+      db
+        .prepare("SELECT * FROM shots WHERE scene_id = ? ORDER BY shot_order")
+        .all(sceneId) as unknown as Row[]
+    ).map((s) => {
+      shotScopeIds.push(asString(s.id) as string);
+      const shot: BackupShotData = {
+        id: asString(s.id) as string,
+        scene_id: sceneId,
+        shot_order: Number(s.shot_order ?? 0),
+        name: asString(s.name),
+        prompt_version_id: asString(s.prompt_version_id),
+        duration: asNumber(s.duration),
+        camera_settings_json: asString(s.camera_settings_json),
+        status: asString(s.status) ?? "draft",
+        generated_asset_version_id: asString(s.generated_asset_version_id),
+        notes: asString(s.notes),
+        created_at: asString(s.created_at) ?? "",
+        updated_at: asString(s.updated_at) ?? "",
+      };
+      return shot;
+    });
+    scenes.push({
+      id: sceneId,
+      storyboard_id: asString(scRow.storyboard_id),
+      name: asString(scRow.name) ?? "Scene",
+      description: asString(scRow.description),
+      prompt_version_id: asString(scRow.prompt_version_id),
+      status: asString(scRow.status) ?? "draft",
+      target_duration: asNumber(scRow.target_duration),
+      aspect_ratio_override: asString(scRow.aspect_ratio_override),
+      frame_rate_override: asNumber(scRow.frame_rate_override),
+      notes: asString(scRow.notes),
+      audio_plan_json: asString(scRow.audio_plan_json),
+      created_at: asString(scRow.created_at) ?? "",
+      updated_at: asString(scRow.updated_at) ?? "",
+      shots,
+    });
+  }
+
+  // Prompt versions for every creative object (full history per scope).
+  const scopes: [string, string[]][] = [
+    ["storyboard_panel", panelScopeIds],
+    ["scene", sceneScopeIds],
+    ["shot", shotScopeIds],
+  ];
+  const prompts: BackupPromptVersionData[] = [];
+  const promptIds: string[] = [];
+  for (const [scopeType, scopeIds] of scopes) {
+    for (const scopeId of scopeIds) {
+      const rows = db.prepare(
+        `SELECT * FROM prompt_versions
+         WHERE scope_type = ? AND scope_id = ?
+         ORDER BY version_number`,
+      ).all(scopeType, scopeId) as unknown as Row[];
+      for (const pRow of rows) {
+        const prompt: BackupPromptVersionData = {
+          id: asString(pRow.id) as string,
+          scope_type: asString(pRow.scope_type) as string,
+          scope_id: asString(pRow.scope_id) as string,
+          version_number: Number(pRow.version_number ?? 0),
+          content: asString(pRow.content) ?? "",
+          content_hash: asString(pRow.content_hash) ?? "",
+          parent_prompt_id: asString(pRow.parent_prompt_id),
+          created_at: asString(pRow.created_at) ?? "",
+        };
+        prompts.push(prompt);
+        promptIds.push(prompt.id);
+      }
+    }
+  }
+
+  const references: BackupReferenceData[] = [];
+  if (promptIds.length > 0) {
+    const inList = promptIds.map(() => "?").join(", ");
+    const refRows = db
+      .prepare(
+        `SELECT * FROM asset_references
+         WHERE source_type IN ('storyboard_panel', 'scene', 'shot')
+           AND source_id IN (${inList})
+         ORDER BY source_type, source_id, COALESCE(start_index, 0)`,
+      )
+      .all(...promptIds) as unknown as Row[];
+    for (const rRow of refRows) {
+      references.push({
+        id: asString(rRow.id) as string,
+        source_type: asString(rRow.source_type) as string,
+        source_id: asString(rRow.source_id) as string,
+        asset_id: asString(rRow.asset_id),
+        asset_version_id: asString(rRow.asset_version_id),
+        role: asString(rRow.role),
+        raw_text: asString(rRow.raw_text) ?? "",
+        start_index: asNumber(rRow.start_index),
+        end_index: asNumber(rRow.end_index),
+        status: asString(rRow.status) ?? "resolved",
+        notes: asString(rRow.notes),
+      });
+    }
+  }
+
   return {
-    schema: 1,
+    schema: 2,
     created_at: new Date().toISOString(),
     project,
     assets,
     timelines,
+    storyboards,
+    scenes,
+    prompts,
+    references,
   };
 }
 
@@ -317,6 +588,12 @@ export function backupCounts(data: ProjectBackupData): BackupCounts {
     items: data.timelines.reduce((n, t) => n + t.items.length, 0),
     markers: data.timelines.reduce((n, t) => n + t.markers.length, 0),
     snapshots_skipped: data.timelines.reduce((n, t) => n + t.snapshots, 0),
+    storyboards: data.storyboards?.length ?? 0,
+    panels: data.storyboards?.reduce((n, b) => n + b.panels.length, 0) ?? 0,
+    scenes: data.scenes?.length ?? 0,
+    shots: data.scenes?.reduce((n, s) => n + s.shots.length, 0) ?? 0,
+    prompts: data.prompts?.length ?? 0,
+    references: data.references?.length ?? 0,
   };
 }
 
@@ -393,14 +670,16 @@ function uniqueAlias(base: string): string {
 /**
  * Restore a backup into a brand-new project owned by `userId`. All ids are
  * fresh UUIDs; foreign keys (assets inside a project, versions, tracks,
- * items) are remapped. Timeline snapshots are skipped (they embed the old
- * ids) and reported as issues, as are versions whose media is missing.
+ * items, creative objects, prompt versions, references) are remapped.
+ * Timeline snapshots are skipped (they embed the old ids) and reported as
+ * issues, as are versions whose media is missing and creative links whose
+ * targets were not part of the backup.
  */
 export function restoreProjectBackup(
   data: ProjectBackupData,
   options: RestoreOptions,
 ): RestoreResult {
-  if (data.schema !== 1) {
+  if (data.schema !== 1 && data.schema !== 2) {
     throw new Error(`Unsupported backup schema: ${String(data.schema)}`);
   }
   const db = getDb();
@@ -442,6 +721,8 @@ export function restoreProjectBackup(
     );
 
     const versionMap = new Map<string, string>();
+    const assetMap = new Map<string, string>();
+    const versionAssetMap = new Map<string, string>();
     const versionInsert = db.prepare(
       `INSERT INTO asset_versions (
         id, asset_id, version_number, status, content_hash, file_path, format,
@@ -471,11 +752,13 @@ export function restoreProjectBackup(
 
     for (const asset of data.assets) {
       const newAssetId = crypto.randomUUID();
+      assetMap.set(asset.id, newAssetId);
       const newVersionIds = new Map<string, string>();
 
       for (const version of asset.versions) {
         const newVersionId = crypto.randomUUID();
         newVersionIds.set(version.id, newVersionId);
+        versionAssetMap.set(version.id, asset.id);
       }
 
       // The asset row must exist before its versions (FK asset_id).
@@ -564,6 +847,274 @@ export function restoreProjectBackup(
           tag,
         );
       }
+    }
+
+    // ---- Creative objects (schema 2) ------------------------------------
+    // Storyboards, scenes and shots get fresh ids; prompt-version history is
+    // restored per scope and every creative pointer (prompt_version_id,
+    // preview/clip/generation version ids, scene links, scene.storyboard_id)
+    // is remapped. Pointers at objects that were not part of the backup are
+    // nulled and reported as issues. Asset reference ids (asset / version)
+    // are globally unique: versions restored above are remapped, others stay
+    // untouched.
+    const storyboards = (data.storyboards ?? []).slice();
+    const scenes = (data.scenes ?? []).slice();
+    const prompts = (data.prompts ?? []).slice();
+    const references = (data.references ?? []).slice();
+
+    const creativeNewIds = new Map<string, string>();
+    for (const board of storyboards) {
+      creativeNewIds.set(board.id, crypto.randomUUID());
+      for (const panel of board.panels) creativeNewIds.set(panel.id, crypto.randomUUID());
+    }
+    for (const scene of scenes) {
+      creativeNewIds.set(scene.id, crypto.randomUUID());
+      for (const shot of scene.shots) creativeNewIds.set(shot.id, crypto.randomUUID());
+    }
+
+    const insertStoryboard = db.prepare(
+      `INSERT INTO storyboards (
+        id, project_id, name, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const insertPanel = db.prepare(
+      `INSERT INTO storyboard_panels (
+        id, storyboard_id, panel_order, shot_number, description,
+        prompt_version_id, duration, camera_settings_json, mood, lighting,
+        time_of_day, dialogue, voiceover, music_cue, sfx, transition, notes,
+        status, preview_asset_version_id, generated_clip_asset_version_id,
+        linked_scene_id, linked_shot_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertScene = db.prepare(
+      `INSERT INTO scenes (
+        id, project_id, storyboard_id, name, description, prompt_version_id,
+        status, target_duration, aspect_ratio_override, frame_rate_override,
+        notes, audio_plan_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertShot = db.prepare(
+      `INSERT INTO shots (
+        id, scene_id, shot_order, name, prompt_version_id, duration,
+        camera_settings_json, status, generated_asset_version_id, notes,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertPrompt = db.prepare(
+      `INSERT INTO prompt_versions (
+        id, scope_type, scope_id, version_number, content, content_hash,
+        parent_prompt_id, created_at, created_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertReference = db.prepare(
+      `INSERT INTO asset_references (
+        id, source_type, source_id, asset_id, asset_version_id, role, raw_text,
+        start_index, end_index, status, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    const remapVersion = (versionId: string | null): string | null =>
+      versionId ? versionMap.get(versionId) ?? null : null;
+    const remapCreative = (id: string | null): string | null =>
+      id ? creativeNewIds.get(id) ?? null : null;
+
+    const newPromptIds = new Map<string, string>();
+    for (const prompt of prompts) {
+      const newScopeId = creativeNewIds.get(prompt.scope_id);
+      if (!newScopeId) {
+        issues.push(
+          `prompt ${prompt.scope_type}:${
+            prompt.scope_id.slice(
+              0,
+              8,
+            )
+          }: creative object not in backup, skipped`,
+        );
+        continue;
+      }
+      newPromptIds.set(prompt.id, crypto.randomUUID());
+    }
+    const remapPrompt = (versionId: string | null): string | null =>
+      versionId ? newPromptIds.get(versionId) ?? null : null;
+
+    for (const board of storyboards) {
+      (insertStoryboard.run as (...params: unknown[]) => unknown)(
+        creativeNewIds.get(board.id) as string,
+        projectId,
+        board.name,
+        board.status,
+        board.created_at || now,
+        now,
+      );
+      const newBoardId = creativeNewIds.get(board.id) as string;
+      for (const panel of board.panels) {
+        const newPanelId = creativeNewIds.get(panel.id) as string;
+        const newPanelPrompt = remapPrompt(panel.prompt_version_id);
+        if (panel.prompt_version_id && newPanelPrompt === null) {
+          issues.push(
+            `panel "${panel.description ?? panel.id.slice(0, 8)}": prompt version not in backup`,
+          );
+        }
+        const newLinkedScene = remapCreative(panel.linked_scene_id);
+        if (panel.linked_scene_id && newLinkedScene === null) {
+          issues.push(
+            `panel "${panel.description ?? panel.id.slice(0, 8)}": linked scene not in backup`,
+          );
+        }
+        const newLinkedShot = remapCreative(panel.linked_shot_id);
+        if (panel.linked_shot_id && newLinkedShot === null) {
+          issues.push(
+            `panel "${panel.description ?? panel.id.slice(0, 8)}": linked shot not in backup`,
+          );
+        }
+        (insertPanel.run as (...params: unknown[]) => unknown)(
+          newPanelId,
+          newBoardId,
+          panel.panel_order,
+          panel.shot_number,
+          panel.description,
+          newPanelPrompt,
+          panel.duration,
+          panel.camera_settings_json,
+          panel.mood,
+          panel.lighting,
+          panel.time_of_day,
+          panel.dialogue,
+          panel.voiceover,
+          panel.music_cue,
+          panel.sfx,
+          panel.transition,
+          panel.notes,
+          panel.status,
+          remapVersion(panel.preview_asset_version_id),
+          remapVersion(panel.generated_clip_asset_version_id),
+          newLinkedScene,
+          newLinkedShot,
+          panel.created_at || now,
+          now,
+        );
+      }
+    }
+
+    for (const scene of scenes) {
+      const newSceneId = creativeNewIds.get(scene.id) as string;
+      const newStoryboardId = remapCreative(scene.storyboard_id);
+      if (scene.storyboard_id && newStoryboardId === null) {
+        issues.push(`scene "${scene.name}": storyboard not in backup`);
+      }
+      const newScenePrompt = remapPrompt(scene.prompt_version_id);
+      if (scene.prompt_version_id && newScenePrompt === null) {
+        issues.push(`scene "${scene.name}": prompt version not in backup`);
+      }
+      (insertScene.run as (...params: unknown[]) => unknown)(
+        newSceneId,
+        projectId,
+        newStoryboardId,
+        scene.name,
+        scene.description,
+        newScenePrompt,
+        scene.status,
+        scene.target_duration,
+        scene.aspect_ratio_override,
+        scene.frame_rate_override,
+        scene.notes,
+        scene.audio_plan_json,
+        scene.created_at || now,
+        now,
+      );
+      for (const shot of scene.shots) {
+        const newShotPrompt = remapPrompt(shot.prompt_version_id);
+        if (shot.prompt_version_id && newShotPrompt === null) {
+          issues.push(
+            `shot "${shot.name ?? shot.id.slice(0, 8)}": prompt version not in backup`,
+          );
+        }
+        (insertShot.run as (...params: unknown[]) => unknown)(
+          creativeNewIds.get(shot.id) as string,
+          newSceneId,
+          shot.shot_order,
+          shot.name,
+          newShotPrompt,
+          shot.duration,
+          shot.camera_settings_json,
+          shot.status,
+          remapVersion(shot.generated_asset_version_id),
+          shot.notes,
+          shot.created_at || now,
+          now,
+        );
+      }
+    }
+
+    for (const prompt of prompts) {
+      const newPromptId = newPromptIds.get(prompt.id);
+      if (!newPromptId) continue; // unknown scope: reported above
+      const remappedParent = prompt.parent_prompt_id
+        ? newPromptIds.get(prompt.parent_prompt_id) ?? null
+        : null;
+      if (prompt.parent_prompt_id && remappedParent === null) {
+        issues.push(
+          `prompt ${prompt.scope_type}:${
+            prompt.scope_id.slice(
+              0,
+              8,
+            )
+          }: parent prompt not restored`,
+        );
+      }
+      (insertPrompt.run as (...params: unknown[]) => unknown)(
+        newPromptId,
+        prompt.scope_type,
+        creativeNewIds.get(prompt.scope_id) as string,
+        prompt.version_number,
+        prompt.content,
+        prompt.content_hash,
+        remappedParent,
+        prompt.created_at || now,
+        options.userId,
+      );
+    }
+
+    for (const ref of references) {
+      // source_id is the prompt version id the reference was resolved from.
+      const newSourceId = newPromptIds.get(ref.source_id);
+      if (!newSourceId) {
+        issues.push(
+          `reference "${ref.raw_text}": source prompt not restored, skipped`,
+        );
+        continue;
+      }
+      let newAssetId = ref.asset_id ?? null;
+      let newVersionId = ref.asset_version_id ?? null;
+      if (ref.asset_version_id) {
+        const restoredVersion = versionMap.get(ref.asset_version_id) ?? null;
+        const oldAssetId = versionAssetMap.get(ref.asset_version_id);
+        newAssetId = oldAssetId
+          ? assetMap.get(oldAssetId) ?? ref.asset_id ?? null
+          : (ref.asset_id ?? null);
+        if (restoredVersion === null) {
+          issues.push(
+            `reference "${ref.raw_text}": media version not in backup`,
+          );
+        }
+        newVersionId = restoredVersion;
+      }
+      (insertReference.run as (...params: unknown[]) => unknown)(
+        crypto.randomUUID(),
+        ref.source_type,
+        newSourceId,
+        newAssetId,
+        newVersionId,
+        ref.role,
+        ref.raw_text,
+        ref.start_index,
+        ref.end_index,
+        ref.status,
+        ref.notes,
+        now,
+        now,
+      );
     }
 
     const insertTimeline = db.prepare(
