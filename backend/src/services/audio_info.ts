@@ -72,12 +72,23 @@ async function runFfprobe(filePath: string): Promise<ProbeInfo | null> {
     return {
       duration: json.format?.duration ? Number(json.format.duration) : null,
       sample_rate: stream?.sample_rate ? Number(stream.sample_rate) : null,
-      channels: stream?.channels ?? null,
+      channels: json.streams?.[0]?.channels ?? null,
       bit_rate: json.format?.bit_rate ? Number(json.format.bit_rate) : null,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Duration of any media file per ffprobe. Returns null when the ffprobe
+ * binary is missing or the file cannot be probed; callers must treat that
+ * as "unknown", not as zero.
+ */
+export async function probeMediaDuration(filePath: string): Promise<number | null> {
+  const info = await runFfprobe(filePath);
+  if (!info || !Number.isFinite(info.duration) || (info.duration ?? 0) <= 0) return null;
+  return info.duration;
 }
 
 /**

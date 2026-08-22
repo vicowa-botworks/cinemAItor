@@ -13,6 +13,14 @@ export interface RenderInputItem {
   source_offset?: number;
   /** Playback speed (1 = normal). */
   speed?: number;
+  /**
+   * Whether the item plays to the end of its source (from
+   * `source_offset` to EOF). The lossless concat path can only splice
+   * whole files, so a tail-trimmed item (`false`) requires the fx pass for
+   * a frame-accurate cut. `undefined` means unknown and keeps the legacy
+   * concat behavior; `buildPlan` probes the source for the real value.
+   */
+  consumes_full_source?: boolean;
   /** Blend between this item and the one preceding it. */
   transition: string;
   transition_duration: number;
@@ -84,14 +92,16 @@ export function itemNeedsSourceEdit(
 /**
  * True when the plan needs the re-encoding fx pass: per-item fx, text
  * overlays, audio-track placement, or per-item source edits (the lossless
- * concat path can only splice whole video files).
+ * concat path can only splice whole video files and cannot cut a
+ * tail-trimmed item frame-accurately).
  */
 export function planNeedsFxPass(plan: RenderPlan): boolean {
   return (
     planHasFx(plan.items) ||
     plan.text_overlays.length > 0 ||
     (plan.audio_items?.length ?? 0) > 0 ||
-    plan.items.some(itemNeedsSourceEdit)
+    plan.items.some(itemNeedsSourceEdit) ||
+    plan.items.some((i) => i.consumes_full_source === false)
   );
 }
 

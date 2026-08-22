@@ -29,7 +29,11 @@ import {
   updateRenderProgress,
 } from "../src/db/renders.ts";
 import { type JobEventMessage, subscribeJobEvents } from "../src/services/job_events.ts";
-import { type RenderRunner, startRenderRunner } from "../src/services/render_runner.ts";
+import {
+  itemConsumesFullSource,
+  type RenderRunner,
+  startRenderRunner,
+} from "../src/services/render_runner.ts";
 import {
   buildAtempoFilters,
   buildAudioArgs,
@@ -229,6 +233,116 @@ describe("renders", () => {
 
     // Cancel after terminal state -> conflict.
     assertThrows(() => cancelRenderJob(job.id), Error, "already succeeded");
+  });
+
+  describe("frame-accurate cuts (tail trims)", () => {
+    let origFfprobePath: string | undefined;
+
+    beforeEach(() => {
+      origFfprobePath = Deno.env.get("FFPROBE_PATH");
+    });
+
+    afterEach(() => {
+      if (origFfprobePath === undefined) Deno.env.delete("FFPROBE_PATH");
+      else Deno.env.set("FFPROBE_PATH", origFfprobePath);
+    });
+
+    function writeFakeFfmpegWithArgsLog(argsLog: string): string {
+      const dir = Deno.makeTempDirSync({ prefix: "fake_ffmpeg_" });
+      const path = join(dir, "ffmpeg");
+      const body = [
+        'printf "%s\\n" "$@" > "' + argsLog + '"',
+        "out=$1",
+        'for a in "$@"; do out=$a; done',
+        'printf "out_time_us=5000000\\nprogress=end\\n"',
+        'printf "fake-video-bytes\\n" > "$out"',
+        "exit 0",
+      ].join("\n");
+      Deno.writeTextFileSync(path, `#!/bin/sh\n${body}\n`);
+      Deno.chmodSync(path, 0o755);
+      return path;
+    }
+
+    function writeFakeFfprobe(duration: string): string {
+      const dir = Deno.makeTempDirSync({ prefix: "fake_ffprobe_" });
+      const path = join(dir, "ffprobe");
+      Deno.writeTextFileSync(
+        path,
+        `#!/bin/sh\necho '{"format":{"duration":"${duration}"}}'\n`,
+      );
+      Deno.chmodSync(path, 0o755);
+      return path;
+    }
+
+    /** Renders a one-item timeline through the fake ffmpeg engine and
+     * returns the ffmpeg argument list it was invoked with. */
+    async function renderOneItem(
+      itemEnd: number,
+      probePath: string,
+      label: string,
+    ): Promise<string[]> {
+      const timeline = createTimeline(ownerId, { project_id: projectId, name: "Cuts" }).id;
+      const track = createTrack(ownerId, timeline, { track_type: "video", name: "V1" });
+      const version = getDb()
+        .prepare(
+          "SELECT id FROM asset_versions WHERE asset_id = ? ORDER BY version_number DESC LIMIT 1",
+        )
+        .get(mediaAssetId) as { id: string };
+      createItem(ownerId, timeline, {
+        track_id: track.id,
+        asset_version_id: version.id,
+        start_time: 0,
+        end_time: itemEnd,
+      });
+      Deno.env.set("FFPROBE_PATH", probePath);
+      const argsLog = join(appData, `args-${label}.txt`);
+      setRenderEngine(new FfmpegRenderEngine(writeFakeFfmpegWithArgsLog(argsLog)));
+      const job = createRenderJob(ownerId, {
+        project_id: projectId,
+        timeline_id: timeline,
+        preset_id: "preset-final",
+      });
+      runner = startRenderRunner({ pollMs: 5 });
+      await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job.id)?.status ?? ""));
+      assertEquals(rawGetRenderJob(job.id)?.status, "succeeded");
+      return (await Deno.readTextFile(argsLog)).split("\n");
+    }
+
+    it("classifies tail trims against the probed source length", () => {
+      assertEquals(itemConsumesFullSource(2, 1, 0, 5), false);
+      assertEquals(itemConsumesFullSource(5, 1, 0, 5), true);
+      // Inside the 0.1 s rounding tolerance: stays lossless.
+      assertEquals(itemConsumesFullSource(4.95, 1, 0, 5), true);
+      // Faster playback consumes less source per timeline second.
+      assertEquals(itemConsumesFullSource(2, 2, 0, 5), false);
+      assertEquals(itemConsumesFullSource(10, 2, 0, 5), true);
+      // Head offset shrinks the remaining source.
+      assertEquals(itemConsumesFullSource(5, 1, 1, 6), true);
+      assertEquals(itemConsumesFullSource(4, 1, 1, 6), false);
+      // Unknown length preserves the legacy concat behavior.
+      assertEquals(itemConsumesFullSource(2, 1, 0, null), undefined);
+    });
+
+    it("renders a tail-trimmed item through the fx pass", async () => {
+      const args = await renderOneItem(2, writeFakeFfprobe("5.0"), "trim");
+      assert(args.includes("-filter_complex"));
+      assert(!args.includes("concat"));
+    });
+
+    it("keeps lossless concat when the item consumes the whole source", async () => {
+      const args = await renderOneItem(5, writeFakeFfprobe("5.0"), "full");
+      assert(args.includes("-f"));
+      assert(args.includes("concat"));
+    });
+
+    it("keeps lossless concat when the source length is unknown", async () => {
+      const args = await renderOneItem(
+        2,
+        join(appData, "no-such-ffprobe"),
+        "unknown",
+      );
+      assert(args.includes("concat"));
+    });
   });
 
   it("applies per-item fx (transition / fades / color grade) at render time", async () => {
@@ -438,6 +552,9 @@ describe("renders", () => {
     assert(planNeedsFxPass({ ...base, audio_items: [audio] }));
     assert(planNeedsFxPass({ ...base, items: [{ ...video, source_offset: 1 }] }));
     assert(planNeedsFxPass({ ...base, items: [{ ...video, speed: 2 }] }));
+    // A tail-trimmed item cannot be spliced by the lossless concat path.
+    assert(planNeedsFxPass({ ...base, items: [{ ...video, consumes_full_source: false }] }));
+    assert(!planNeedsFxPass({ ...base, items: [{ ...video, consumes_full_source: true }] }));
     const overlay: RenderTextOverlay = {
       start_time: 0,
       end_time: 1,
@@ -927,6 +1044,19 @@ describe("renders", () => {
         onProgress: (p) => seen.push(p),
         isCancelled: () => false,
       });
+      assertEquals(flat(seen), [5, 10, 50, 90, 100]);
+    });
+
+    it("dispatches tail-trimmed video items to the fx path", async () => {
+      const script = writeFakeFfmpeg(progressScript);
+      const seen: number[] = [];
+      const engine = new FfmpegRenderEngine(script);
+      await engine.render(planFor({ consumes_full_source: false }), {
+        onProgress: (p) => seen.push(p),
+        isCancelled: () => false,
+      });
+      // Same progress band as the fx pass (base 10), not the concat fast
+      // path (base 20).
       assertEquals(flat(seen), [5, 10, 50, 90, 100]);
     });
 

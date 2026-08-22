@@ -29,6 +29,7 @@ import {
   getAssetVersion,
 } from "../db/assets.ts";
 import { parseAudioMetadata } from "../db/audio.ts";
+import { probeMediaDuration } from "./audio_info.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import {
   getRenderEngine,
@@ -188,6 +189,7 @@ async function buildPlan(
         );
       }
       return {
+        ...(await buildVideoSourceEdit(i, file_path)),
         file_path,
         source,
         start_time: i.start_time,
@@ -282,6 +284,51 @@ async function buildPlan(
       ? Math.round(Math.max(...audioItems.map((a) => a.end_time), 0) * 100) / 100
       : planItems.reduce((sum, i) => sum + i.duration, 0),
   };
+}
+
+/**
+ * Tolerance used when deciding whether an item plays all the way to the
+ * end of its source. The editor rounds times to 0.01 s and probed
+ * durations are float-approximate, so a tail trim inside this window is
+ * left to the lossless concat pass.
+ */
+const SOURCE_TAIL_EPSILON = 0.1;
+
+/**
+ * Whether an item consumes its source to the end, given the item's
+ * timeline duration, playback speed, source offset and the probed source
+ * length. `undefined` means the source length is unknown (ffprobe
+ * unavailable or failed) and preserves the legacy concat behavior.
+ */
+export function itemConsumesFullSource(
+  itemDurationSec: number,
+  speed: number,
+  sourceOffsetSec: number,
+  sourceLengthSec: number | null,
+): boolean | undefined {
+  if (sourceLengthSec === null) return undefined;
+  const sourceNeeded = itemDurationSec / Math.max(speed, 0.01);
+  return sourceNeeded >= sourceLengthSec - sourceOffsetSec - SOURCE_TAIL_EPSILON;
+}
+
+/**
+ * Probe the rendered file (proxy in draft renders, master in final
+ * renders) for its duration so the concat-vs-fx decision can detect tail
+ * trims: the lossless concat path can only splice whole files, so a
+ * tail-trimmed item must render through the fx pass for a correct,
+ * frame-accurate cut.
+ */
+async function buildVideoSourceEdit(
+  item: Pick<TimelineItem, "start_time" | "end_time" | "source_offset" | "speed">,
+  filePath: string,
+): Promise<{ consumes_full_source?: boolean }> {
+  const value = itemConsumesFullSource(
+    item.end_time - item.start_time,
+    item.speed,
+    item.source_offset,
+    await probeMediaDuration(filePath),
+  );
+  return value === undefined ? {} : { consumes_full_source: value };
 }
 
 /**

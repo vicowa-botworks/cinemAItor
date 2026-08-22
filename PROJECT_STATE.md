@@ -242,10 +242,18 @@ The product track follows `MASTER-PLAN.md`.
       at 100 ms — the same speed/offset math as the preview) feeds `api.getAssetThumbnailUrl`, whose
       blob URLs are cached per version+seek and revoked on unmount; failed fetches leave the item as
       a plain color block
+- [x] Frame-accurate cuts (Workstream 12 follow-up): the lossless concat fast path can only splice
+      whole files, so a tail-trimmed clip (shorter than its source — the editor's default shrink)
+      was previously concatenated in full and rendered longer than the timeline. `buildPlan` now
+      ffprobes each video item's file (the proxy in draft renders, the master in final renders) and
+      sets `consumes_full_source`; a `false` flag forces the re-encoding fx pass, whose `trim`
+      filter cuts frame-accurately. A 0.1 s tolerance absorbs the editor's 0.01 s rounding (plus
+      float-approximate probed durations) so untouched clips stay lossless; when ffprobe is
+      unavailable or fails, the duration is unknown and the legacy concat behavior is kept
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
+- [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
