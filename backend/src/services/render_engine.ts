@@ -389,6 +389,50 @@ export function buildFxArgs(
   return args;
 }
 
+/**
+ * Audio-only export (wav presets): the audio-track mix with per-item source
+ * window, speed, gain and fades, delayed into its timeline slot. There is no
+ * picture and no tail cut to a video length — the mix plays to the end of
+ * its longest item. Output is 16-bit PCM (wav's native encoding).
+ */
+export function buildAudioArgs(
+  audioItems: RenderAudioItem[],
+  outputPath: string,
+): string[] {
+  const args: string[] = ["-v", "error", "-y"];
+  for (const audio of audioItems) args.push("-i", audio.file_path);
+
+  const filters: string[] = [];
+  audioItems.forEach((audio, k) => {
+    const chain: string[] = [
+      `atrim=start=${round4(audio.source_offset)}:end=${
+        round4(audio.source_offset + audio.source_duration)
+      }`,
+      "asetpts=PTS-STARTPTS",
+      ...buildAtempoFilters(audio.speed),
+    ];
+    if (Math.abs(audio.gain - 1) > 1e-9) chain.push(`volume=${round4(audio.gain)}`);
+    if (audio.fade_in > 0) {
+      chain.push(`afade=t=in:st=0:d=${round2(audio.fade_in)}`);
+    }
+    if (audio.fade_out > 0) {
+      const st = Math.max(0, round2(audio.duration - audio.fade_out));
+      chain.push(`afade=t=out:st=${st}:d=${round2(audio.fade_out)}`);
+    }
+    chain.push(`adelay=${Math.round(audio.start_time * 1000)}:all=1`);
+    filters.push(`[${k}:a]${chain.join(",")}[ak${k}]`);
+  });
+  const mixInputs = audioItems.map((_, k) => `[ak${k}]`).join("");
+  filters.push(
+    `${mixInputs}amix=inputs=${audioItems.length}:duration=longest:normalize=0` +
+      ",asetpts=PTS-STARTPTS[aout]",
+  );
+
+  args.push("-filter_complex", filters.join(";"));
+  args.push("-map", "[aout]", "-vn", "-c:a", "pcm_s16le", outputPath);
+  return args;
+}
+
 export class FfmpegRenderEngine implements RenderEngine {
   readonly name = "ffmpeg";
   private readonly binary: string;
@@ -466,6 +510,22 @@ export class FfmpegRenderEngine implements RenderEngine {
       plan.output_path,
       plan.audio_items ?? [],
     );
+    await this.runFfmpeg(args, plan.total_duration, 10, hooks);
+    checkCancelled(hooks);
+    hooks.onProgress(90);
+    const stat = await Deno.stat(plan.output_path);
+    hooks.onProgress(100);
+    return { output_path: plan.output_path, file_size: stat.size, ticks: 3 };
+  }
+
+  /** wavs render the audio-track mix to 16-bit PCM, no picture at all. */
+  private async renderAudio(
+    plan: RenderPlan,
+    hooks: RenderHooks,
+  ): Promise<RenderResult> {
+    checkCancelled(hooks);
+    hooks.onProgress(10);
+    const args = buildAudioArgs(plan.audio_items ?? [], plan.output_path);
     await this.runFfmpeg(args, plan.total_duration, 10, hooks);
     checkCancelled(hooks);
     hooks.onProgress(90);
@@ -572,6 +632,7 @@ export class FfmpegRenderEngine implements RenderEngine {
   render(plan: RenderPlan, hooks: RenderHooks): Promise<RenderResult> {
     checkCancelled(hooks);
     hooks.onProgress(5);
+    if (plan.format === "wav") return this.renderAudio(plan, hooks);
     return planNeedsFxPass(plan) ? this.renderFx(plan, hooks) : this.renderConcat(plan, hooks);
   }
 }

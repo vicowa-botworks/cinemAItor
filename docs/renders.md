@@ -16,32 +16,38 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   `queued` by `recoverStaleRenderJobs`. The in-process render runner polls every 250 ms, claims one
   job per poll, and executes it.
 - **Engines** implement `RenderEngine.render(plan, hooks)` in `services/render_engine.ts`:
-  - `FfmpegRenderEngine` — two paths, chosen per plan (`planNeedsFxPass`):
+  - `FfmpegRenderEngine` — three paths, chosen per plan (audio preset first, then
+    `planNeedsFxPass`):
     - **No fx** (all items hard-cut, no fades, no grade, no source trim/speed, no text overlays, no
       audio): lossless concat demuxer (`ffmpeg -f concat -c copy`), stream copy.
-    - **With fx**: one input per item plus a filter graph — per-item `trim` + `setpts` (source
-      offset / speed), `eq` (brightness/contrast/saturation), `colortemperature` (grade temperature
-      → Kelvin), `fade` in/out — chained with `xfade` for real transitions and the `concat` filter
-      for hard cuts; text overlays are drawn in a final `drawtext` stage (per-overlay
-      `enable=between(t, start, end)`, position/size/color from the item's `text_style`).
-      Audio-track items become extra inputs, each run through `atrim` (the source window after the
-      version trim is applied) + `asetpts` + `atempo` chain (speed; extreme speeds are split into
-      repeated `atempo` stages) + `volume` (the version's `gain_db`) + `afade` in/out, then silenced
-      into its timeline slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no
-      1/N normalization) — the mix is trimmed back to the video length and mapped as AAC (192 k).
-      Re-encodes to H.264 (+ AAC when audio is mixed); silent plans keep `-an`.
-    - **Progress**: both paths run ffmpeg with `-nostats -progress pipe:1`; the reported `out_time`
-      (microseconds preferred, seconds fallback) is mapped onto the job progress scale — concat 20 →
-      90, fx 10 → 90 — and 100 is reported after the output file is stat-verified. The read loop
-      races against process exit (a killed ffmpeg with helper processes would otherwise hold the
-      pipe open), and a 250 ms poller kills ffmpeg when the job is cancelled so cancellation does
-      not wait on ffmpeg output.
-  - `MockRenderEngine` — deterministic placeholder output, content-addressed on the plan (seeded
-    from format + duration + a fingerprint of every item's source/source-edit, fx and the text and
-    audio overlays; valid minimal WAV for the `wav` format) so rendering works on machines without
-    ffmpeg and re-renders of an unchanged timeline deduplicate in the content store.
-  - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
-    `setRenderEngine()` is a test hook.
+  - **With fx**: one input per item plus a filter graph — per-item `trim` + `setpts` (source offset
+    / speed), `eq` (brightness/contrast/saturation), `colortemperature` (grade temperature →
+    Kelvin), `fade` in/out — chained with `xfade` for real transitions and the `concat` filter for
+    hard cuts; text overlays are drawn in a final `drawtext` stage (per-overlay
+    `enable=between(t, start, end)`, position/size/color from the item's `text_style`). Audio-track
+    items become extra inputs, each run through `atrim` (the source window after the version trim is
+    applied) + `asetpts` + `atempo` chain (speed; extreme speeds are split into repeated `atempo`
+    stages) + `volume` (the version's `gain_db`) + `afade` in/out, then silenced into its timeline
+    slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no 1/N normalization) —
+    the mix is trimmed back to the video length and mapped as AAC (192 k). Re-encodes to H.264 (+
+    AAC when audio is mixed); silent plans keep `-an`.
+  - **Audio-only** (`wav` presets): one input per audio-track item, each run through the same
+    `atrim` + `asetpts` + `atempo` + `volume` + `afade` chain as the fx pass, then silenced into its
+    timeline slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no 1/N
+    normalization, no trim back to a video length — the mix runs to the longest item). Mapped as PCM
+    16-bit (`pcm_s16le`) with no video stream (`-vn`).
+  - **Progress**: all paths run ffmpeg with `-nostats -progress pipe:1`; the reported `out_time`
+    (microseconds preferred, seconds fallback) is mapped onto the job progress scale — concat 20 →
+    90, fx 10 → 90, audio 10 → 90 — and 100 is reported after the output file is stat-verified. The
+    read loop races against process exit (a killed ffmpeg with helper processes would otherwise hold
+    the pipe open), and a 250 ms poller kills ffmpeg when the job is cancelled so cancellation does
+    not wait on ffmpeg output.
+- `MockRenderEngine` — deterministic placeholder output, content-addressed on the plan (seeded from
+  format + duration + a fingerprint of every item's source/source-edit, fx and the text and audio
+  overlays; valid minimal WAV for the `wav` format) so rendering works on machines without ffmpeg
+  and re-renders of an unchanged timeline deduplicate in the content store.
+- Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
+  `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
   resolved to its asset version's stored file (carrying the item's `source_offset` and `speed`);
   plus the active text overlays from unlocked `text`/`subtitle` tracks (text items sorted by start
@@ -49,6 +55,10 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   tracks (non-archived items with an asset version, sorted by start time; each clip's version
   `gain_db` plus its track's mixer `gain_db` is applied, so the render matches the preview mix). The
   plan is passed to the engine with progress and `isCancelled` hooks.
+- **Audio-only plans** (`wav` presets, e.g. the seeded `preset-audio`): no video items and no text
+  overlays are collected; the plan's `total_duration` is the audio items' end extent (latest
+  `end_time`), and rendering is rejected with a validation error when the timeline has no
+  audio-track items.
 - **Source selection (draft/final)**: each plan item (video and audio) resolves to a `source` —
   `proxy` or `master` (the asset version's stored file). `draft`-kind presets prefer the version's
   proxy and fall back to the master if none exists; `final`-kind presets always use the master and
@@ -85,4 +95,6 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 | GET    | `/api/v1/exports`            | List exports (filters: `project_id`, `render_job_id`), scoped to projects the user can read                |
 
 All endpoints require authentication; reads/writes are gated by project permissions (create requires
-timeline write + read on the first item's media; the first renderable video item is required).
+timeline write + read on the first item's media). A video preset requires at least one renderable
+video item; a `wav` (audio) preset requires at least one audio-track item — otherwise the queued job
+fails the render with a validation error.

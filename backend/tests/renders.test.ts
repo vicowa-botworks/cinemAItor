@@ -32,6 +32,7 @@ import { type JobEventMessage, subscribeJobEvents } from "../src/services/job_ev
 import { type RenderRunner, startRenderRunner } from "../src/services/render_runner.ts";
 import {
   buildAtempoFilters,
+  buildAudioArgs,
   buildDrawTextFilter,
   buildFxArgs,
   consumeFfmpegProgressLine,
@@ -514,6 +515,66 @@ describe("renders", () => {
     assert(!fcPlain.includes("setpts="));
   });
 
+  it("builds audio-only export args (wav preset)", () => {
+    const a: RenderAudioItem = {
+      file_path: "/tmp/m.wav",
+      start_time: 0,
+      end_time: 4,
+      duration: 4,
+      source_offset: 1,
+      source_duration: 2,
+      speed: 1.5,
+      gain: 2,
+      fade_in: 0.2,
+      fade_out: 0.3,
+    };
+    const b: RenderAudioItem = {
+      file_path: "/tmp/v.wav",
+      start_time: 2.5,
+      end_time: 5,
+      duration: 2.5,
+      source_offset: 0,
+      source_duration: 2.5,
+      speed: 1,
+      gain: 1,
+      fade_in: 0,
+      fade_out: 0,
+    };
+    const args = buildAudioArgs([a, b], "/tmp/out.wav");
+
+    // Both sources are inputs, in order.
+    assertEquals(args[args.indexOf("/tmp/m.wav") - 1], "-i");
+    assertEquals(args[args.indexOf("/tmp/v.wav") - 1], "-i");
+
+    const fc = args[args.indexOf("-filter_complex") + 1];
+    // Per-item chains: source window, speed, gain, fades, slot delay.
+    assert(fc.includes("[0:a]"));
+    assert(fc.includes("[1:a]"));
+    assert(fc.includes("atrim=start=1:end=3"));
+    assert(fc.includes("atempo=1.5"));
+    assert(fc.includes("volume=2"));
+    assert(fc.includes("afade=t=in:st=0:d=0.2"));
+    assert(fc.includes("afade=t=out:st=3.7:d=0.3"));
+    assert(fc.includes("adelay=0:all=1"));
+    assert(fc.includes("adelay=2500:all=1"));
+    // Gain of 1 and zero fades add no extra stages for the second item
+    // (exactly one atempo total, from item A's 1.5× speed; no volume=1).
+    assertEquals(fc.split("atempo=").length - 1, 1);
+    assert(!fc.includes("volume=1"));
+    // Mix runs to the longest item (no tail cut to a video length).
+    assert(fc.includes("amix=inputs=2:duration=longest:normalize=0"));
+    assert(fc.includes("asetpts=PTS-STARTPTS[aout]"));
+    assert(!fc.includes("atrim=end="));
+
+    // Audio out only: PCM 16-bit into wav, no video.
+    assert(args.includes("-map"));
+    assert(args[args.indexOf("-map") + 1] === "[aout]");
+    assert(args.includes("-vn"));
+    assert(args.includes("pcm_s16le"));
+    assertEquals(args[args.length - 1], "/tmp/out.wav");
+    assert(!args.includes("libx264"));
+  });
+
   it("renders audio-track items end to end (deterministic mock mix)", async () => {
     const db = getDb();
     const music = createTrack(ownerId, timelineId, { track_type: "music", name: "M1" });
@@ -613,6 +674,112 @@ describe("renders", () => {
       | { audio?: { items: number } }
       | null;
     assertEquals(mutedReport?.audio?.items, 0);
+  });
+
+  it("exports audio-only wav via the audio preset", async () => {
+    const db = getDb();
+    const musicTrack = createTrack(ownerId, timelineId, { track_type: "music", name: "M2" });
+    const scoreAsset = createAsset(
+      {
+        unique_slug: "score_wav",
+        display_name: "Score",
+        asset_type: "audio",
+        library_scope: "global",
+      },
+      ownerId,
+    );
+    const scoreVersionId = createAssetVersion(scoreAsset.id, ownerId, {
+      content_hash: "a".repeat(64),
+      file_path: "/tmp/score.wav",
+      format: "wav",
+      mime_type: "audio/wav",
+      file_size: 4000,
+      make_active: true,
+    }).id;
+    createItem(ownerId, timelineId, {
+      track_id: musicTrack.id,
+      asset_version_id: scoreVersionId,
+      start_time: 0,
+      end_time: 2,
+    });
+    createItem(ownerId, timelineId, {
+      track_id: musicTrack.id,
+      asset_version_id: scoreVersionId,
+      start_time: 1.5,
+      end_time: 3.5,
+    });
+
+    const job = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-audio",
+    });
+    runner = startRenderRunner({ pollMs: 5 });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job.id)?.status ?? ""));
+    const done = rawGetRenderJob(job.id);
+    assert(done?.status === "succeeded");
+    const report = done?.validation_report as
+      | { items: number; audio: { items: number } }
+      | null;
+    assertEquals(report?.items, 0, "video items are excluded from audio exports");
+    assertEquals(report?.audio?.items, 2);
+
+    // The export is an audio asset whose file is a real WAV.
+    const exportRow = db
+      .prepare("SELECT asset_id, asset_version_id FROM exports WHERE render_job_id = ?")
+      .get(job.id) as { asset_id: string; asset_version_id: string };
+    const assetRow = db
+      .prepare("SELECT asset_type FROM assets WHERE id = ?")
+      .get(exportRow.asset_id) as { asset_type: string };
+    assertEquals(assetRow.asset_type, "audio");
+    const versionRow = db
+      .prepare("SELECT format, mime_type, file_path FROM asset_versions WHERE id = ?")
+      .get(exportRow.asset_version_id) as {
+        format: string;
+        mime_type: string;
+        file_path: string;
+      };
+    assertEquals(versionRow.format, "wav");
+    assertEquals(versionRow.mime_type, "audio/wav");
+    const bytes = Deno.readFileSync(versionRow.file_path);
+    const head = new TextDecoder().decode(bytes.slice(0, 12));
+    assert(head.startsWith("RIFF"));
+    assert(head.endsWith("WAVE"));
+    // 16-bit mono @ 8kHz: the data chunk matches the mix extent (3.5s).
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    assertEquals(view.getUint32(40, true), Math.floor(3.5 * 8000) * 2);
+
+    // A re-render is byte-identical (content addressed on the plan).
+    const job2 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-audio",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job2.id)?.status ?? ""));
+    assertEquals(rawGetRenderJob(job2.id)?.status, "succeeded");
+    const hashFor = (jobId: string) => {
+      const row = db
+        .prepare("SELECT asset_version_id FROM exports WHERE render_job_id = ?")
+        .get(jobId) as { asset_version_id: string };
+      return (db
+        .prepare("SELECT content_hash FROM asset_versions WHERE id = ?")
+        .get(row.asset_version_id) as { content_hash: string }).content_hash;
+    };
+    assertEquals(hashFor(job2.id), hashFor(job.id));
+  });
+
+  it("fails the audio preset when the timeline has no audio items", async () => {
+    // The fixture timeline holds a single video item and no audio tracks.
+    const job = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-audio",
+    });
+    runner = startRenderRunner({ pollMs: 5 });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job.id)?.status ?? ""));
+    const done = rawGetRenderJob(job.id);
+    assertEquals(done?.status, "failed");
+    assert(done?.error_text?.includes("no audio-track items"));
   });
 
   it("cancels queued renders", () => {
@@ -760,6 +927,45 @@ describe("renders", () => {
         onProgress: (p) => seen.push(p),
         isCancelled: () => false,
       });
+      assertEquals(flat(seen), [5, 10, 50, 90, 100]);
+    });
+
+    it("routes wav plans to the audio path", async () => {
+      // Same progress band as the fx path (base 10), not the concat fast
+      // path — and with no video items at all.
+      const script = writeFakeFfmpeg(progressScript);
+      const seen: number[] = [];
+      const engine = new FfmpegRenderEngine(script);
+      await engine.render(
+        planFor(
+          {},
+          {
+            output_path: join(appData, "out.wav"),
+            filename: "out.wav",
+            format: "wav",
+            items: [],
+            audio_items: [
+              {
+                file_path: "/tmp/fake_in.wav",
+                source: "master",
+                start_time: 0,
+                end_time: 5,
+                duration: 5,
+                source_offset: 0,
+                source_duration: 5,
+                speed: 1,
+                gain: 1,
+                fade_in: 0,
+                fade_out: 0,
+              },
+            ],
+          },
+        ),
+        {
+          onProgress: (p) => seen.push(p),
+          isCancelled: () => false,
+        },
+      );
       assertEquals(flat(seen), [5, 10, 50, 90, 100]);
     });
 
