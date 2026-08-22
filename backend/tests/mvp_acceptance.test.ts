@@ -536,8 +536,11 @@ async function p05Assets() {
   s.musicAssetId = requireField(audio.body!.asset as Body, "id");
   s.musicVersionId = requireField(audio.body!.version as Body, "id");
   const audioMeta = (audio.body!.audio ?? null) as Body | null;
-  if (audioMeta !== null) {
-    const duration = audioMeta.duration as number;
+  if (
+    audioMeta !== null &&
+    typeof audioMeta.duration === "number"
+  ) {
+    const duration = audioMeta.duration;
     assertGreater(duration, 1.8);
     assert(duration < 2.2);
   }
