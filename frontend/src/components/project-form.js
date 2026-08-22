@@ -50,6 +50,18 @@ export class ProjectForm extends LitElement {
       width: 100%;
       margin-bottom: 0;
       background-color: var(--color-bg);
+      color: var(--color-text);
+      caret-color: var(--color-text);
+    }
+
+    .form-group input::placeholder,
+    .form-group textarea::placeholder {
+      color: var(--color-text-muted);
+    }
+
+    .form-group select option {
+      color: var(--color-text);
+      background-color: var(--color-surface);
     }
 
     .form-group textarea {
