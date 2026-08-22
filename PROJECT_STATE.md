@@ -229,13 +229,24 @@ The product track follows `MASTER-PLAN.md`.
       shared with the waveform + preview paths), clears a stale selection when the track changes,
       and prefills the placement duration from the selected version's ffprobe audio metadata (also
       fixed the picker's blank option labels, which read `a.name` instead of `display_name`)
+- [x] Timeline video thumbnails (STO-007..008 / Workstream 12):
+      `GET
+      /api/v1/assets/:id/versions/:versionId/thumbnail` generates a cached JPEG per
+      version and geometry: video = one frame at `?at=<sec>` (input seek, quantized to 100 ms),
+      images scaled down to `?w=<px>` (clamped 64..1280, default 320), via ffmpeg. Files land in
+      `appDataDir/assets/thumbnails/` under a deterministic `version-at-width` name, so repeated
+      requests are a `stat`; 404 for audio versions or missing files, 400 for a bad `at`, 503 when
+      ffmpeg is unavailable, 502 when extraction fails (stderr in the error details, 30 s spawn
+      timeout). The timeline editor now draws a film strip inside video/overlay items: the
+      unit-tested pure `filmstripFramesFor` (one frame per ~2 s of span, at most 4, in source time
+      at 100 ms — the same speed/offset math as the preview) feeds `api.getAssetThumbnailUrl`, whose
+      blob URLs are cached per version+seek and revoked on unmount; failed fetches leave the item as
+      a plain color block
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Thumbnails in the timeline view (STO-007..008) — waveforms now ship with phase 7, asset
-      proxies with the proxy workflow above
 - [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
       snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),

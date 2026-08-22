@@ -2,6 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { jobEvents } from "../job-events.js";
 import { detailToState, UndoHistory } from "../undo-history.js";
+import { filmstripFramesFor } from "../timeline-playback.js";
 import { parseAudioMetadata } from "../audio-adjustments.js";
 import "./audio-dialog.js";
 
@@ -15,6 +16,7 @@ const AUDIO_TRACK_TYPES = [
   "sfx",
   "ambience",
 ];
+const VISUAL_TRACK_TYPES = ["video", "overlay"];
 const TRACK_TYPES = [
   "video",
   "overlay",
@@ -312,12 +314,35 @@ export class TimelineDetail extends LitElement {
       margin-left: 8px;
     }
 
+    .item .filmstrip {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      gap: 1px;
+      background: rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+    }
+
+    .item .filmstrip img,
+    .item .filmstrip .filmstrip-slot {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 100%;
+      display: block;
+    }
+
+    .item .filmstrip img {
+      object-fit: cover;
+    }
+
     .track-lane.locked .item {
       cursor: not-allowed;
       opacity: 0.65;
     }
 
     .item-label {
+      position: relative;
+      z-index: 1;
       font-size: 11px;
       color: white;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
@@ -549,6 +574,7 @@ export class TimelineDetail extends LitElement {
     audioAssets: { state: true },
     clipNames: { state: true },
     waveforms: { state: true },
+    thumbUrls: { state: true },
     showAudioGen: { state: true },
     loading: { state: true },
     error: { state: true },
@@ -595,6 +621,8 @@ export class TimelineDetail extends LitElement {
     this.audioAssets = [];
     this.clipNames = new Map();
     this.waveforms = new Map();
+    this.thumbUrls = new Map();
+    this.thumbFailed = new Set();
     this.showAudioGen = false;
     this.loading = false;
     this.error = "";
@@ -652,6 +680,9 @@ export class TimelineDetail extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback?.();
+    for (const url of this.thumbUrls.values()) URL.revokeObjectURL(url);
+    this.thumbUrls = new Map();
+    this.thumbFailed = new Set();
     this._stopRenderPolling();
     this._unsubscribeEvents?.();
     this._unsubscribeEvents = null;
@@ -686,6 +717,7 @@ export class TimelineDetail extends LitElement {
       this._buildClipNames();
       this._loadAudioWaveforms();
       this._buildPreviewVersions();
+      this._loadFilmstrips();
       if (this.placeTrackId && !this._trackById(this.placeTrackId)) {
         this.placeTrackId = this.tracks[0]?.id ?? "";
       }
@@ -856,6 +888,47 @@ export class TimelineDetail extends LitElement {
       pts.push(`${x.toFixed(2)},${(12 + amp).toFixed(2)}`);
     }
     return pts.join(" ");
+  }
+
+  /**
+   * Fetch filmstrip thumbnails for video items on active/preview versions.
+   * Resolved blob: URLs stay in this.thumbUrls across _load re-runs; failures
+   * are remembered in this.thumbFailed so the item keeps its color block.
+   */
+  _loadFilmstrips() {
+    if (this.tracks.length === 0) return;
+    const wanted = new Map();
+    for (const track of this.tracks) {
+      if (!VISUAL_TRACK_TYPES.includes(track.track_type)) continue;
+      for (const item of track.items) {
+        if (!item.asset_version_id) continue;
+        const info = this.previewVersions.get(item.asset_version_id);
+        if (!info || info.assetType !== "video") continue;
+        for (const at of filmstripFramesFor(item)) {
+          const key = `${item.asset_version_id}@${at}`;
+          if (!this.thumbUrls.has(key) && !this.thumbFailed.has(key)) {
+            wanted.set(key, {
+              assetId: info.assetId,
+              versionId: item.asset_version_id,
+              at,
+            });
+          }
+        }
+      }
+    }
+    if (wanted.size === 0) return;
+    let pending = wanted.size;
+    const settle = () => {
+      pending -= 1;
+      if (pending <= 0 && this.isConnected) this.requestUpdate();
+    };
+    for (const [key, ref] of wanted) {
+      api
+        .getAssetThumbnailUrl(ref.assetId, ref.versionId, ref.at)
+        .then(({ url }) => this.thumbUrls.set(key, url))
+        .catch(() => this.thumbFailed.add(key))
+        .finally(settle);
+    }
   }
 
   _trackById(id) {
@@ -1751,6 +1824,29 @@ export class TimelineDetail extends LitElement {
     return "empty item";
   }
 
+  _filmstripFor(item, track) {
+    if (
+      !item.asset_version_id ||
+      !VISUAL_TRACK_TYPES.includes(track.track_type)
+    ) {
+      return null;
+    }
+    const info = this.previewVersions.get(item.asset_version_id);
+    if (!info || info.assetType !== "video") return null;
+    const frames = filmstripFramesFor(item);
+    if (frames.length === 0) return null;
+    return html`
+      <div class="filmstrip" aria-hidden="true">
+        ${frames.map((at) => {
+          const url = this.thumbUrls.get(`${item.asset_version_id}@${at}`);
+          return url
+            ? html`<img src=${url} alt="" draggable="false">`
+            : html`<span class="filmstrip-slot"></span>`;
+        })}
+      </div>
+    `;
+  }
+
   _renderItem(item, track, color) {
     const start = this.dragPreview !== null &&
         this.selectedItemId === item.id
@@ -1772,6 +1868,7 @@ export class TimelineDetail extends LitElement {
         title="${this._itemLabel(item)} · ${this._formatTime(
           item.start_time,
         )} → ${this._formatTime(item.end_time)}">
+        ${this._filmstripFor(item, track)}
         <span class="item-label">${this._itemLabel(item)}</span>
         ${showWave
           ? html`

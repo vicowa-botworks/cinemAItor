@@ -30,6 +30,16 @@ import { mediaTypeFor } from "@cinemaItor/storage/media_types.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
 import { queueProxyGeneration } from "@cinemaItor/services/job_runner.ts";
 import {
+  clampThumbnailWidth,
+  generateThumbnail,
+  quantizeTimestamp,
+  THUMBNAIL_WIDTH_DEFAULT,
+  thumbnailCachePath,
+  ThumbnailGenerationError,
+  thumbnailKindFor,
+  ThumbnailUnavailableError,
+} from "@cinemaItor/services/thumbnails.ts";
+import {
   AppError,
   badRequest,
   ERROR_CODES,
@@ -456,6 +466,85 @@ export const assetRouter = new Router()
     ctx.response.headers.set("content-length", String(stat.size));
     ctx.response.body = file.readable;
   })
+  .get(
+    "/api/v1/assets/:id/versions/:versionId/thumbnail",
+    authMiddleware,
+    async (ctx, _next) => {
+      const userId = requireUserId(ctx);
+      const asset = getAssetAccessible(ctx.params.id, userId);
+      if (!asset) throw notFound("Asset not found");
+
+      const version = getAssetVersion(ctx.params.versionId);
+      if (!version || version.asset_id !== asset.id) {
+        throw notFound("Version not found");
+      }
+      if (!version.file_path) throw notFound("Version has no stored file");
+
+      const kind = thumbnailKindFor(version.mime_type, asset.asset_type);
+      if (!kind) throw notFound("This media type has no thumbnails");
+
+      const params = ctx.request.url.searchParams;
+      const atRaw = params.get("at");
+      const at = atRaw === null || atRaw === "" ? 0 : Number(atRaw);
+      if (!Number.isFinite(at) || at < 0) {
+        throw badRequest("at must be a non-negative number of seconds");
+      }
+      const widthRaw = params.get("w");
+      const width = clampThumbnailWidth(
+        widthRaw === null ? THUMBNAIL_WIDTH_DEFAULT : Number(widthRaw),
+      );
+      const atQuantized = quantizeTimestamp(at);
+
+      const config = loadConfig();
+      const cachePath = thumbnailCachePath(
+        config.appDataDir,
+        version.id,
+        atQuantized,
+        width,
+      );
+      const cachedStat = await Deno.stat(cachePath).catch(() => null);
+      const cached = cachedStat !== null && cachedStat.isFile;
+      if (!cached) {
+        try {
+          await generateThumbnail({
+            sourcePath: version.file_path,
+            kind,
+            atSec: atQuantized,
+            width,
+            outPath: cachePath,
+          });
+        } catch (error) {
+          if (error instanceof ThumbnailUnavailableError) {
+            throw new AppError(ERROR_CODES.INTERNAL, error.message, {
+              status: 503,
+            });
+          }
+          if (error instanceof ThumbnailGenerationError) {
+            throw new AppError(
+              ERROR_CODES.GENERATION_FAILED,
+              "Thumbnail generation failed",
+              { status: 502, details: error.stderr },
+            );
+          }
+          throw error;
+        }
+      }
+
+      const file = await Deno.open(cachePath).catch(() => {
+        throw new AppError(
+          ERROR_CODES.MISSING_FILE,
+          "Thumbnail file is missing from storage",
+          { status: 404 },
+        );
+      });
+      const stat = await file.stat();
+      ctx.response.status = 200;
+      ctx.response.headers.set("content-type", "image/jpeg");
+      ctx.response.headers.set("content-length", String(stat.size));
+      ctx.response.headers.set("cache-control", "private, max-age=86400");
+      ctx.response.body = file.readable;
+    },
+  )
   .get("/api/v1/assets/:id/versions/:versionId/proxy", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
     const asset = getAssetAccessible(ctx.params.id, userId);

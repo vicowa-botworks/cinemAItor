@@ -6,6 +6,7 @@ import {
   activeVisual,
   audioVolumeFor,
   fadeFactorAt,
+  filmstripFramesFor,
   gradeFilter,
   itemAt,
   playbackRange,
@@ -220,5 +221,85 @@ describe("playbackRange", () => {
   it("parses a valid range (also from numbers)", () => {
     assertEquals(playbackRange("1", "4"), { from: 1, to: 4 });
     assertEquals(playbackRange(1, 4), { from: 1, to: 4 });
+  });
+});
+
+describe("filmstripFramesFor", () => {
+  it("returns [] without a media version or with no span", () => {
+    assertEquals(filmstripFramesFor(null), []);
+    assertEquals(
+      filmstripFramesFor({ asset_version_id: null, start_time: 0, end_time: 3 }),
+      [],
+    );
+    assertEquals(
+      filmstripFramesFor({ asset_version_id: "v1", start_time: 2, end_time: 2 }),
+      [],
+    );
+  });
+
+  it("gives short items a single frame at their midpoint", () => {
+    const item = {
+      asset_version_id: "v1",
+      start_time: 4,
+      end_time: 5,
+      speed: 1,
+      source_offset: 0,
+    };
+    // Timeline 4–5 maps to source 0–1, so the frame is sought at 0.5s.
+    assertEquals(filmstripFramesFor(item), [0.5]);
+  });
+
+  it("samples one frame every ~2s of span in source time", () => {
+    const item = {
+      asset_version_id: "v1",
+      start_time: 0,
+      end_time: 8,
+      speed: 1,
+      source_offset: 0,
+    };
+    assertEquals(filmstripFramesFor(item), [1, 3, 5, 7]);
+  });
+
+  it("honors speed and source_offset when mapping to source time", () => {
+    const item = {
+      asset_version_id: "v1",
+      start_time: 10,
+      end_time: 15,
+      speed: 2,
+      source_offset: 1,
+    };
+    assertEquals(filmstripFramesFor(item), [2.7, 6, 9.3]);
+  });
+
+  it("quantizes to 100 ms of source time without going negative", () => {
+    // 0.125s span -> one frame at 0.0625 -> quantizes to 0.1
+    const item = {
+      asset_version_id: "v1",
+      start_time: 0,
+      end_time: 0.125,
+      speed: 1,
+      source_offset: 0,
+    };
+    assertEquals(filmstripFramesFor(item), [0.1]);
+    // 0.04s span -> frame at 0.02 -> quantizes to 0 (clamped, never < 0)
+    const short = {
+      asset_version_id: "v2",
+      start_time: 0,
+      end_time: 0.04,
+      speed: 1,
+      source_offset: 0,
+    };
+    assertEquals(filmstripFramesFor(short), [0]);
+  });
+
+  it("respects maxFrames", () => {
+    const item = {
+      asset_version_id: "v1",
+      start_time: 0,
+      end_time: 20,
+      speed: 1,
+      source_offset: 0,
+    };
+    assertEquals(filmstripFramesFor(item, 2), [5, 15]);
   });
 });
