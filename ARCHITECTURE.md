@@ -149,6 +149,7 @@ server.ts (entry point)
 │   └── DELETE /:id (soft delete)
 ├── Asset routes (/api/v1/assets/*, auth middleware)
 │   ├── CRUD + upload + versions + restore + aliases + tags + preview
+│   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)

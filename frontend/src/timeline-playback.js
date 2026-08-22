@@ -29,6 +29,29 @@ export function sourceTimeAt(item, t) {
 }
 
 /**
+ * Source times to fetch as filmstrip thumbnails for a timeline item.
+ * One frame every ~2 s of item span (clamped to [1, maxFrames]), sampled at
+ * the sub-span midpoints, expressed in source seconds and quantized to 100 ms
+ * (matching the server-side thumbnail cache key). Returns [] for items that
+ * have no media version.
+ */
+export function filmstripFramesFor(item, maxFrames = 4) {
+  if (!item || !item.asset_version_id) return [];
+  const start = Number(item.start_time) || 0;
+  const end = Number(item.end_time) || 0;
+  if (!(end > start)) return [];
+  const span = end - start;
+  const frames = Math.min(Math.max(1, maxFrames), Math.max(1, Math.round(span / 2)));
+  const out = [];
+  for (let k = 0; k < frames; k++) {
+    const t = start + ((k + 0.5) * span) / frames;
+    const at = sourceTimeAt(item, t);
+    out.push(Math.max(0, Math.round(at * 10) / 10));
+  }
+  return out;
+}
+
+/**
  * Fade factor (0..1) at timeline time t across the item span, combining
  * fade_in (from the item start) and fade_out (toward the item end).
  */

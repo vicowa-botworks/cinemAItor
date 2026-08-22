@@ -856,6 +856,37 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("getAssetThumbnailUrl", () => {
+    function mockFetch(url, type = "image/jpeg", label = "jpg") {
+      globalThis.fetch = async (input) => {
+        url.value = String(input);
+        const blob = new Blob([label], { type });
+        return { ok: true, status: 200, blob: async () => blob };
+      };
+    }
+
+    it("requests the version thumbnail endpoint with quantized at and width", async () => {
+      const url = { value: "" };
+      mockFetch(url);
+      const media = await api.getAssetThumbnailUrl("a-1", "v-1", 2.54, 640);
+      assert(media.url.startsWith("blob:"));
+      assertEquals(media.type, "image/jpeg");
+      assert(url.value.includes("/assets/a-1/versions/v-1/thumbnail?at=2.5&w=640"));
+      URL.revokeObjectURL(media.url);
+    });
+
+    it("normalizes negative and non-numeric at to 0 and defaults width", async () => {
+      const url = { value: "" };
+      mockFetch(url);
+      const m1 = await api.getAssetThumbnailUrl("a-1", "v-1", -3);
+      assert(url.value.endsWith("/thumbnail?at=0.0&w=320"));
+      URL.revokeObjectURL(m1.url);
+      const m2 = await api.getAssetThumbnailUrl("a-1", "v-1", "garbage");
+      assert(url.value.endsWith("/thumbnail?at=0.0&w=320"));
+      URL.revokeObjectURL(m2.url);
+    });
+  });
+
   describe("error handling", () => {
     it("throws ApiError with server message and status", async () => {
       globalThis.fetch = async () => jsonResponse({ error: "Invalid credentials" }, 401);

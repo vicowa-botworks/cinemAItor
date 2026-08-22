@@ -238,6 +238,25 @@ class ApiClient {
     );
   }
 
+  /**
+   * Fetch a version thumbnail (server-generated JPEG: one frame at `at`
+   * seconds, scaled to `width` px) and resolve it to a blob: URL. `at` is
+   * quantized to 100 ms to match the server cache key. The caller owns the
+   * URL and must revoke it when done.
+   */
+  getAssetThumbnailUrl(id, versionId, at = 0, width = 320) {
+    const safeAt = Math.max(0, Number(at) || 0);
+    const params = new URLSearchParams({
+      at: safeAt.toFixed(1),
+      w: String(Math.round(width)),
+    });
+    return this.fetchMediaUrl(
+      `/assets/${encodeURIComponent(id)}/versions/${
+        encodeURIComponent(versionId)
+      }/thumbnail?${params}`,
+    );
+  }
+
   regenerateAssetProxy(id, versionId) {
     return this.request(
       `/assets/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/proxy`,

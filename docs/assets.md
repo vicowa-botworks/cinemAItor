@@ -43,27 +43,44 @@ and audit logs.
 - `POST .../proxy` regenerates a version's proxy (a fresh job, re-linking `proxy_path` on success);
   `GET .../proxy` streams the proxy file (404 until the job has produced one).
 
+## Thumbnails
+
+- `GET .../thumbnail` generates a small JPEG of a version for quick visual previews (the timeline
+  editor's film strips):
+  - **Video**: one frame at `?at=<seconds>` (default `0`), input-seeked (`-ss` before `-i`) so any
+    seek point costs the same sub-second extraction; the request time is quantized to 100 ms.
+  - **Image**: scaled down to `?w=<width>` px (clamped 64..1280, default 320, height kept
+    proportional via `force_original_aspect_ratio=decrease` plus the `-2` even-dimension rule).
+- Output is cached at `appDataDir/assets/thumbnails/<version>-<at>-<w>.jpg` (same root as the
+  content store, `APP_DATA_DIR`), so a repeated request for the same frame and width is a `stat`
+  plus a file read — no ffmpeg re-run; responses carry `cache-control: private, max-age=86400`.
+- Errors: `404` for audio versions (no image to show) and versions without a stored file, `400` for
+  a negative/non-numeric `at`, `503` when ffmpeg is unavailable (`FFMPEG_PATH`/PATH probe), `502`
+  when the extraction itself fails (ffmpeg stderr in the error details; generation is force-killed
+  after 30 s). Generated thumbnails carry no provenance row — they are derived, not uploaded, files.
+
 ## Endpoints
 
-| Method | Endpoint                                         | Description                                |
-| ------ | ------------------------------------------------ | ------------------------------------------ |
-| GET    | `/api/v1/assets`                                 | List assets (filter + search)              |
-| POST   | `/api/v1/assets`                                 | Create an asset                            |
-| GET    | `/api/v1/assets/:id`                             | Asset detail (aliases, tags, active v.)    |
-| PATCH  | `/api/v1/assets/:id`                             | Update metadata or status                  |
-| DELETE | `/api/v1/assets/:id`                             | Soft-delete (with reference warnings)      |
-| POST   | `/api/v1/assets/:id/upload`                      | Multipart upload, creates a version        |
-| GET    | `/api/v1/assets/:id/versions`                    | List versions (newest first)               |
-| POST   | `/api/v1/assets/:id/versions`                    | Register a version from a stored hash      |
-| GET    | `/api/v1/assets/:id/versions/:versionId`         | Get one version                            |
-| POST   | `/api/v1/assets/:id/versions/:versionId/restore` | Restore an older version                   |
-| GET    | `/api/v1/assets/:id/versions/:versionId/proxy`   | Stream the version's proxy file            |
-| POST   | `/api/v1/assets/:id/versions/:versionId/proxy`   | Regenerate the version's proxy (fresh job) |
-| POST   | `/api/v1/assets/:id/aliases`                     | Add an alias `@name`                       |
-| DELETE | `/api/v1/assets/:id/aliases/:aliasSlug`          | Remove an alias                            |
-| POST   | `/api/v1/assets/:id/tags`                        | Add a tag                                  |
-| DELETE | `/api/v1/assets/:id/tags/:tag`                   | Remove a tag                               |
-| GET    | `/api/v1/assets/:id/preview`                     | Stream the active version's file           |
+| Method | Endpoint                                           | Description                                                     |
+| ------ | -------------------------------------------------- | --------------------------------------------------------------- |
+| GET    | `/api/v1/assets`                                   | List assets (filter + search)                                   |
+| POST   | `/api/v1/assets`                                   | Create an asset                                                 |
+| GET    | `/api/v1/assets/:id`                               | Asset detail (aliases, tags, active v.)                         |
+| PATCH  | `/api/v1/assets/:id`                               | Update metadata or status                                       |
+| DELETE | `/api/v1/assets/:id`                               | Soft-delete (with reference warnings)                           |
+| POST   | `/api/v1/assets/:id/upload`                        | Multipart upload, creates a version                             |
+| GET    | `/api/v1/assets/:id/versions`                      | List versions (newest first)                                    |
+| POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                           |
+| GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                 |
+| POST   | `/api/v1/assets/:id/versions/:versionId/restore`   | Restore an older version                                        |
+| GET    | `/api/v1/assets/:id/versions/:versionId/proxy`     | Stream the version's proxy file                                 |
+| GET    | `/api/v1/assets/:id/versions/:versionId/thumbnail` | Cached JPEG thumbnail (`?at=`, `?w=`) for video frames / images |
+| POST   | `/api/v1/assets/:id/versions/:versionId/proxy`     | Regenerate the version's proxy (fresh job)                      |
+| POST   | `/api/v1/assets/:id/aliases`                       | Add an alias `@name`                                            |
+| DELETE | `/api/v1/assets/:id/aliases/:aliasSlug`            | Remove an alias                                                 |
+| POST   | `/api/v1/assets/:id/tags`                          | Add a tag                                                       |
+| DELETE | `/api/v1/assets/:id/tags/:tag`                     | Remove a tag                                                    |
+| GET    | `/api/v1/assets/:id/preview`                       | Stream the active version's file                                |
 
 List filters (query params): `project_id`, `library_scope`, `asset_type`, `status`, `tag`, and `q`
 (case-insensitive match on slug, display name, and description).
