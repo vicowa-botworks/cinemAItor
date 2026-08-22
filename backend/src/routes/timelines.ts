@@ -38,6 +38,7 @@ import {
   validateItemFx,
   validatePlacement,
   validateTextOverlay,
+  validateVersionForTrack,
 } from "@cinemaItor/db/timelines.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
@@ -299,11 +300,15 @@ function parseStateItem(
   if (!(ITEM_STATUSES as readonly string[]).includes(status)) {
     throw badRequest(`${label}.status must be one of: ${ITEM_STATUSES.join(", ")}`);
   }
+  const asset_version_id = optionalNullableString(o, "asset_version_id") ?? null;
+  if (asset_version_id !== null) {
+    validateVersionForTrack(track.track_type, asset_version_id);
+  }
   return {
     id: requireString(o, "id", label),
     timeline_id: timelineId,
     track_id: trackId,
-    asset_version_id: optionalNullableString(o, "asset_version_id") ?? null,
+    asset_version_id,
     item_text: item_text ?? null,
     text_style: text_style ?? null,
     start_time,

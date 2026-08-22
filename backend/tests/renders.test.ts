@@ -516,15 +516,27 @@ describe("renders", () => {
 
   it("renders audio-track items end to end (deterministic mock mix)", async () => {
     const db = getDb();
-    const firstRow = db
-      .prepare(
-        "SELECT id FROM asset_versions WHERE asset_id = ? ORDER BY version_number DESC LIMIT 1",
-      )
-      .get(mediaAssetId) as { id: string };
     const music = createTrack(ownerId, timelineId, { track_type: "music", name: "M1" });
+    const musicAsset = createAsset(
+      {
+        unique_slug: "score",
+        display_name: "Score",
+        asset_type: "audio",
+        library_scope: "global",
+      },
+      ownerId,
+    );
+    const musicVersionId = createAssetVersion(musicAsset.id, ownerId, {
+      content_hash: "9".repeat(64),
+      file_path: "/tmp/score.wav",
+      format: "wav",
+      mime_type: "audio/wav",
+      file_size: 4000,
+      make_active: true,
+    }).id;
     createItem(ownerId, timelineId, {
       track_id: music.id,
-      asset_version_id: firstRow.id,
+      asset_version_id: musicVersionId,
       start_time: 0,
       end_time: 2,
       source_offset: 0.25,

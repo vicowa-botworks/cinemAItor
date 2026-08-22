@@ -2,6 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { jobEvents } from "../job-events.js";
 import { detailToState, UndoHistory } from "../undo-history.js";
+import { parseAudioMetadata } from "../audio-adjustments.js";
 import "./audio-dialog.js";
 
 const SCALE = 60;
@@ -545,6 +546,7 @@ export class TimelineDetail extends LitElement {
     presets: { state: true },
     exports: { state: true },
     assets: { state: true },
+    audioAssets: { state: true },
     clipNames: { state: true },
     waveforms: { state: true },
     showAudioGen: { state: true },
@@ -590,6 +592,7 @@ export class TimelineDetail extends LitElement {
     this.presets = [];
     this.exports = [];
     this.assets = [];
+    this.audioAssets = [];
     this.clipNames = new Map();
     this.waveforms = new Map();
     this.showAudioGen = false;
@@ -677,6 +680,9 @@ export class TimelineDetail extends LitElement {
       this.assets = await api
         .listAssets({ project_id: detail.timeline.project_id })
         .catch(() => []);
+      // Generated audio is global-scoped; fetch it once and share it across
+      // the waveforms, preview versions, and the item placement picker.
+      this.audioAssets = await api.listAudioAssets().catch(() => []);
       this._buildClipNames();
       this._loadAudioWaveforms();
       this._buildPreviewVersions();
@@ -686,6 +692,7 @@ export class TimelineDetail extends LitElement {
       if (!this.placeTrackId && this.tracks.length > 0) {
         this.placeTrackId = this.tracks[0].id;
       }
+      this._prunePlaceAsset();
       this.snapshots = await api
         .listTimelineSnapshots(this._timelineId)
         .catch(() => []);
@@ -797,10 +804,7 @@ export class TimelineDetail extends LitElement {
       }
     };
     for (const asset of this.assets) add(asset);
-    const audioAssets = await api
-      .listAudioAssets()
-      .catch(() => []);
-    for (const asset of audioAssets) {
+    for (const asset of this.audioAssets ?? []) {
       if (!this.assets.some((a) => a.id === asset.id)) add(asset);
     }
     this.previewVersions = map;
@@ -820,24 +824,13 @@ export class TimelineDetail extends LitElement {
     }
     // Version ids only identify the asset via the asset lists; generated
     // audio is global-scoped, so include the audio asset list as well.
-    let versionAsset = new Map();
-    for (const asset of this.assets) {
-      if (asset.active_version_id && versionIds.has(asset.active_version_id)) {
+    const versionAsset = new Map();
+    for (const asset of [...this.assets, ...(this.audioAssets ?? [])]) {
+      if (
+        asset.active_version_id && versionIds.has(asset.active_version_id) &&
+        !versionAsset.has(asset.active_version_id)
+      ) {
         versionAsset.set(asset.active_version_id, asset.id);
-      }
-    }
-    if (versionAsset.size < versionIds.size) {
-      const audioAssets = await api
-        .listAudioAssets()
-        .catch(() => []);
-      for (const asset of audioAssets) {
-        if (
-          asset.active_version_id &&
-          versionIds.has(asset.active_version_id) &&
-          !versionAsset.has(asset.active_version_id)
-        ) {
-          versionAsset.set(asset.active_version_id, asset.id);
-        }
       }
     }
     const targets = [...versionAsset.entries()];
@@ -1034,6 +1027,55 @@ export class TimelineDetail extends LitElement {
     this.placeStart = String(this.playhead);
   }
 
+  // Assets the placement picker offers for the selected track. Video/overlay
+  // tracks only accept video assets, audio tracks only audio assets (project
+  // assets plus global generated audio), and the reserved track types
+  // (effect/transition) accept either.
+  _placeableAssets() {
+    const track = this._trackById(this.placeTrackId);
+    if (!track || isTextTrack(track)) return [];
+    const isAudio = AUDIO_TRACK_TYPES.includes(track.track_type);
+    const isVideo = track.track_type === "video" || track.track_type === "overlay";
+    const kinds = isAudio
+      ? new Set(["audio"])
+      : isVideo
+      ? new Set(["video"])
+      : new Set(["video", "audio"]);
+    const out = this.assets.filter((a) => kinds.has(a.asset_type));
+    if (isAudio) {
+      for (const a of this.audioAssets ?? []) {
+        if (a.asset_type === "audio" && !out.some((x) => x.id === a.id)) {
+          out.push(a);
+        }
+      }
+    }
+    return out;
+  }
+
+  // Drop the selected asset/version when the track changed and it no longer
+  // matches the track's kind.
+  _prunePlaceAsset() {
+    if (
+      this.placeAssetId &&
+      !this._placeableAssets().some((a) => a.id === this.placeAssetId)
+    ) {
+      this.placeAssetId = "";
+      this.placeVersions = [];
+      this.placeVersionId = "";
+    }
+  }
+
+  // Prefill the placement duration with the audio source's length when the
+  // selected version carries ffprobe metadata.
+  _prefillDurationFromVersion(version) {
+    if (!version) return;
+    const audio = parseAudioMetadata(version.technical_metadata_json);
+    const duration = Number(audio?.duration);
+    if (Number.isFinite(duration) && duration > 0) {
+      this.placeDuration = String(round2(duration));
+    }
+  }
+
   async _onPlaceAsset() {
     this.placeVersions = [];
     this.placeVersionId = "";
@@ -1042,6 +1084,7 @@ export class TimelineDetail extends LitElement {
     try {
       this.placeVersions = await api.listAssetVersions(this.placeAssetId);
       this.placeVersionId = this.placeVersions[0]?.id ?? "";
+      this._prefillDurationFromVersion(this.placeVersions[0]);
     } catch (e) {
       this.placeError = e.message ?? "Failed to load versions.";
     } finally {
@@ -2072,7 +2115,10 @@ export class TimelineDetail extends LitElement {
           <label>Track</label>
           <select
             .value=${this.placeTrackId}
-            @change=${(e) => (this.placeTrackId = e.target.value)}>
+            @change=${(e) => {
+              this.placeTrackId = e.target.value;
+              this._prunePlaceAsset();
+            }}>
             ${this.tracks.map(
               (t) => html`<option value=${t.id}>${t.name} (${t.track_type})</option>`,
             )}
@@ -2117,8 +2163,8 @@ export class TimelineDetail extends LitElement {
                   this._onPlaceAsset();
                 }}>
                 <option value="">choose…</option>
-                ${this.assets.map(
-                  (a) => html`<option value=${a.id}>${a.name}</option>`,
+                ${this._placeableAssets().map(
+                  (a) => html`<option value=${a.id}>${a.display_name}</option>`,
                 )}
               </select>
             </div>
@@ -2127,7 +2173,12 @@ export class TimelineDetail extends LitElement {
               <select
                 .value=${this.placeVersionId}
                 ?disabled=${!this.placeAssetId || this.placeVersionLoading}
-                @change=${(e) => (this.placeVersionId = e.target.value)}>
+                @change=${(e) => {
+                  this.placeVersionId = e.target.value;
+                  this._prefillDurationFromVersion(
+                    this.placeVersions.find((v) => v.id === e.target.value),
+                  );
+                }}>
                 ${this.placeVersionLoading
                   ? html`<option>loading…</option>`
                   : this.placeVersions.map(

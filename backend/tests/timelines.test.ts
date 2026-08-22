@@ -222,6 +222,92 @@ describe("timeline editor", () => {
     assertEquals(getTimeline(tl.id, ownerId)?.duration, 24);
   });
 
+  it("matches asset kind to track type group on create, update and move", () => {
+    const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
+    const videoTrack = createTrack(ownerId, tl.id, { track_type: "video", name: "V" });
+    const musicTrack = createTrack(ownerId, tl.id, {
+      track_type: "music",
+      name: "M",
+    });
+    const audioAsset = createAsset(
+      {
+        unique_slug: "theme",
+        display_name: "Theme",
+        asset_type: "audio",
+        library_scope: "project",
+        project_id: projectId,
+      },
+      ownerId,
+    );
+    const audioVersionId = createAssetVersion(audioAsset.id, ownerId, {
+      content_hash: "e".repeat(64),
+      file_path: "/tmp/theme.wav",
+      format: "wav",
+      mime_type: "audio/wav",
+      file_size: 2000,
+      make_active: true,
+    }).id;
+
+    // Matching kinds are accepted on both groups.
+    const videoItem = createItem(ownerId, tl.id, {
+      track_id: videoTrack.id,
+      asset_version_id: versionId,
+      start_time: 0,
+      end_time: 2,
+    });
+    const audioItem = createItem(ownerId, tl.id, {
+      track_id: musicTrack.id,
+      asset_version_id: audioVersionId,
+      start_time: 0,
+      end_time: 8,
+    });
+
+    // Mismatching kinds are rejected with a readable reason.
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: videoTrack.id,
+          asset_version_id: audioVersionId,
+          start_time: 10,
+          end_time: 12,
+        }),
+      Error,
+      'video tracks need video assets, but "Theme" is audio',
+    );
+    assertThrows(
+      () =>
+        createItem(ownerId, tl.id, {
+          track_id: musicTrack.id,
+          asset_version_id: versionId,
+          start_time: 10,
+          end_time: 12,
+        }),
+      Error,
+      'music tracks need audio assets, but "Clip" is video',
+    );
+
+    // Moving an item onto a mismatched track is rejected as well.
+    assertThrows(
+      () => updateItem(ownerId, tl.id, audioItem.id, { track_id: videoTrack.id }),
+      Error,
+      'video tracks need video assets, but "Theme" is audio',
+    );
+    assertThrows(
+      () => updateItem(ownerId, tl.id, videoItem.id, { track_id: musicTrack.id }),
+      Error,
+      'music tracks need audio assets, but "Clip" is video',
+    );
+
+    // Reserved track types (effect/transition) stay unconstrained.
+    const fxTrack = createTrack(ownerId, tl.id, { track_type: "effect", name: "FX" });
+    createItem(ownerId, tl.id, {
+      track_id: fxTrack.id,
+      asset_version_id: audioVersionId,
+      start_time: 0,
+      end_time: 1,
+    });
+  });
+
   it("refuses item writes on locked tracks", () => {
     const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
     const track = createTrack(ownerId, tl.id, { track_type: "video", name: "V" });
@@ -495,9 +581,26 @@ describe("timeline editor", () => {
 
     // Diverge.
     const track2 = createTrack(ownerId, tl.id, { track_type: "music", name: "M" });
+    const soundAsset = createAsset(
+      {
+        unique_slug: "score",
+        display_name: "Score",
+        asset_type: "audio",
+        library_scope: "global",
+      },
+      ownerId,
+    );
+    const soundVersionId = createAssetVersion(soundAsset.id, ownerId, {
+      content_hash: "a".repeat(64),
+      file_path: "/tmp/score.wav",
+      format: "wav",
+      mime_type: "audio/wav",
+      file_size: 4000,
+      make_active: true,
+    }).id;
     const item2 = createItem(ownerId, tl.id, {
       track_id: track2.id,
-      asset_version_id: versionId,
+      asset_version_id: soundVersionId,
       start_time: 3,
       end_time: 6,
     });

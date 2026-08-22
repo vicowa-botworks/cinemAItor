@@ -52,6 +52,23 @@ to) an asset version; it is drawn as a video overlay at render time (`drawtext`)
 All endpoints require authentication and follow project permissions (read for fetches, write for
 mutations).
 
+## Media kind matching (audio tracks)
+
+A placed item's asset must match the kind of media its track holds. Enforced on item create, item
+update, and full-state restore alike (400 on mismatch):
+
+- `video`/`overlay` tracks accept only **video** assets,
+- `dialogue`/`voiceover`/`music`/`sfx`/`ambience` tracks accept only **audio** assets (without the
+  check, an audio clip placed on a video track — or a video on a music track — would silently vanish
+  from the render output),
+- `text`/`subtitle` tracks are unaffected (text overlays), and the reserved `effect`/`transition`
+  track types accept any media until they gain dedicated semantics.
+
+The editor's placement picker mirrors the rule: only matching assets are offered for the selected
+track (plus globally generated audio for audio tracks); switching to an incompatible track clears a
+stale selection, and choosing a version with ffprobe audio metadata prefills the placement duration
+with the source's length.
+
 ## Playback preview (frontend, TIM-010)
 
 The timeline editor plays the timeline in the browser above the canvas (`timeline-preview`,

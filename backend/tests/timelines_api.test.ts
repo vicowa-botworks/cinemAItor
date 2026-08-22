@@ -634,6 +634,36 @@ describe("timelines api", () => {
         );
         assertEquals(dupItem.status, 400);
 
+        // An item whose asset kind does not match the track group is rejected.
+        const audioAsset = createAsset(
+          {
+            unique_slug: `theme_${Math.random().toString(36).slice(2, 8)}`,
+            display_name: "Theme",
+            asset_type: "audio",
+            library_scope: "global",
+          },
+          ownerId,
+        );
+        const audioVersionId = createAssetVersion(audioAsset.id, ownerId, {
+          content_hash: "f".repeat(64),
+          file_path: "/tmp/theme.wav",
+          format: "wav",
+          mime_type: "audio/wav",
+          file_size: 2000,
+          make_active: true,
+        }).id;
+        const wrongKind = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          {
+            tracks: [track],
+            items: [{ ...item(0, 1), asset_version_id: audioVersionId }],
+            markers: [],
+          },
+          ownerToken,
+        );
+        assertEquals(wrongKind.status, 400);
+
         // A valid restore of a subset still works (drops the missing rows).
         const ok = await req(
           "POST",
