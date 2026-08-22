@@ -492,7 +492,7 @@ describe("timelines api", () => {
         const state = {
           duration: d.timeline.duration,
           settings: d.timeline.settings ?? null,
-          tracks: d.tracks.map(({ items, ...track }) => track),
+          tracks: d.tracks.map(({ items: _items, ...track }) => track),
           items: d.tracks.flatMap((t) => t.items),
           markers: d.markers,
         };
