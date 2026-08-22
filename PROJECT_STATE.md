@@ -260,13 +260,20 @@ The product track follows `MASTER-PLAN.md`.
       `scene.storyboard_id`, reference source/asset/version ids); links to objects missing from the
       backup are nulled and reported in `issues`. Schema-1 backups remain restorable (empty creative
       sections)
+- [x] Timeline-snapshot backup (Workstream 13 follow-up): the backup document is now `schema: 3` and
+      includes each timeline's snapshots with their full serialized state. Restore re-creates them
+      under fresh timeline rows and rewrites every embedded id (`track_id`, `item_id`, `marker_id`,
+      `asset_version_id`) to the restored objects, so the app's own `restoreSnapshot` path replays
+      them on the restored timeline. Snapshot entries whose targets were not part of the backup are
+      dropped and reported; snapshots in pre-schema-3 backups (count-only) are skipped and reported.
+      Backup `counts.snapshots` now counts the snapshots carried by the document (the earlier
+      `snapshots_skipped` field is gone)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 13 (Diagnostics) follow-ups: snapshot JSON id-remap on restore, backup of media
-      binaries (transferable bundles)
+- [ ] Workstream 13 (Diagnostics) follow-up: backup of media binaries (transferable bundles)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
       project templates, advanced storage management, ducking, audio cleanup, subtitle generation
       from dialogue/voiceover, A/B + version comparison improvements, model benchmark
