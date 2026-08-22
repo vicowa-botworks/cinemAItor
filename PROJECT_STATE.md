@@ -56,10 +56,12 @@ The product track follows `MASTER-PLAN.md`.
       logger (warn/error sink; logging failures can never break a request); DIA-004 storage report
       (per-directory usage, content-store dedup, orphan files, missing version media); DIA-005
       redacted diagnostics export (no `*_secret` config keys); DIA-006 project backup (JSON bundle
-      under `backups/` + `backups` table record, media manifest with presence/size); DIA-007 restore
-      (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/timelines/tracks/
-      items/markers, per-file missing-media report); DIA-008 crash recovery (already covered by the
-      lease + stale-recovery of the job/render runners, tested)
+      under `backups/` + `backups` table record, media manifest with presence/size; schema 2 adds
+      storyboards/panels, scenes/shots, prompt-version history, and resolved references); DIA-007
+      restore (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/
+      timelines/tracks/items/markers plus all creative objects and their prompt/reference links,
+      per-file missing-media and dangling-link reports); DIA-008 crash recovery (already covered by
+      the lease + stale-recovery of the job/render runners, tested)
 - [x] Audio generation (Milestone 7 part 1, AUD-009/010/011): `POST /api/v1/audio/generate`
       generates music / voiceover (text to speech) / SFX from a prompt via the generation pipeline
       (kind → task type `music` / `voice` / `audio`), each call targeting a fresh `audio` asset;
@@ -250,13 +252,21 @@ The product track follows `MASTER-PLAN.md`.
       filter cuts frame-accurately. A 0.1 s tolerance absorbs the editor's 0.01 s rounding (plus
       float-approximate probed durations) so untouched clips stay lossless; when ffprobe is
       unavailable or fails, the duration is unknown and the legacy concat behavior is kept
+- [x] Creative-objects backup (Workstream 13 follow-up): the backup document is now `schema: 2` and
+      includes storyboards + panels, scenes + shots, the full `prompt_versions` history per creative
+      object, and their resolved `asset_references` (references keep global asset ids). Restore
+      re-creates all of it under fresh UUIDs with every creative link remapped (panel/ scene/shot
+      `prompt_version_id`, preview/clip/generated version ids, scene/shot links,
+      `scene.storyboard_id`, reference source/asset/version ids); links to objects missing from the
+      backup are nulled and reported in `issues`. Schema-1 backups remain restorable (empty creative
+      sections)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 13 (Diagnostics) follow-ups: restore also re-links storyboards/scenes/prompts,
-      snapshot JSON id-remap on restore, backup of media binaries (transferable bundles)
+- [ ] Workstream 13 (Diagnostics) follow-ups: snapshot JSON id-remap on restore, backup of media
+      binaries (transferable bundles)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
       project templates, advanced storage management, ducking, audio cleanup, subtitle generation
       from dialogue/voiceover, A/B + version comparison improvements, model benchmark

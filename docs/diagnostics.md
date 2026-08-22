@@ -22,17 +22,25 @@ DIA-001…DIA-008).
   entries into a single JSON bundle written under `<app_data>/logs/diagnostics-*.json`. Secret
   config keys (`jwt_secret`, etc.) are never included — safe to hand to support.
 - **Project backup** (DIA-006): `buildProjectBackupData(projectId)` snapshots the project's
-  _subtree_ — project, project-scoped assets with their versions/aliases/tags, and timelines with
-  tracks/items/markers — into a versioned JSON document (`schema: 1`). Global-scope assets, prompts,
-  references, jobs and renders are intentionally out of scope (see follow-ups). A **media manifest**
+  _subtree_ — project, project-scoped assets with their versions/aliases/tags, timelines with
+  tracks/items/markers, and the creative objects — storyboards + panels, scenes + shots, the full
+  `prompt_versions` history for those objects, and the resolved `asset_references` — into a
+  versioned JSON document (`schema: 2`; schema-1 backups remain restorable, the creative sections
+  are simply absent). Global-scope assets, jobs and renders are intentionally out of scope; asset
+  references keep global asset ids (they ride along with the prompt scope). A **media manifest**
   (`hash → present/size`) lets the operator see exactly which content-addressed files a restore will
   need.
 - **Restore** (DIA-007): `restoreProjectBackup()` re-creates the subtree under **fresh UUIDs** in a
   new project (the creator is the restoring user). Slugs/alias slugs are made unique on collision.
-  Every FK (asset → version → alias/tag, timeline → track → item → marker) is remapped. Media is
-  re-resolved against the content store (`resolveExisting` verifies the file is actually on disk);
-  missing files do **not** fail the restore — the version row is still created (so item ordering is
-  preserved) and each gap is reported in `issues`, as are skipped timeline snapshots.
+  Every FK is remapped — asset → version → alias/tag, timeline → track → item → marker, and
+  storyboard → panel / scene → shot, prompt versions per creative scope, and the creative pointers
+  (panel/scene/shot `prompt_version_id`, preview/clip/generated-asset version ids, `linked_scene_id`
+  / `linked_shot_id`, `scene.storyboard_id`) plus reference `source_id` (prompt version) /
+  `asset_id` / `asset_version_id`. A link whose target was not part of the backup is nulled and
+  reported in `issues` rather than failing the restore. Media is re-resolved against the content
+  store (`resolveExisting` verifies the file is actually on disk); missing files do **not** fail the
+  restore — the version row is still created (so item ordering is preserved) and each gap is
+  reported in `issues`, as are skipped timeline snapshots.
 - **Crash recovery** (DIA-008): already provided by the generation-job and render-job runners — both
   use leases (`lease_owner` / `lease_expires_at`) and `recoverStale*Jobs()` re-queues jobs whose
   lease expired, so a crashed process leaves no stuck work (covered by the job/render runner tests).
@@ -62,6 +70,7 @@ tracks id, source project, path, and `counts_json`.
   validation, and the logger sink (captures warn/error, never throws).
 - `tests/diagnostics_api.test.ts` — all five report/export endpoints end-to-end, including the admin
   gate on export and redaction of secret keys.
-- `tests/backups.test.ts` — build/restore subtree at the service level (fresh ids, FK remap, slug
-  collision safety, missing-media issues).
+- `tests/backups.test.ts` — build/restore subtree at the service level (fresh ids, FK remap incl.
+  storyboards/panels/scenes/shots/prompts/references, slug collision safety, missing-media and
+  dangling creative-link issues, schema-1 compatibility).
 - `tests/backups_api.test.ts` — backup/restore/delete over HTTP with permission checks.

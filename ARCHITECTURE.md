@@ -216,8 +216,10 @@ server.ts (entry point)
   ├── Diagnostics routes (/api/v1/diagnostics/*, auth middleware)
   │   ├── GET /hardware (CPU/RAM/GPU/OS), GET /models (health batch), GET /storage
   │   ├── GET /logs (filtered `diagnostics` rows), POST /export (admin; redacted JSON on disk)
-  │   ├── Project backup/restore (DIA-006/007): POST /backups, GET /backups,
-  │   │   POST /backups/:id/restore, DELETE /backups/:id
+   │   ├── Project backup/restore (DIA-006/007): POST /backups, GET /backups,
+   │   │   POST /backups/:id/restore, DELETE /backups/:id — schema-2 bundles cover assets,
+   │   │   timelines, and creative objects (storyboards/panels, scenes/shots, prompt versions,
+   │   │   references); restore remaps every creative FK and reports dangling links
   │   ├── Logger sink mirrors warn/error into the durable `diagnostics` table (DIA-003)
   │   └── (see docs/diagnostics.md)
    └── Legacy auth routes (/api/auth/register, /api/auth/login, /api/auth/me —
