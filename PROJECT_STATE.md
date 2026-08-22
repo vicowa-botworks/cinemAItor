@@ -160,6 +160,18 @@ The product track follows `MASTER-PLAN.md`.
       format from the file name) and failed transcodes include ffmpeg's stderr in the job error, and
       audio analysis probes with ffprobe (`FFPROBE_PATH`, default `ffprobe`) instead of passing
       ffprobe-only flags to ffmpeg
+- [x] Audio export (Workstream 12 goal): `wav` presets (e.g. the seeded `preset-audio`) now produce
+      real audio-only renders. The plan builder builds an audio-only plan for `wav` formats — no
+      video items, no text overlays, `total_duration` = the audio items' end extent, and a "no
+      audio-track items" render failure when there is nothing to mix; the ffmpeg engine gained an
+      audio path (`buildAudioArgs`) that runs each audio item through the same
+      `atrim`/`atempo`/`volume`/`afade` chain as the fx pass, delays it into its timeline slot and
+      sums the mix with `amix=duration=longest:normalize=0` into a PCM 16-bit wav with no video
+      (`-vn`); the mix runs to the longest item instead of a video length, and exports land as audio
+      assets with an `audio/wav` version (mock engine already wrote valid wavs). Verified against
+      real ffmpeg 8.0 in a live smoke (exact 5.000 s output from two sine inputs with
+      speed/gain/fade); tests cover the arg builder, wav routing, mock e2e export and the no-audio
+      failure
 - [x] WebSocket `/ws/v1/jobs` live updates (Milestone 3 follow-up): authenticated WebSocket
       (`?token=` query param verified through the auth-middleware path — JWT + session) that pushes
       job and render updates to every connected client. Frames are

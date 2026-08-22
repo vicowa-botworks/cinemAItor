@@ -158,8 +158,12 @@ async function buildPlan(
     .filter((t) => (t.track_type === "video" || t.track_type === "overlay") && !t.locked)
     .map((t) => t.id);
 
+  const format = preset?.output_format ?? "mp4";
+  // wav presets are pure audio exports: no picture, no text overlays, and the
+  // timeline length comes from the audio mix extent.
+  const audioOnly = format === "wav";
   const useProxy = preset?.kind === "draft";
-  const pendingPlanItems = items
+  const pendingPlanItems = audioOnly ? [] : items
     .filter((i) => i.status !== "archived" && renderableTrackIds.includes(i.track_id))
     .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
     .map(async (i) => {
@@ -199,7 +203,7 @@ async function buildPlan(
       };
     });
   const planItems = await Promise.all(pendingPlanItems);
-  if (planItems.length === 0) {
+  if (!audioOnly && planItems.length === 0) {
     throw new RenderFailedError("Timeline has no renderable video items");
   }
 
@@ -240,13 +244,18 @@ async function buildPlan(
   const rawAudioItems = await Promise.all(pendingAudioItems);
   // Items fully clipped out by their version's trim window are dropped.
   const audioItems = rawAudioItems.filter((a): a is RenderAudioItem => a !== null);
+  if (audioOnly && audioItems.length === 0) {
+    throw new RenderFailedError("Timeline has no audio-track items to export");
+  }
 
-  const textTrackIds = tracks
+  const textTrackIds = audioOnly ? [] : tracks
     .filter((t) => (TEXT_TRACK_TYPES as readonly string[]).includes(t.track_type) && !t.locked)
     .map((t) => t.id);
-  const textOverlays = items
+  const textOverlays = textTrackIds.length === 0 ? [] : items
     .filter(
-      (i) => i.status === "active" && i.item_text !== null && textTrackIds.includes(i.track_id),
+      (i) =>
+        i.status === "active" && i.item_text !== null &&
+        textTrackIds.includes(i.track_id),
     )
     .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
     .map((i) => ({
@@ -260,16 +269,18 @@ async function buildPlan(
   const config = loadConfig();
   const outDir = join(config.appDataDir, "projects", job.project_id, "output");
   await Deno.mkdir(outDir, { recursive: true });
-  const filename = `render-${job.id.slice(0, 8)}.${preset?.output_format ?? "mp4"}`;
+  const filename = `render-${job.id.slice(0, 8)}.${format}`;
   return {
     output_path: join(outDir, filename),
     filename,
-    format: preset?.output_format ?? "mp4",
+    format,
     preset,
     items: planItems,
     text_overlays: textOverlays,
     audio_items: audioItems,
-    total_duration: planItems.reduce((sum, i) => sum + i.duration, 0),
+    total_duration: audioOnly
+      ? Math.round(Math.max(...audioItems.map((a) => a.end_time), 0) * 100) / 100
+      : planItems.reduce((sum, i) => sum + i.duration, 0),
   };
 }
 

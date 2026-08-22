@@ -201,8 +201,9 @@ server.ts (entry point)
   │   ├── Durable render queue (leases, stale recovery) + in-process render runner
   │   ├── Engines: ffmpeg concat (`-c copy`), ffmpeg fx pass (source trim/speed,
   │   │   transitions/fades/grade, `drawtext` text overlays, audio-track mix via
-  │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC) or deterministic mock (auto by
-  │   │   availability, `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running, polled during
+  │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC), ffmpeg audio-only export for `wav`
+  │   │   presets (`amix=duration=longest` → `pcm_s16le`, no video), or deterministic mock (auto
+  │   │   by availability, `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running, polled during
   │   │   ffmpeg runs); progress from ffmpeg `-progress pipe:1` out_time; structured logs
     │   ├── Draft/final source selection (video + audio items): draft presets render proxies
     │   │   (master fallback), final presets render masters only; per-source tallies in the
