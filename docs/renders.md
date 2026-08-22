@@ -18,8 +18,11 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 - **Engines** implement `RenderEngine.render(plan, hooks)` in `services/render_engine.ts`:
   - `FfmpegRenderEngine` — three paths, chosen per plan (audio preset first, then
     `planNeedsFxPass`):
-    - **No fx** (all items hard-cut, no fades, no grade, no source trim/speed, no text overlays, no
-      audio): lossless concat demuxer (`ffmpeg -f concat -c copy`), stream copy.
+  - **No fx** (all items hard-cut, no fades, no grade, no source trim/speed, no text overlays, no
+    audio, and every item plays its source to the end — no tail trim): lossless concat demuxer
+    (`ffmpeg -f concat -c copy`), stream copy. The concat demuxer can only splice whole files, so a
+    tail-trimmed item instead takes the fx path below and gets a frame-accurate cut (see the plan's
+    `consumes_full_source` flag).
   - **With fx**: one input per item plus a filter graph — per-item `trim` + `setpts` (source offset
     / speed), `eq` (brightness/contrast/saturation), `colortemperature` (grade temperature →
     Kelvin), `fade` in/out — chained with `xfade` for real transitions and the `concat` filter for
@@ -49,12 +52,19 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
   `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
-  resolved to its asset version's stored file (carrying the item's `source_offset` and `speed`);
-  plus the active text overlays from unlocked `text`/`subtitle` tracks (text items sorted by start
-  time); plus audio items from unlocked, non-muted `dialogue`/`voiceover`/`music`/`sfx`/`ambience`
-  tracks (non-archived items with an asset version, sorted by start time; each clip's version
-  `gain_db` plus its track's mixer `gain_db` is applied, so the render matches the preview mix). The
-  plan is passed to the engine with progress and `isCancelled` hooks.
+  resolved to its asset version's stored file (carrying the item's `source_offset` and `speed`).
+  Because the lossless concat path can only splice whole files, the builder ffprobes each video
+  item's file (the proxy in draft renders, the master in final renders) and sets
+  `consumes_full_source`: `true` when the item's source consumption (timeline duration ÷ speed)
+  reaches the source end within a 0.1 s tolerance (the editor rounds times to 0.01 s and probed
+  durations are float-approximate, so untouched clips stay lossless), `false` for a tail trim
+  (forcing the frame-accurate fx pass), and `undefined` when the duration is unknown (ffprobe
+  missing or failing), which preserves the legacy concat behavior; plus the active text overlays
+  from unlocked `text`/`subtitle` tracks (text items sorted by start time); plus audio items from
+  unlocked, non-muted `dialogue`/`voiceover`/`music`/`sfx`/`ambience` tracks (non-archived items
+  with an asset version, sorted by start time; each clip's version `gain_db` plus its track's mixer
+  `gain_db` is applied, so the render matches the preview mix). The plan is passed to the engine
+  with progress and `isCancelled` hooks.
 - **Audio-only plans** (`wav` presets, e.g. the seeded `preset-audio`): no video items and no text
   overlays are collected; the plan's `total_duration` is the audio items' end extent (latest
   `end_time`), and rendering is rejected with a validation error when the timeline has no

@@ -200,7 +200,9 @@ server.ts (entry point)
   ├── Render routes (/api/v1/render-presets, /api/v1/renders/*, /api/v1/exports,
   │   auth middleware, project-permission gated; preset writes admin-only)
   │   ├── Durable render queue (leases, stale recovery) + in-process render runner
-  │   ├── Engines: ffmpeg concat (`-c copy`), ffmpeg fx pass (source trim/speed,
+  │   ├── Engines: ffmpeg concat (`-c copy`; only when every item consumes its whole
+  │   │   source — the plan builder ffprobes each item's file and routes tail-trimmed
+  │   │   clips to the fx pass for a frame-accurate cut), ffmpeg fx pass (source trim/speed,
   │   │   transitions/fades/grade, `drawtext` text overlays, audio-track mix via
   │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC), ffmpeg audio-only export for `wav`
   │   │   presets (`amix=duration=longest` → `pcm_s16le`, no video), or deterministic mock (auto
