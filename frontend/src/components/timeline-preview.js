@@ -469,7 +469,7 @@ class TimelinePreview extends LitElement {
           return;
         }
         const fade = fadeFactorAt(item, t);
-        el.volume = audioVolumeFor(adj?.gain_db ?? 0, fade);
+        el.volume = audioVolumeFor((adj?.gain_db ?? 0) + Number(track.gain_db ?? 0), fade);
         try {
           if (Math.abs(el.currentTime - S) > AUDIO_SEEK_TOLERANCE) {
             el.currentTime = S;

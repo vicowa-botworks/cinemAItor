@@ -11,6 +11,7 @@ import {
   createTrack,
   getItem,
   updateItem,
+  updateTrack,
 } from "../src/db/timelines.ts";
 import {
   cancelRenderJob,
@@ -576,6 +577,30 @@ describe("renders", () => {
     });
     await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job3.id)?.status ?? ""));
     assertNotEquals(bytesFor(job3.id), first);
+
+    // Mixer (AUD-007): a track gain change alters the mix; muting the track
+    // removes its items from the plan entirely.
+    updateTrack(ownerId, timelineId, music.id, { gain_db: 3 });
+    const job4 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job4.id)?.status ?? ""));
+    assertNotEquals(bytesFor(job4.id), first);
+
+    updateTrack(ownerId, timelineId, music.id, { muted: true });
+    const job5 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job5.id)?.status ?? ""));
+    assertEquals(rawGetRenderJob(job5.id)?.status, "succeeded");
+    const mutedReport = rawGetRenderJob(job5.id)?.validation_report as
+      | { audio?: { items: number } }
+      | null;
+    assertEquals(mutedReport?.audio?.items, 0);
   });
 
   it("cancels queued renders", () => {

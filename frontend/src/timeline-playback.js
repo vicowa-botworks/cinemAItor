@@ -130,12 +130,12 @@ export function gradeFilter(grade) {
 }
 
 /**
- * Playback element volume for an audio item: 2^(gain_db/20) scaled by the
- * fade factor, clamped to 0..1.
+ * Playback element volume for an audio item: 10^(gain_db/20) (the same
+ * linear scale the renderer uses) scaled by the fade factor, clamped to 0..1.
  */
 export function audioVolumeFor(gainDb, fade) {
   const gain = Number(gainDb) || 0;
-  return Math.max(0, Math.min(1, Math.pow(2, gain / 20) * (fade || 0)));
+  return Math.max(0, Math.min(1, Math.pow(10, gain / 20) * (fade || 0)));
 }
 
 /**

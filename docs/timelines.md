@@ -10,7 +10,8 @@ snapshots (Workstream 10, Milestone 5).
 - **Track** (`tracks`): typed lane
   (`video | dialogue | voiceover | music | sfx |
   ambience | overlay | text | subtitle | effect | transition`),
-  unique `track_order` per timeline, lock/mute flags. Max 32 tracks.
+  unique `track_order` per timeline, lock/mute flags, and a per-track `gain_db` mixer gain (dB,
+  −60..24, default 0). Max 32 tracks.
 - **Timeline item** (`timeline_items`): a placed `asset_version_id` with `start_time`/`end_time`
   (timeline seconds), `source_offset`, `speed`, plus transform, fades, transition, effect chain,
   color grade and audio settings (JSON). Max 1024 items per timeline. Locked tracks reject item
@@ -71,10 +72,11 @@ the source of truth for final output.
   is approximated with CSS filters (`brightness`/`contrast`/`saturate` + a warm/cool color tint).
 - **Audio mix**: both the proxy and the preview endpoint stream the stored file without adjustments
   (they are non-destructive and applied at render time), so the preview applies them client-side:
-  version-level `gain_db` is added to the item fade volume on each pooled `<audio>` element, and the
-  version `trim` window gates playback (silence outside it). Adjustments are read from the asset's
-  _active_ version only — the adjustments UI targets that version, so no other version has any to
-  apply.
+  the item's version-level `gain_db` plus its track's mixer `gain_db` (dB values summed, matching
+  the render pipeline) become the volume on each pooled `<audio>` element after the item fades, and
+  the version `trim` window gates playback (silence outside it). Muted tracks stay silent.
+  Adjustments are read from the asset's _active_ version only — the adjustments UI targets that
+  version, so no other version has any to apply.
 - **Controls**: play/pause, stop (reset to 0), rate 0.25×–2×, and an in/out loop range (blank = full
   timeline). Scrubbing works from the preview's own state and from the canvas ruler, which now
   drag-scrubs in addition to click-to-set; the playhead line follows the preview at ~10 Hz while
@@ -90,7 +92,7 @@ the source of truth for final output.
 | PATCH  | `/api/v1/timelines/:id`                               | Update name/duration/settings                                                                                                           |
 | DELETE | `/api/v1/timelines/:id`                               | Delete (cascades)                                                                                                                       |
 | POST   | `/api/v1/timelines/:id/tracks`                        | Create track (auto or explicit order)                                                                                                   |
-| PATCH  | `/api/v1/timelines/:id/tracks/:trackId`               | Update name/order (swap semantics)/locked/muted                                                                                         |
+| PATCH  | `/api/v1/timelines/:id/tracks/:trackId`               | Update name/order (swap semantics)/locked/muted/gain_db (mixer gain, dB, −60..24)                                                       |
 | DELETE | `/api/v1/timelines/:id/tracks/:trackId`               | Delete track + its items                                                                                                                |
 | POST   | `/api/v1/timelines/:id/items`                         | Place an item (required: track_id, start_time, end_time; `asset_version_id` required on media tracks, optional on text/subtitle tracks) |
 | PATCH  | `/api/v1/timelines/:id/items/:itemId`                 | Move/trim/detune an item                                                                                                                |

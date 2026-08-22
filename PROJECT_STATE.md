@@ -179,20 +179,27 @@ The product track follows `MASTER-PLAN.md`.
       fallback for the active/preview version, per-clip speed/fade-in-fade-out (applied to
       playbackRate, opacity, and audio volume), and CSS-filter approximations of the stored color
       grade + temperature. Audio-track items are mixed from a small pool of `<audio>` elements: the
-      served stream is the unadjusted stored file, so the version-level gain and trim window are
-      applied client-side (only the active version carries adjustments — the adjustments UI targets
-      that version); audio plays for the asset's active/preview version only, since the media
-      endpoint streams that version's file. Item fades apply on top; text/subtitle items render as
-      positioned overlays. The pure geometry (active-visual/audio/text selection, source time at
-      timeline time, fade factors, grade → filter mapping, in/out range) lives in
-      `frontend/src/timeline-playback.js` with unit tests; the component drives it from a
-      requestAnimationFrame loop and emits `playheadchange` (~10 Hz) which the ruler playhead
-      follows. The ruler now also drag-scrubs (pointer capture) in addition to click-to-set.
-      Grades/mixes are preview approximations — the render pipeline remains the source of truth
+      served stream is the unadjusted stored file, so the item's version `gain_db` (plus its track's
+      mixer `gain_db`) and the version's trim window are applied client-side (only the active
+      version carries adjustments — the adjustments UI targets that version); audio plays for the
+      asset's active/preview version only, since the media endpoint streams that version's file.
+      Item fades apply on top; text/subtitle items render as positioned overlays. The pure geometry
+      (active-visual/audio/text selection, source time at timeline time, fade factors, grade →
+      filter mapping, in/out range) lives in `frontend/src/timeline-playback.js` with unit tests;
+      the component drives it from a requestAnimationFrame loop and emits `playheadchange` (~10 Hz)
+      which the ruler playhead follows. The ruler now also drag-scrubs (pointer capture) in addition
+      to click-to-set. Grades/mixes are preview approximations — the render pipeline remains the
+      source of truth
+- [x] Basic mixer (AUD-007 / Workstream 11 follow-up): audio tracks (dialogue, voiceover, music,
+      SFX, ambience) gain a per-track `gain_db` mixer slider (−24..+24 dB in the UI; the API allows
+      −60..+24) on the track row. The render plan now skips muted audio tracks and applies the
+      track's `gain_db` on top of each clip's version `gain_db` (dB values summed, then a single
+      linear factor — the preview uses the same 10^(dB/20) scale after fixing the playback module's
+      2^(dB/20) scale mismatch), so the preview and the render match. Migrations
+      `0016_track_gain.sql`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
-- [ ] Workstream 11 follow-ups: basic mixer
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
 - [ ] Workstream 10 follow-ups: undo/redo, basic audio track (playback preview shipped above)
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
@@ -235,3 +242,4 @@ The product track follows `MASTER-PLAN.md`.
 - Frontend phase 7 (audio generation dialog + waveforms, diagnostics panel, legacy movies removal,
   MASTER-PLAN §15.3): Fri Aug 21 2026
 - Timeline playback preview (TIM-010): Fri Aug 21 2026
+- Basic mixer (AUD-007, track gain in preview + renders): Fri Aug 21 2026

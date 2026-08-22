@@ -245,6 +245,7 @@ export const timelineRouter = new Router()
       track_order: optionalInt(body, "track_order"),
       locked: optionalBool(body, "locked"),
       muted: optionalBool(body, "muted"),
+      gain_db: optionalNumber(body, "gain_db"),
     };
     const track = createTrack(userId, param(ctx as ParamsContext, "id"), input);
     ctx.response.status = 201;
@@ -268,6 +269,7 @@ export const timelineRouter = new Router()
           track_order: optionalInt(body, "track_order"),
           locked: optionalBool(body, "locked"),
           muted: optionalBool(body, "muted"),
+          gain_db: optionalNumber(body, "gain_db"),
         },
       );
       if (!track) throw notFound("Track not found");

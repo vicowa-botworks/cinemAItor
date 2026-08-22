@@ -108,6 +108,37 @@ describe("timeline editor", () => {
     assertEquals(listTracks(tl.id, ownerId).length, 1);
   });
 
+  it("holds a per-track mixer gain with adjustment limits, surviving snapshots", () => {
+    const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
+    const music = createTrack(ownerId, tl.id, { track_type: "music", name: "M", gain_db: -3 });
+    assertEquals(music.gain_db, -3);
+    const neutral = createTrack(ownerId, tl.id, { track_type: "sfx", name: "S" });
+    assertEquals(neutral.gain_db, 0);
+
+    const patched = updateTrack(ownerId, tl.id, neutral.id, { gain_db: 6.5 });
+    assertEquals(patched?.gain_db, 6.5);
+
+    for (const bad of [-61, 25, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assertThrows(
+        () => updateTrack(ownerId, tl.id, music.id, { gain_db: bad }),
+        Error,
+        "gain_db",
+      );
+    }
+    assertThrows(
+      () => createTrack(ownerId, tl.id, { track_type: "sfx", name: "X", gain_db: 99 }),
+      Error,
+      "gain_db",
+    );
+
+    // Snapshot taken at -3 dB; gain edited afterwards; restore brings -3 back.
+    const snap = createSnapshot(ownerId, tl.id, { name: "snap" });
+    updateTrack(ownerId, tl.id, music.id, { gain_db: 0 });
+    restoreSnapshot(ownerId, tl.id, snap.id);
+    const after = listTracks(tl.id, ownerId).find((t) => t.id === music.id);
+    assertEquals(after?.gain_db, -3);
+  });
+
   it("places items, trims, moves, duplicates and recomputes duration", () => {
     const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
     const track = createTrack(ownerId, tl.id, { track_type: "video", name: "V" });

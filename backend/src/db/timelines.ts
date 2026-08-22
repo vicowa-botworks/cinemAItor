@@ -21,6 +21,20 @@ export type TrackType = (typeof TRACK_TYPES)[number];
 export const MAX_TRACKS = 32;
 export const MAX_ITEMS_PER_TIMELINE = 1024;
 
+/** Gain range in dB for tracks and version audio adjustments. */
+export const GAIN_DB_MIN = -60;
+export const GAIN_DB_MAX = 24;
+
+function requireGainDb(gainDb: number | undefined, field: string): void {
+  if (
+    gainDb !== undefined &&
+    (typeof gainDb !== "number" || !Number.isFinite(gainDb) ||
+      gainDb < GAIN_DB_MIN || gainDb > GAIN_DB_MAX)
+  ) {
+    throw badRequest(`${field} must be a number between ${GAIN_DB_MIN} and ${GAIN_DB_MAX}`);
+  }
+}
+
 export interface Timeline {
   id: string;
   project_id: string;
@@ -39,6 +53,8 @@ export interface Track {
   track_order: number;
   locked: boolean;
   muted: boolean;
+  /** Per-track audio gain in dB (basic mixer); 0 is neutral. */
+  gain_db: number;
 }
 
 export interface TimelineItem {
@@ -123,6 +139,7 @@ export function rowToTrack(row: Record<string, unknown>): Track {
     track_order: Number(row.track_order),
     locked: Boolean(row.locked),
     muted: Boolean(row.muted),
+    gain_db: asNum(row.gain_db) ?? 0,
   };
 }
 
@@ -326,6 +343,7 @@ export interface TrackInput {
   track_order?: number;
   locked?: boolean;
   muted?: boolean;
+  gain_db?: number;
 }
 
 export function createTrack(
@@ -339,6 +357,7 @@ export function createTrack(
     throw badRequest(`track_type must be one of: ${TRACK_TYPES.join(", ")}`);
   }
   if (!input.name?.trim()) throw badRequest("name is required");
+  requireGainDb(input.gain_db, "gain_db");
 
   const db = getDb();
   const count = (
@@ -373,8 +392,8 @@ export function createTrack(
 
   const id = crypto.randomUUID();
   (db.prepare(
-    `INSERT INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run as (...params: unknown[]) => unknown)(
     id,
     timelineId,
@@ -383,6 +402,7 @@ export function createTrack(
     order,
     input.locked ? 1 : 0,
     input.muted ? 1 : 0,
+    input.gain_db ?? 0,
   );
   logAudit(userId, "track.create", timelineId, { track_id: id });
   return getTrack(timelineId, id, userId) as Track;
@@ -397,10 +417,12 @@ export function updateTrack(
     track_order?: number;
     locked?: boolean;
     muted?: boolean;
+    gain_db?: number;
   },
 ): Track | undefined {
   const track = getTrack(timelineId, trackId, userId, "write");
   if (!track) return undefined;
+  requireGainDb(patch.gain_db, "gain_db");
   if (
     patch.track_order !== undefined &&
     (typeof patch.track_order !== "number" || !Number.isInteger(patch.track_order) ||
@@ -425,12 +447,13 @@ export function updateTrack(
     }
   }
   (db.prepare(
-    `UPDATE tracks SET name = ?, track_order = ?, locked = ?, muted = ? WHERE id = ?`,
+    `UPDATE tracks SET name = ?, track_order = ?, locked = ?, muted = ?, gain_db = ? WHERE id = ?`,
   ).run as (...params: unknown[]) => unknown)(
     patch.name ?? track.name,
     patch.track_order ?? track.track_order,
     (patch.locked ?? track.locked) ? 1 : 0,
     (patch.muted ?? track.muted) ? 1 : 0,
+    patch.gain_db ?? track.gain_db,
     trackId,
   );
   return getTrack(timelineId, trackId, userId);
@@ -1099,8 +1122,8 @@ export function restoreSnapshot(
 
   for (const track of data.tracks) {
     (db.prepare(
-      `INSERT OR IGNORE INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run as (...params: unknown[]) => unknown)(
       track.id,
       timelineId,
@@ -1109,6 +1132,7 @@ export function restoreSnapshot(
       track.track_order,
       track.locked ? 1 : 0,
       track.muted ? 1 : 0,
+      Number(track.gain_db) || 0,
     );
   }
   for (const item of data.items) {
