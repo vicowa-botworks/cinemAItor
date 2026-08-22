@@ -40,6 +40,31 @@ export class StoryboardList extends LitElement {
       color: var(--color-text);
     }
 
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .btn-primary {
+      background-color: var(--color-primary);
+      color: white;
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background-color: var(--color-surface-hover);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
     .error {
       color: var(--color-error);
       font-size: 14px;
