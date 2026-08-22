@@ -5,6 +5,7 @@ import {
   activeTextItems,
   activeVisual,
   audioVolumeFor,
+  duckGainAt,
   fadeFactorAt,
   filmstripFramesFor,
   gradeFilter,
@@ -15,6 +16,7 @@ import {
 
 function item({
   id = "i",
+  track_id = null,
   start = 0,
   end = 2,
   offset = 0,
@@ -25,6 +27,7 @@ function item({
 } = {}) {
   return {
     id,
+    track_id,
     start_time: start,
     end_time: end,
     source_offset: offset,
@@ -205,6 +208,65 @@ describe("audioVolumeFor", () => {
     assertAlmostEquals(audioVolumeFor(6, 0.4), 0.4 * Math.pow(10, 6 / 20));
     assertEquals(audioVolumeFor(0, 2), 1);
     assertEquals(audioVolumeFor(0, 0), 0);
+  });
+});
+
+describe("duckGainAt", () => {
+  const dItem = item({ id: "d", start: 2, end: 4, track_id: "td" });
+  const mItem = item({ id: "m", start: 1, end: 6, track_id: "tm" });
+  const music = (duck_db, extra = {}) => ({
+    id: "tm",
+    track_type: "music",
+    track_order: 1,
+    locked: false,
+    muted: false,
+    duck_db,
+    items: [mItem],
+    ...extra,
+  });
+  const dialogue = (extra = {}) => ({
+    id: "td",
+    track_type: "dialogue",
+    track_order: 2,
+    locked: false,
+    muted: false,
+    duck_db: 0,
+    items: [dItem],
+    ...extra,
+  });
+
+  it("drops music by 10^(-duck_db/20) only while dialogue sounds", () => {
+    const ts = [music(6), dialogue()];
+    assertEquals(duckGainAt(ts, mItem, 1.5), 1);
+    assertAlmostEquals(duckGainAt(ts, mItem, 2.5), Math.pow(10, -6 / 20));
+    assertEquals(duckGainAt(ts, mItem, 4.5), 1);
+  });
+
+  it("never ducks below full level or non-music items", () => {
+    const off = [music(0), dialogue()];
+    assertEquals(duckGainAt(off, mItem, 2.5), 1);
+    const sfxItem = item({ id: "s", start: 2, end: 3, track_id: "ts" });
+    const sfxTrack = {
+      id: "ts",
+      track_type: "sfx",
+      track_order: 3,
+      locked: false,
+      muted: false,
+      duck_db: 6,
+      items: [sfxItem],
+    };
+    assertEquals(duckGainAt([sfxTrack, dialogue()], sfxItem, 2.5), 1);
+  });
+
+  it("ignores muted or locked dialogue tracks, matching the render source", () => {
+    assertEquals(
+      duckGainAt([music(6), dialogue({ muted: true })], mItem, 2.5),
+      1,
+    );
+    assertEquals(
+      duckGainAt([music(6), dialogue({ locked: true })], mItem, 2.5),
+      1,
+    );
   });
 });
 

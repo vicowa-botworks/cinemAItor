@@ -290,14 +290,26 @@ The product track follows `MASTER-PLAN.md`.
       on backup restore and `item_text`/`text_style` were never captured — the backup payload now
       carries both and restore keeps versionless items (media items with a missing version are still
       dropped + reported, including inside restored snapshots)
+- [x] Ducking (AUD-013 / Workstream 14): music lowers under dialogue. `tracks` gain a `duck_db`
+      (0..60 dB, default 0 = off; migration `0017_track_ducking.sql`; settable via PATCH track and
+      the full-state restore, unit-tested). The render plan computes duck windows per music item —
+      the rendered dialogue items' timeline spans, clipped to the music item's lifetime and merged
+      when they overlap or touch (locked/muted dialogue is outside the plan and never ducks; only
+      `dialogue` drives, and only `music` ducks) — and the engine applies each window as a
+      frame-evaluated `volume` stage (`1-(1-G)*…`, `G = 10^(-duck_db/20)`) on the item's audio
+      chain, so a render with ducking differs byte-for-byte from the unducked plan (mock
+      fingerprint + fake-ffmpeg `volume=`-stage assertions cover this). The editor gets a
+      per-music-track duck slider on the track row, and the browser preview attenuates music clips
+      by the same factor while audible dialogue plays (`duckGainAt` in `timeline-playback.js`,
+      unit-tested) — preview and render match
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
-      project templates, advanced storage management, ducking, audio cleanup, subtitle generation
-      from dialogue/voiceover, A/B + version comparison improvements, model benchmark
+      project templates, advanced storage management, audio cleanup, subtitle generation from
+      dialogue/voiceover, A/B + version comparison improvements, model benchmark
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues
@@ -332,3 +344,4 @@ The product track follows `MASTER-PLAN.md`.
 - Timeline playback preview (TIM-010): Fri Aug 21 2026
 - Basic mixer (AUD-007, track gain in preview + renders): Fri Aug 21 2026
 - MVP acceptance flow (E2E over HTTP) + backup text-overlay restore fix: Sat Aug 22 2026
+- Ducking (AUD-013, music lowers under dialogue in preview + renders): Sat Aug 22 2026

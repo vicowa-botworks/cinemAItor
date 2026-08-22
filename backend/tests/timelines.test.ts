@@ -139,6 +139,37 @@ describe("timeline editor", () => {
     assertEquals(after?.gain_db, -3);
   });
 
+  it("holds a per-track duck amount with limits, surviving snapshots", () => {
+    const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
+    const music = createTrack(ownerId, tl.id, { track_type: "music", name: "M", duck_db: 6 });
+    assertEquals(music.duck_db, 6);
+    const neutral = createTrack(ownerId, tl.id, { track_type: "dialogue", name: "D" });
+    assertEquals(neutral.duck_db, 0);
+
+    const patched = updateTrack(ownerId, tl.id, neutral.id, { duck_db: 12.5 });
+    assertEquals(patched?.duck_db, 12.5);
+
+    for (const bad of [-1, 61, Number.NaN]) {
+      assertThrows(
+        () => updateTrack(ownerId, tl.id, music.id, { duck_db: bad }),
+        Error,
+        "duck_db",
+      );
+    }
+    assertThrows(
+      () => createTrack(ownerId, tl.id, { track_type: "music", name: "X", duck_db: -0.5 }),
+      Error,
+      "duck_db",
+    );
+
+    // Snapshot taken at 6 dB; amount edited afterwards; restore brings 6 back.
+    const snap = createSnapshot(ownerId, tl.id, { name: "snap" });
+    updateTrack(ownerId, tl.id, music.id, { duck_db: 0 });
+    restoreSnapshot(ownerId, tl.id, snap.id);
+    const after = listTracks(tl.id, ownerId).find((t) => t.id === music.id);
+    assertEquals(after?.duck_db, 6);
+  });
+
   it("places items, trims, moves, duplicates and recomputes duration", () => {
     const tl = createTimeline(ownerId, { project_id: projectId, name: "T" });
     const track = createTrack(ownerId, tl.id, { track_type: "video", name: "V" });

@@ -162,6 +162,28 @@ export function audioVolumeFor(gainDb, fade) {
 }
 
 /**
+ * Ducking (AUD-013): linear gain multiplier for the item at timeline time t,
+ * applied on top of audioVolumeFor. An item on a music track drops by its
+ * track's duck_db while any dialogue-track item is sounding, mirroring the
+ * duck windows the renderer computes for the same items. Otherwise full
+ * level (1).
+ */
+export function duckGainAt(tracks, item, t) {
+  const track = (tracks ?? []).find((tr) => tr.id === item.track_id);
+  const duckDb = Number(track?.duck_db) || 0;
+  if (track?.track_type !== "music" || duckDb <= 0) return 1;
+  // Locked or muted dialogue tracks are outside the render source, so they
+  // never duck (matching the renderer's plan).
+  for (const other of tracks ?? []) {
+    if (other.track_type !== "dialogue" || other.locked || other.muted) continue;
+    for (const d of other.items ?? []) {
+      if (itemAt(d, t)) return Math.pow(10, -duckDb / 20);
+    }
+  }
+  return 1;
+}
+
+/**
  * Optional loop range from raw from/to form values (numbers or strings).
  * Returns `{ from, to }` in seconds when a valid range is given, otherwise
  * null (play to the end of the timeline).

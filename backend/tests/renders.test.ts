@@ -30,6 +30,7 @@ import {
 } from "../src/db/renders.ts";
 import { type JobEventMessage, subscribeJobEvents } from "../src/services/job_events.ts";
 import {
+  duckWindowsFor,
   itemConsumesFullSource,
   type RenderRunner,
   startRenderRunner,
@@ -37,9 +38,11 @@ import {
 import {
   buildAtempoFilters,
   buildAudioArgs,
+  buildAudioItemChain,
   buildDrawTextFilter,
   buildFxArgs,
   consumeFfmpegProgressLine,
+  duckVolumeExpr,
   FfmpegRenderEngine,
   mapFfmpegProgress,
   MockRenderEngine,
@@ -690,6 +693,203 @@ describe("renders", () => {
     assert(args.includes("pcm_s16le"));
     assertEquals(args[args.length - 1], "/tmp/out.wav");
     assert(!args.includes("libx264"));
+  });
+
+  it("builds frame-evaluated ducking expressions and audio chains (AUD-013)", () => {
+    // Off (0 dB or no windows) means no duck stage at all.
+    assertEquals(duckVolumeExpr(0, [{ start: 0, end: 1 }]), null);
+    assertEquals(duckVolumeExpr(6, []), null);
+    assertEquals(
+      duckVolumeExpr(6, [{ start: 1, end: 2.5 }]),
+      "1-(1-0.5012)*clip(between(t,1,2.5),0,1)",
+    );
+    assertEquals(
+      duckVolumeExpr(12, [
+        { start: 0, end: 1 },
+        { start: 4, end: 6 },
+      ]),
+      "1-(1-0.2512)*clip(between(t,0,1)+between(t,4,6),0,1)",
+    );
+
+    const music: RenderAudioItem = {
+      file_path: "/tmp/m.wav",
+      start_time: 0,
+      end_time: 4,
+      duration: 4,
+      source_offset: 0,
+      source_duration: 4,
+      speed: 1,
+      gain: 1,
+      fade_in: 0,
+      fade_out: 0,
+      duck_db: 6,
+      duck_windows: [{ start: 1, end: 2.5 }],
+    };
+    // duck sits where the stages allow: after trim/speed/gain, before fades
+    // and the slot delay; neutral gain/fades/speed add nothing.
+    assertEquals(buildAudioItemChain(music), [
+      "atrim=start=0:end=4",
+      "asetpts=PTS-STARTPTS",
+      "volume='1-(1-0.5012)*clip(between(t,1,2.5),0,1)':eval=frame",
+      "adelay=0:all=1",
+    ]);
+
+    // The fx mix carries exactly one frame-evaluated duck stage, on the
+    // music input; the dialogue input's chain is duck-free.
+    const video: RenderInputItem = {
+      file_path: "/tmp/v.mp4",
+      start_time: 0,
+      end_time: 4,
+      duration: 4,
+      transition: "cut",
+      transition_duration: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+      color_grade: null,
+    };
+    const dialogue: RenderAudioItem = {
+      file_path: "/tmp/d.wav",
+      start_time: 1,
+      end_time: 2.5,
+      duration: 1.5,
+      source_offset: 0,
+      source_duration: 1.5,
+      speed: 1,
+      gain: 1,
+      fade_in: 0,
+      fade_out: 0,
+    };
+    const args = buildFxArgs([video], [], "/tmp/out.mp4", [music, dialogue]);
+    const fc = args[args.indexOf("-filter_complex") + 1];
+    assert(
+      fc.includes(
+        "volume='1-(1-0.5012)*clip(between(t,1,2.5),0,1)':eval=frame",
+      ),
+    );
+    assertEquals(fc.split("eval=frame").length - 1, 1);
+  });
+
+  it("clips and merges dialogue spans into item-local duck windows", () => {
+    const spans = [
+      { start: 2, end: 4 },
+      { start: 3.5, end: 6 },
+      { start: 8, end: 9 },
+    ];
+    // Item lives at 1..5: the spans clip to 1..3 and 2.5..4 and merge; the
+    // far span falls outside the item's lifetime.
+    assertEquals(duckWindowsFor(1, 4, spans), [{ start: 1, end: 4 }]);
+    // Fully outside on the left.
+    assertEquals(duckWindowsFor(10, 2, [{ start: 0, end: 4 }]), []);
+    // Touching windows merge into one.
+    assertEquals(
+      duckWindowsFor(0, 5, [
+        { start: 0, end: 2 },
+        { start: 2, end: 4 },
+      ]),
+      [{ start: 0, end: 4 }],
+    );
+  });
+
+  it("ducks music under dialogue through the render pipeline (AUD-013)", async () => {
+    const db = getDb();
+    const dialogueTrack = createTrack(ownerId, timelineId, {
+      track_type: "dialogue",
+      name: "D",
+    });
+    const musicTrack = createTrack(ownerId, timelineId, {
+      track_type: "music",
+      name: "MD",
+      duck_db: 6,
+    });
+    const dAsset = createAsset(
+      {
+        unique_slug: "dialogue_duck",
+        display_name: "Duck D",
+        asset_type: "audio",
+        library_scope: "global",
+      },
+      ownerId,
+    );
+    const dVersionId = createAssetVersion(dAsset.id, ownerId, {
+      content_hash: "b".repeat(64),
+      file_path: "/tmp/d_duck.wav",
+      format: "wav",
+      mime_type: "audio/wav",
+      file_size: 2000,
+      make_active: true,
+    }).id;
+    const mAsset = createAsset(
+      {
+        unique_slug: "score_duck",
+        display_name: "Duck M",
+        asset_type: "audio",
+        library_scope: "global",
+      },
+      ownerId,
+    );
+    const mVersionId = createAssetVersion(mAsset.id, ownerId, {
+      content_hash: "c".repeat(64),
+      file_path: "/tmp/m_duck.wav",
+      format: "wav",
+      mime_type: "audio/wav",
+      file_size: 4000,
+      make_active: true,
+    }).id;
+    createItem(ownerId, timelineId, {
+      track_id: musicTrack.id,
+      asset_version_id: mVersionId,
+      start_time: 0,
+      end_time: 4,
+    });
+    createItem(ownerId, timelineId, {
+      track_id: dialogueTrack.id,
+      asset_version_id: dVersionId,
+      start_time: 1,
+      end_time: 2,
+    });
+
+    const bytesFor = (jobId: string): Uint8Array => {
+      const exportRow = db
+        .prepare("SELECT asset_version_id FROM exports WHERE render_job_id = ?")
+        .get(jobId) as { asset_version_id: string };
+      const version = db
+        .prepare("SELECT file_path FROM asset_versions WHERE id = ?")
+        .get(exportRow.asset_version_id) as { file_path: string };
+      return Deno.readFileSync(version.file_path);
+    };
+
+    const job = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    runner = startRenderRunner({ pollMs: 5 });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job.id)?.status ?? ""));
+    assert(rawGetRenderJob(job.id)?.status === "succeeded");
+    const report = rawGetRenderJob(job.id)?.validation_report as
+      | { audio?: { items: number } }
+      | null;
+    assertEquals(report?.audio?.items, 2);
+    const withDuck = bytesFor(job.id);
+
+    // Turning ducking off changes the mix; so does the depth.
+    updateTrack(ownerId, timelineId, musicTrack.id, { duck_db: 0 });
+    const job2 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job2.id)?.status ?? ""));
+    assertNotEquals(bytesFor(job2.id), withDuck);
+
+    updateTrack(ownerId, timelineId, musicTrack.id, { duck_db: 12 });
+    const job3 = createRenderJob(ownerId, {
+      project_id: projectId,
+      timeline_id: timelineId,
+      preset_id: "preset-final",
+    });
+    await waitFor(() => TERMINAL_RENDER_STATUSES.includes(rawGetRenderJob(job3.id)?.status ?? ""));
+    assertNotEquals(bytesFor(job3.id), withDuck);
   });
 
   it("renders audio-track items end to end (deterministic mock mix)", async () => {

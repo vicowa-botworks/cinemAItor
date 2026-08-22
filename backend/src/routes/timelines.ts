@@ -12,6 +12,8 @@ import {
   deleteMarker,
   deleteTimeline,
   deleteTrack,
+  DUCK_DB_MAX,
+  DUCK_DB_MIN,
   duplicateItem,
   GAIN_DB_MAX,
   GAIN_DB_MIN,
@@ -248,6 +250,12 @@ function parseStateTrack(
       `tracks[${index}].gain_db must be a number between ${GAIN_DB_MIN} and ${GAIN_DB_MAX}`,
     );
   }
+  const duckDb = optionalNumber(o, "duck_db") ?? 0;
+  if (duckDb < DUCK_DB_MIN || duckDb > DUCK_DB_MAX) {
+    throw badRequest(
+      `tracks[${index}].duck_db must be a number between ${DUCK_DB_MIN} and ${DUCK_DB_MAX}`,
+    );
+  }
   return {
     id: requireString(o, "id", `tracks[${index}]`),
     timeline_id: timelineId,
@@ -257,6 +265,7 @@ function parseStateTrack(
     locked: requireBool(o, "locked", `tracks[${index}]`),
     muted: requireBool(o, "muted", `tracks[${index}]`),
     gain_db: gainDb,
+    duck_db: duckDb,
   };
 }
 
@@ -459,6 +468,7 @@ export const timelineRouter = new Router()
       locked: optionalBool(body, "locked"),
       muted: optionalBool(body, "muted"),
       gain_db: optionalNumber(body, "gain_db"),
+      duck_db: optionalNumber(body, "duck_db"),
     };
     const track = createTrack(userId, param(ctx as ParamsContext, "id"), input);
     ctx.response.status = 201;
@@ -483,6 +493,7 @@ export const timelineRouter = new Router()
           locked: optionalBool(body, "locked"),
           muted: optionalBool(body, "muted"),
           gain_db: optionalNumber(body, "gain_db"),
+          duck_db: optionalNumber(body, "duck_db"),
         },
       );
       if (!track) throw notFound("Track not found");

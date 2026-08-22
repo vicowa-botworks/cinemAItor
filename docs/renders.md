@@ -30,10 +30,12 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
     `enable=between(t, start, end)`, position/size/color from the item's `text_style`). Audio-track
     items become extra inputs, each run through `atrim` (the source window after the version trim is
     applied) + `asetpts` + `atempo` chain (speed; extreme speeds are split into repeated `atempo`
-    stages) + `volume` (the version's `gain_db`) + `afade` in/out, then silenced into its timeline
-    slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no 1/N normalization) —
-    the mix is trimmed back to the video length and mapped as AAC (192 k). Re-encodes to H.264 (+
-    AAC when audio is mixed); silent plans keep `-an`.
+    stages) + `volume` (the version's `gain_db` plus the track's mixer `gain_db`) + a
+    frame-evaluated ducking `volume` stage for music items (see “Ducking”) + `afade` in/out, then
+    silenced into its timeline slot with `adelay` and summed with
+    `amix=duration=longest:normalize=0` (no 1/N normalization) — the mix is trimmed back to the
+    video length and mapped as AAC (192 k). Re-encodes to H.264 (+AAC when audio is mixed); silent
+    plans keep `-an`.
   - **Audio-only** (`wav` presets): one input per audio-track item, each run through the same
     `atrim` + `asetpts` + `atempo` + `volume` + `afade` chain as the fx pass, then silenced into its
     timeline slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no 1/N
@@ -75,6 +77,14 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   fail the render (`No file for asset version ...`) if its proxy-only state has no master file.
   Per-item `source` is part of the mock engine's fingerprint and of the `validation_report.sources`
   (video `{proxy, master}`) and `validation_report.audio` (`{items, proxy, master}`) tallies.
+- **Ducking (music lowers under dialogue)**: a music-track item on a track with a positive `duck_db`
+  (0..60, default 0 = off) gets a frame-evaluated `volume` stage
+  (`volume='1-(1-G)*clip(between(t,s0,e0)+between(t,s1,e1)+…),0,1)':eval=frame`, where
+  `G = 10^(-duck_db/20)` and the windows are the rendered dialogue items' timeline spans clipped to
+  the music item's lifetime, merged when they overlap or touch, expressed in item-local seconds).
+  Dialogue items that are locked or muted (outside the render source) never duck; non-music tracks
+  are neither ducked nor ducking. The same windows drive the in-browser preview, so the mix matches
+  what the editor plays.
 - **Audio placement (items × version adjustments)**: an audio item's source window starts at
   `max(item.source_offset, version trim.start)` and consumes
   `min(duration / speed, trim.end −

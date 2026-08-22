@@ -25,6 +25,10 @@ export const MAX_ITEMS_PER_TIMELINE = 1024;
 export const GAIN_DB_MIN = -60;
 export const GAIN_DB_MAX = 24;
 
+/** Ducking reduction range in dB (0 = off; applied to music under dialogue). */
+export const DUCK_DB_MIN = 0;
+export const DUCK_DB_MAX = 60;
+
 function requireGainDb(gainDb: number | undefined, field: string): void {
   if (
     gainDb !== undefined &&
@@ -32,6 +36,16 @@ function requireGainDb(gainDb: number | undefined, field: string): void {
       gainDb < GAIN_DB_MIN || gainDb > GAIN_DB_MAX)
   ) {
     throw badRequest(`${field} must be a number between ${GAIN_DB_MIN} and ${GAIN_DB_MAX}`);
+  }
+}
+
+function requireDuckDb(duckDb: number | undefined, field: string): void {
+  if (
+    duckDb !== undefined &&
+    (typeof duckDb !== "number" || !Number.isFinite(duckDb) ||
+      duckDb < DUCK_DB_MIN || duckDb > DUCK_DB_MAX)
+  ) {
+    throw badRequest(`${field} must be a number between ${DUCK_DB_MIN} and ${DUCK_DB_MAX}`);
   }
 }
 
@@ -55,6 +69,8 @@ export interface Track {
   muted: boolean;
   /** Per-track audio gain in dB (basic mixer); 0 is neutral. */
   gain_db: number;
+  /** Ducking reduction in dB while dialogue sounds (music tracks); 0 is off. */
+  duck_db: number;
 }
 
 export interface TimelineItem {
@@ -140,6 +156,7 @@ export function rowToTrack(row: Record<string, unknown>): Track {
     locked: Boolean(row.locked),
     muted: Boolean(row.muted),
     gain_db: asNum(row.gain_db) ?? 0,
+    duck_db: asNum(row.duck_db) ?? 0,
   };
 }
 
@@ -344,6 +361,7 @@ export interface TrackInput {
   locked?: boolean;
   muted?: boolean;
   gain_db?: number;
+  duck_db?: number;
 }
 
 export function createTrack(
@@ -358,6 +376,7 @@ export function createTrack(
   }
   if (!input.name?.trim()) throw badRequest("name is required");
   requireGainDb(input.gain_db, "gain_db");
+  requireDuckDb(input.duck_db, "duck_db");
 
   const db = getDb();
   const count = (
@@ -392,8 +411,8 @@ export function createTrack(
 
   const id = crypto.randomUUID();
   (db.prepare(
-    `INSERT INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db, duck_db)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run as (...params: unknown[]) => unknown)(
     id,
     timelineId,
@@ -403,6 +422,7 @@ export function createTrack(
     input.locked ? 1 : 0,
     input.muted ? 1 : 0,
     input.gain_db ?? 0,
+    input.duck_db ?? 0,
   );
   logAudit(userId, "track.create", timelineId, { track_id: id });
   return getTrack(timelineId, id, userId) as Track;
@@ -418,11 +438,13 @@ export function updateTrack(
     locked?: boolean;
     muted?: boolean;
     gain_db?: number;
+    duck_db?: number;
   },
 ): Track | undefined {
   const track = getTrack(timelineId, trackId, userId, "write");
   if (!track) return undefined;
   requireGainDb(patch.gain_db, "gain_db");
+  requireDuckDb(patch.duck_db, "duck_db");
   if (
     patch.track_order !== undefined &&
     (typeof patch.track_order !== "number" || !Number.isInteger(patch.track_order) ||
@@ -447,13 +469,14 @@ export function updateTrack(
     }
   }
   (db.prepare(
-    `UPDATE tracks SET name = ?, track_order = ?, locked = ?, muted = ?, gain_db = ? WHERE id = ?`,
+    `UPDATE tracks SET name = ?, track_order = ?, locked = ?, muted = ?, gain_db = ?, duck_db = ? WHERE id = ?`,
   ).run as (...params: unknown[]) => unknown)(
     patch.name ?? track.name,
     patch.track_order ?? track.track_order,
     (patch.locked ?? track.locked) ? 1 : 0,
     (patch.muted ?? track.muted) ? 1 : 0,
     patch.gain_db ?? track.gain_db,
+    patch.duck_db ?? track.duck_db,
     trackId,
   );
   return getTrack(timelineId, trackId, userId);
@@ -1156,8 +1179,8 @@ export function replaceTimelineState(
 
   for (const track of data.tracks) {
     (db.prepare(
-      `INSERT OR IGNORE INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO tracks (id, timeline_id, track_type, name, track_order, locked, muted, gain_db, duck_db)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run as (...params: unknown[]) => unknown)(
       track.id,
       timelineId,
@@ -1167,6 +1190,7 @@ export function replaceTimelineState(
       track.locked ? 1 : 0,
       track.muted ? 1 : 0,
       Number(track.gain_db) || 0,
+      Number(track.duck_db) || 0,
     );
   }
   for (const item of data.items) {

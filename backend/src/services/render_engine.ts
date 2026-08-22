@@ -49,6 +49,13 @@ export interface RenderAudioItem {
   gain: number;
   fade_in: number;
   fade_out: number;
+  /**
+   * Ducking (AUD-013): lower this item by this many dB inside
+   * `duck_windows` (item-local, merged, in seconds). Set by the plan builder
+   * on music-track items that overlap rendered dialogue.
+   */
+  duck_db?: number;
+  duck_windows?: { start: number; end: number }[];
 }
 
 /** Text/subtitle overlay drawn on top of the video during the fx pass. */
@@ -216,11 +223,11 @@ const XFADE_NAMES: Record<string, string> = {
   slideright: "slideright",
 };
 
-function round2(x: number): number {
+export function round2(x: number): number {
   return Math.round(x * 100) / 100;
 }
 
-function round4(x: number): number {
+export function round4(x: number): number {
   return Math.round(x * 10000) / 10000;
 }
 
@@ -269,15 +276,61 @@ export function buildDrawTextFilter(overlay: RenderTextOverlay): string {
 }
 
 /**
+ * Frame-evaluated `volume` filter expression implementing ducking (AUD-013):
+ * full gain except inside the item-local windows, where the level drops by
+ * `duckDb` dB. Multiple (merged) windows are summed and clipped so the
+ * expression stays one term regardless of window count.
+ */
+export function duckVolumeExpr(
+  duckDb: number,
+  windows: { start: number; end: number }[],
+): string | null {
+  if (!Number.isFinite(duckDb) || duckDb <= 0 || windows.length === 0) return null;
+  const d = round4(Math.pow(10, -duckDb / 20));
+  const terms = windows
+    .map((w) => `between(t,${round4(w.start)},${round4(w.end)})`)
+    .join("+");
+  return `1-(1-${d})*clip(${terms},0,1)`;
+}
+
+/**
+ * Per-audio-item filter chain (shared by the fx and audio-only passes):
+ * trim the source window, reset timestamps, apply speed, static gain, duck
+ * (when the plan carries duck windows) and fades, then silence the item into
+ * its timeline slot.
+ */
+export function buildAudioItemChain(audio: RenderAudioItem): string[] {
+  const chain: string[] = [
+    `atrim=start=${round4(audio.source_offset)}:end=${
+      round4(audio.source_offset + audio.source_duration)
+    }`,
+    "asetpts=PTS-STARTPTS",
+    ...buildAtempoFilters(audio.speed),
+  ];
+  if (Math.abs(audio.gain - 1) > 1e-9) chain.push(`volume=${round4(audio.gain)}`);
+  const duck = duckVolumeExpr(audio.duck_db ?? 0, audio.duck_windows ?? []);
+  if (duck) chain.push(`volume='${duck}':eval=frame`);
+  if (audio.fade_in > 0) {
+    chain.push(`afade=t=in:st=0:d=${round2(audio.fade_in)}`);
+  }
+  if (audio.fade_out > 0) {
+    const st = Math.max(0, round2(audio.duration - audio.fade_out));
+    chain.push(`afade=t=out:st=${st}:d=${round2(audio.fade_out)}`);
+  }
+  chain.push(`adelay=${Math.round(audio.start_time * 1000)}:all=1`);
+  return chain;
+}
+
+/**
  * Build the ffmpeg command for a plan whose items carry per-item fx
  * (transitions, fades, color grade, source trimming, speed) or text
  * overlays: one input per item, a filter graph that trims, grades and fades
  * each video input, pairwise `xfade` (real transitions) or `concat` (hard
  * cuts) between consecutive items, and a final `drawtext` stage per text
  * overlay. Audio-track items become additional inputs, each trimmed, speed-
- * adjusted, gain-scaled and faded, then silenced into its timeline slot via
- * `adelay` and summed with `amix` (no normalization) onto the output.
- * Re-encodes to H.264 (+ AAC when audio is mixed).
+ * adjusted, gain-scaled, ducked (AUD-013) and faded, then silenced into its
+ * timeline slot via `adelay` and summed with `amix` (no normalization) onto
+ * the output. Re-encodes to H.264 (+ AAC when audio is mixed).
  */
 export function buildFxArgs(
   items: RenderInputItem[],
@@ -356,27 +409,11 @@ export function buildFxArgs(
   }
 
   if (audioItems.length > 0) {
-    // Each audio item: trim the source window, reset timestamps, apply speed,
-    // gain and fades, then silence it into its timeline slot.
+    // Each audio item: see buildAudioItemChain (trim, speed, gain, duck,
+    // fades, slot delay).
     audioItems.forEach((audio, k) => {
       const input = items.length + k;
-      const chain: string[] = [
-        `atrim=start=${round4(audio.source_offset)}:end=${
-          round4(audio.source_offset + audio.source_duration)
-        }`,
-        "asetpts=PTS-STARTPTS",
-        ...buildAtempoFilters(audio.speed),
-      ];
-      if (Math.abs(audio.gain - 1) > 1e-9) chain.push(`volume=${round4(audio.gain)}`);
-      if (audio.fade_in > 0) {
-        chain.push(`afade=t=in:st=0:d=${round2(audio.fade_in)}`);
-      }
-      if (audio.fade_out > 0) {
-        const st = Math.max(0, round2(audio.duration - audio.fade_out));
-        chain.push(`afade=t=out:st=${st}:d=${round2(audio.fade_out)}`);
-      }
-      chain.push(`adelay=${Math.round(audio.start_time * 1000)}:all=1`);
-      filters.push(`[${input}:a]${chain.join(",")}[ak${k}]`);
+      filters.push(`[${input}:a]${buildAudioItemChain(audio).join(",")}[ak${k}]`);
     });
     const mixInputs = audioItems.map((_, k) => `[ak${k}]`).join("");
     // Longest surviving stream wins, no 1/N normalization; the tail is cut
@@ -414,23 +451,7 @@ export function buildAudioArgs(
 
   const filters: string[] = [];
   audioItems.forEach((audio, k) => {
-    const chain: string[] = [
-      `atrim=start=${round4(audio.source_offset)}:end=${
-        round4(audio.source_offset + audio.source_duration)
-      }`,
-      "asetpts=PTS-STARTPTS",
-      ...buildAtempoFilters(audio.speed),
-    ];
-    if (Math.abs(audio.gain - 1) > 1e-9) chain.push(`volume=${round4(audio.gain)}`);
-    if (audio.fade_in > 0) {
-      chain.push(`afade=t=in:st=0:d=${round2(audio.fade_in)}`);
-    }
-    if (audio.fade_out > 0) {
-      const st = Math.max(0, round2(audio.duration - audio.fade_out));
-      chain.push(`afade=t=out:st=${st}:d=${round2(audio.fade_out)}`);
-    }
-    chain.push(`adelay=${Math.round(audio.start_time * 1000)}:all=1`);
-    filters.push(`[${k}:a]${chain.join(",")}[ak${k}]`);
+    filters.push(`[${k}:a]${buildAudioItemChain(audio).join(",")}[ak${k}]`);
   });
   const mixInputs = audioItems.map((_, k) => `[ak${k}]`).join("");
   filters.push(
@@ -693,10 +714,13 @@ export function fxFingerprint(
     .map((o) => `${o.start_time}-${o.end_time}:${o.text}:${JSON.stringify(o.style ?? null)}`)
     .join("|");
   const audioPart = audioItems
-    .map((a) =>
-      `${a.source ?? "master"}:${a.start_time}-${a.end_time}:${a.source_offset}` +
-      `:${a.source_duration}:${a.speed}:${a.gain}:${a.fade_in}:${a.fade_out}`
-    )
+    .map((a) => {
+      const duck = a.duck_windows?.length
+        ? `${a.duck_db}:${a.duck_windows.map((w) => `${w.start}-${w.end}`).join(";")}`
+        : "off";
+      return `${a.source ?? "master"}:${a.start_time}-${a.end_time}:${a.source_offset}` +
+        `:${a.source_duration}:${a.speed}:${a.gain}:${a.fade_in}:${a.fade_out}:${duck}`;
+    })
     .join("|");
   const tail = [overlayPart, audioPart].filter((p) => p !== "").join("##");
   return tail === "" ? itemPart : `${itemPart}##${tail}`;

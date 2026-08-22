@@ -6,6 +6,7 @@ import {
   activeTextItems,
   activeVisual,
   audioVolumeFor,
+  duckGainAt,
   fadeFactorAt,
   gradeFilter,
   playbackRange,
@@ -469,7 +470,11 @@ class TimelinePreview extends LitElement {
           return;
         }
         const fade = fadeFactorAt(item, t);
-        el.volume = audioVolumeFor((adj?.gain_db ?? 0) + Number(track.gain_db ?? 0), fade);
+        const duck = duckGainAt(this.tracks, item, t);
+        el.volume = audioVolumeFor(
+          (adj?.gain_db ?? 0) + Number(track.gain_db ?? 0),
+          fade * duck,
+        );
         try {
           if (Math.abs(el.currentTime - S) > AUDIO_SEEK_TOLERANCE) {
             el.currentTime = S;
