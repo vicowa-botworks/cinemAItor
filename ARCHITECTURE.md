@@ -219,8 +219,10 @@ server.ts (entry point)
    │   ├── Project backup/restore (DIA-006/007): POST /backups, GET /backups,
    │   │   POST /backups/:id/restore, DELETE /backups/:id — schema-3 bundles cover assets,
    │   │   timelines (tracks/items/markers/snapshots), and creative objects (storyboards/panels,
-   │   │   scenes/shots, prompt versions, references); restore remaps every creative FK and
-   │   │   rewrites snapshot-embedded ids to the restored objects, reporting dangling links
+   │   │   scenes/shots, prompt versions, references); export also writes a media bundle
+   │   │   (`backup-<id>/media/`, content-store layout) for transferability; restore remaps every
+   │   │   creative FK, rewrites snapshot-embedded ids, and imports the bundle media (SHA-256
+   │   │   verified), reporting dangling links and missing/corrupt media
   │   ├── Logger sink mirrors warn/error into the durable `diagnostics` table (DIA-003)
   │   └── (see docs/diagnostics.md)
    └── Legacy auth routes (/api/auth/register, /api/auth/login, /api/auth/me —

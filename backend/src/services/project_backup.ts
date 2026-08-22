@@ -1,13 +1,19 @@
+import { basename, dirname, join } from "@std/path";
 import { getDb } from "../db/database.ts";
+import { sha256File } from "../storage/checksums.ts";
+import { contentAddressedPath } from "../storage/paths.ts";
+import type { ContentStore } from "../storage/content_store.ts";
 
 // ---------------------------------------------------------------------------
 // DIA-006 / DIA-007: project backup and restore
 //
 // A backup is a JSON snapshot of one project's subtree: assets, timelines,
 // and creative objects (storyboards, panels, scenes, shots) with their
-// prompt version history and resolved references. Media binaries are never
-// copied: versions keep their content hash, so a restore can verify which
-// files are still in the content store and report the ones that are missing.
+// prompt version history and resolved references. Media binaries are copied
+// into a sibling bundle directory (`backup-<id>/media/`, content-addressed
+// like the store), so a backup is transferable; a restore without the bundle
+// verifies which files are still in the content store and reports the rest
+// as missing.
 //
 // Schema 2 adds the creative-object sections; schema 1 backups restore with
 // empty creative sections. Schema 3 adds full timeline snapshots; snapshots
@@ -662,6 +668,131 @@ export function backupMediaManifest(
   return [...seen.entries()]
     .map(([hash, info]) => ({ hash, ...info }))
     .sort((a, b) => a.hash.localeCompare(b.hash));
+}
+
+// ---------------------------------------------------------------------------
+// Media bundle (transferable backups)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bundle layout next to the JSON:
+ * `backup-<id>/media/<hash 0:2>/<hash 2:4>/<hash>.<ext>` — the media tree
+ * mirrors the content store so restore is a straight file copy.
+ */
+export function bundleDirForBackupFile(backupFile: string): string {
+  return join(dirname(backupFile), basename(backupFile, ".json"));
+}
+
+/** Relative path of a bundle media file inside the bundle directory. */
+export function bundleMediaRelPath(hash: string, storedName: string): string {
+  return join("media", hash.slice(0, 2), hash.slice(2, 4), storedName);
+}
+
+export interface BundleMediaEntry {
+  hash: string;
+  srcPath: string;
+  relPath: string;
+}
+
+/**
+ * Content-store files referenced by the backup, addressed for copying into
+ * the bundle directory. Hashes already absent from the store cannot be
+ * bundled and are left to the restore-time missing-media report.
+ */
+export function bundleMediaEntries(
+  data: ProjectBackupData,
+  resolve: (hash: string) => string | undefined,
+): BundleMediaEntry[] {
+  const entries: BundleMediaEntry[] = [];
+  const seen = new Set<string>();
+  for (const asset of data.assets) {
+    for (const version of asset.versions) {
+      if (!version.content_hash || seen.has(version.content_hash)) continue;
+      const srcPath = resolve(version.content_hash);
+      if (!srcPath) continue;
+      seen.add(version.content_hash);
+      entries.push({
+        hash: version.content_hash,
+        srcPath,
+        relPath: bundleMediaRelPath(version.content_hash, basename(srcPath)),
+      });
+    }
+  }
+  return entries.sort((a, b) => a.hash.localeCompare(b.hash));
+}
+
+export interface BundleMediaRestoreResult {
+  /** Files copied from the bundle into the content store. */
+  restored: number;
+  /** Files already present in the content store. */
+  reused: number;
+  /** Hashes whose bundle copy failed checksum verification. */
+  corrupted: string[];
+}
+
+/**
+ * Copy bundle media into the content store, verifying each file's SHA-256
+ * against its content-addressed name. A no-op when the bundle has no media
+ * directory (pre-bundle backups).
+ */
+export async function restoreBundleMedia(
+  bundleDir: string,
+  store: ContentStore,
+): Promise<BundleMediaRestoreResult> {
+  const result: BundleMediaRestoreResult = {
+    restored: 0,
+    reused: 0,
+    corrupted: [],
+  };
+  await walkBundleMedia(
+    join(bundleDir, "media"),
+    (path, name) => handleBundleFile(path, name, result, store),
+  );
+  return result;
+}
+
+async function walkBundleMedia(
+  dir: string,
+  visit: (path: string, name: string) => Promise<void>,
+): Promise<void> {
+  let entries: Deno.DirEntry[];
+  try {
+    entries = Array.from(Deno.readDirSync(dir));
+  } catch {
+    return; // No media directory: nothing to restore.
+  }
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory) {
+      await walkBundleMedia(path, visit);
+    } else if (entry.isFile) {
+      await visit(path, entry.name);
+    }
+  }
+}
+
+async function handleBundleFile(
+  path: string,
+  name: string,
+  result: BundleMediaRestoreResult,
+  store: ContentStore,
+): Promise<void> {
+  const dot = name.lastIndexOf(".");
+  const hash = dot > 0 ? name.slice(0, dot) : name;
+  if (!/^[0-9a-f]{64}$/.test(hash)) return;
+  if (store.resolveExisting(hash)) {
+    result.reused++;
+    return;
+  }
+  const actual = await sha256File(path);
+  if (actual !== hash) {
+    result.corrupted.push(hash);
+    return;
+  }
+  const dest = contentAddressedPath(store.layout, hash, dot > 0 ? name.slice(dot) : "");
+  await Deno.mkdir(dirname(dest), { recursive: true });
+  await Deno.copyFile(path, dest);
+  result.restored++;
 }
 
 // ---------------------------------------------------------------------------
