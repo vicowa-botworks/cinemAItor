@@ -22,9 +22,12 @@ import {
   backupCounts,
   backupMediaManifest,
   buildProjectBackupData,
+  bundleMediaEntries,
   type ProjectBackupData,
+  restoreBundleMedia,
   restoreProjectBackup,
 } from "../src/services/project_backup.ts";
+import { basename, dirname, join } from "@std/path";
 import { getContentStore, resetContentStore } from "../src/storage/content_store.ts";
 
 let owner: number;
@@ -237,6 +240,14 @@ describe("project backup and restore", () => {
     );
     assertEquals(manifest.length, 1);
     assertEquals(manifest[0].present, true);
+
+    const bundleEntries = bundleMediaEntries(
+      data,
+      (hash) => getContentStore().resolveExisting(hash),
+    );
+    assertEquals(bundleEntries.length, 1);
+    assertEquals(bundleEntries[0].hash, manifest[0].hash);
+    assert(bundleEntries[0].relPath.startsWith("media/"));
   });
 
   it("restores into a new project with fresh ids and remapped links", () => {
@@ -457,6 +468,88 @@ describe("project backup and restore", () => {
     assertEquals(restoredVersion.file_path, null);
   });
 
+  it("bundles media binaries so a backup is transferable", async () => {
+    const data = buildProjectBackupData(projectId);
+    const hash = getVersionHash();
+    const store = getContentStore();
+    const bundleDir = Deno.makeTempDirSync({ prefix: "cinemaitor_backup_bundle_" });
+    try {
+      await writeBundle(data, bundleDir);
+      const srcPath = store.resolveExisting(hash) as string;
+      const bundleFile = join(
+        bundleDir,
+        "media",
+        hash.slice(0, 2),
+        hash.slice(2, 4),
+        basename(srcPath),
+      );
+      assert(Deno.statSync(bundleFile).isFile);
+
+      // Simulate the bundle arriving on a host with an empty content store.
+      Deno.removeSync(srcPath);
+      assertEquals(store.resolveExisting(hash), undefined);
+
+      const media = await restoreBundleMedia(bundleDir, store);
+      assertEquals(media.restored, 1);
+      assertEquals(media.reused, 0);
+      assertEquals(media.corrupted, []);
+
+      const result = restoreProjectBackup(data, {
+        userId: collaborator,
+        resolveContent: (h) => store.resolveExisting(h),
+      });
+      assertEquals(
+        result.issues.filter((issue) => issue.includes("media not in content store")),
+        [],
+      );
+      const restoredVersion = (
+        getDb()
+          .prepare(
+            `SELECT v.* FROM asset_versions v
+             JOIN assets a ON a.id = v.asset_id
+             WHERE a.project_id = ?`,
+          )
+          .get(result.project_id)
+      ) as Record<string, unknown>;
+      assertEquals(restoredVersion.file_path, store.resolveExisting(hash));
+    } finally {
+      removeDir(bundleDir);
+    }
+  });
+
+  it("reports corrupted bundle copies instead of importing them", async () => {
+    const data = buildProjectBackupData(projectId);
+    const hash = getVersionHash();
+    const store = getContentStore();
+    const bundleDir = Deno.makeTempDirSync({ prefix: "cinemaitor_backup_bundle_" });
+    try {
+      await writeBundle(data, bundleDir);
+      const bundleDirForHash = join(bundleDir, "media", hash.slice(0, 2), hash.slice(2, 4));
+      const [entry] = Array.from(Deno.readDirSync(bundleDirForHash));
+      const bundleFile = join(bundleDirForHash, (entry as { name: string }).name);
+      const handle = await Deno.open(bundleFile, { append: true });
+      await handle.write(new TextEncoder().encode("corrupt"));
+      await handle.close();
+
+      Deno.removeSync(store.resolveExisting(hash) as string);
+      const media = await restoreBundleMedia(bundleDir, store);
+      assertEquals(media.restored, 0);
+      assertEquals(media.reused, 0);
+      assertEquals(media.corrupted, [hash]);
+
+      const result = restoreProjectBackup(data, {
+        userId: collaborator,
+        resolveContent: (h) => store.resolveExisting(h),
+      });
+      assertEquals(
+        result.issues.filter((issue) => issue.includes("media not in content store")).length,
+        1,
+      );
+    } finally {
+      removeDir(bundleDir);
+    }
+  });
+
   it("rejects unknown backup schema versions", () => {
     const data = buildProjectBackupData(projectId);
     const mutated = { ...data, schema: 99 } as unknown as ProjectBackupData;
@@ -673,4 +766,20 @@ function getVersionHash(): string {
     .prepare("SELECT content_hash FROM asset_versions WHERE id = ?")
     .get(versionId) as Record<string, unknown>;
   return String(row.content_hash);
+}
+
+async function writeBundle(
+  data: ProjectBackupData,
+  bundleDir: string,
+): Promise<void> {
+  for (
+    const entry of bundleMediaEntries(
+      data,
+      (hash) => getContentStore().resolveExisting(hash),
+    )
+  ) {
+    const dest = join(bundleDir, entry.relPath);
+    await Deno.mkdir(dirname(dest), { recursive: true });
+    await Deno.copyFile(entry.srcPath, dest);
+  }
 }

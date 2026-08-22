@@ -10,7 +10,7 @@ import {
   modelsReport,
   storageReport,
 } from "@cinemaItor/services/diagnostics.ts";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { ensureLayout } from "@cinemaItor/storage/paths.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
 import { getProjectAccessible } from "@cinemaItor/db/projects.ts";
@@ -24,6 +24,9 @@ import {
   backupCounts,
   backupMediaManifest,
   buildProjectBackupData,
+  bundleDirForBackupFile,
+  bundleMediaEntries,
+  restoreBundleMedia,
   restoreProjectBackup,
 } from "@cinemaItor/services/project_backup.ts";
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
@@ -102,6 +105,17 @@ export const diagnosticsRouter = new Router()
       const id = crypto.randomUUID();
       const filePath = join(layout.backups, `backup-${id}.json`);
       await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
+      const bundleDir = bundleDirForBackupFile(filePath);
+      for (
+        const entry of bundleMediaEntries(
+          data,
+          (hash) => getContentStore().resolveExisting(hash),
+        )
+      ) {
+        const dest = join(bundleDir, entry.relPath);
+        await Deno.mkdir(dirname(dest), { recursive: true });
+        await Deno.copyFile(entry.srcPath, dest);
+      }
       const record = createBackupRecord({
         id,
         project_id: projectId,
@@ -154,13 +168,26 @@ export const diagnosticsRouter = new Router()
           projectName = body.project_name;
         }
       }
+      // Transferable bundles: copy any media the bundle carries into the
+      // content store before the state restore probes for missing files.
+      const media = await restoreBundleMedia(
+        bundleDirForBackupFile(backup.file_path),
+        getContentStore(),
+      );
       const result = restoreProjectBackup(data, {
         userId,
         project_name: projectName,
         resolveContent: (hash) => getContentStore().resolveExisting(hash),
       });
+      for (const hash of media.corrupted) {
+        result.issues.push(
+          `media hash ${
+            hash.slice(0, 12)
+          }…: bundle copy failed checksum verification, not restored`,
+        );
+      }
       ctx.response.status = 201;
-      ctx.response.body = result;
+      ctx.response.body = { ...result, media };
     },
   )
   .delete("/api/v1/diagnostics/backups/:id", authMiddleware, (ctx, _next) => {
@@ -173,6 +200,9 @@ export const diagnosticsRouter = new Router()
     const removed = deleteBackup(backup.id);
     if (removed) {
       Deno.remove(backup.file_path).catch(() => undefined);
+      Deno.remove(bundleDirForBackupFile(backup.file_path), {
+        recursive: true,
+      }).catch(() => undefined);
     }
     ctx.response.body = { message: "Backup deleted" };
   });

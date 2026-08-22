@@ -30,7 +30,10 @@ DIA-001…DIA-008).
   timeline **snapshots** themselves, with their serialized state. Global-scope assets, jobs and
   renders are intentionally out of scope; asset references keep global asset ids (they ride along
   with the prompt scope). A **media manifest** (`hash → present/size`) lets the operator see exactly
-  which content-addressed files a restore will need.
+  which content-addressed files a restore will need. The export also writes a **media bundle**: a
+  sibling `backup-<id>/media/<h0:2>/<h2:4>/<hash>.<ext>` tree — the content-store layout — with one
+  copy of each referenced file that is still in the store, so a backup + its bundle directory is
+  transferable between hosts (pre-bundle single-file backups remain restorable).
 - **Restore** (DIA-007): `restoreProjectBackup()` re-creates the subtree under **fresh UUIDs** in a
   new project (the creator is the restoring user). Slugs/alias slugs are made unique on collision.
   Every FK is remapped — asset → version → alias/tag, timeline → track → item → **marker** →
@@ -42,9 +45,13 @@ DIA-001…DIA-008).
   works on the restored timeline; snapshot entries whose targets were not part of the backup are
   dropped from the payload and reported, as are snapshots from pre-schema-3 backups. A link whose
   target was not part of the backup is nulled and reported in `issues` rather than failing the
-  restore. Media is re-resolved against the content store (`resolveExisting` verifies the file is
-  actually on disk); missing files do **not** fail the restore — the version row is still created
-  (so item ordering is preserved) and each gap is reported in `issues`.
+  restore. Before the state restore, any media bundle next to the backup JSON is copied into the
+  content store, each file's SHA-256 re-verified against its content-addressed name — a corrupt copy
+  is skipped and reported in `issues`, already-present files are deduplicated as `reused`, and the
+  response carries a `media: { restored, reused, corrupted }` summary. Media is then re-resolved
+  against the content store (`resolveExisting` verifies the file is actually on disk); missing files
+  do **not** fail the restore — the version row is still created (so item ordering is preserved) and
+  each gap is reported in `issues`.
 - **Crash recovery** (DIA-008): already provided by the generation-job and render-job runners — both
   use leases (`lease_owner` / `lease_expires_at`) and `recoverStale*Jobs()` re-queues jobs whose
   lease expired, so a crashed process leaves no stuck work (covered by the job/render runner tests).
@@ -53,20 +60,21 @@ DIA-001…DIA-008).
 
 All under `/api/v1/diagnostics`, behind `authMiddleware`.
 
-| Method | Path                                               | Access                 | Result                                                                |
-| ------ | -------------------------------------------------- | ---------------------- | --------------------------------------------------------------------- |
-| GET    | `/hardware`                                        | any user               | hardware report                                                       |
-| GET    | `/models`                                          | any user               | model health report                                                   |
-| GET    | `/storage`                                         | any user               | storage usage / orphans / missing media                               |
-| GET    | `/logs?category&severity&since_hours&limit`        | any user               | `count` + filtered entries                                            |
-| POST   | `/export`                                          | admin                  | writes redacted bundle → `{ path, generated_at, size }`               |
-| POST   | `/backups` `(body: { project_id })`                | project read           | creates backup file + row → `201 { backup, counts, media }`           |
-| GET    | `/backups`                                         | any user               | caller's backups (admin sees all)                                     |
-| POST   | `/backups/:id/restore` `(body: { project_name? })` | backup creator / admin | restores subtree → `201 { project_id, project_name, counts, issues }` |
-| DELETE | `/backups/:id`                                     | backup creator / admin | removes file + row → `{ ok: true }`                                   |
+| Method | Path                                               | Access                 | Result                                                                                                    |
+| ------ | -------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| GET    | `/hardware`                                        | any user               | hardware report                                                                                           |
+| GET    | `/models`                                          | any user               | model health report                                                                                       |
+| GET    | `/storage`                                         | any user               | storage usage / orphans / missing media                                                                   |
+| GET    | `/logs?category&severity&since_hours&limit`        | any user               | `count` + filtered entries                                                                                |
+| POST   | `/export`                                          | admin                  | writes redacted bundle → `{ path, generated_at, size }`                                                   |
+| POST   | `/backups` `(body: { project_id })`                | project read           | creates backup file + row → `201 { backup, counts, media }`                                               |
+| GET    | `/backups`                                         | any user               | caller's backups (admin sees all)                                                                         |
+| POST   | `/backups/:id/restore` `(body: { project_name? })` | backup creator / admin | restores subtree (importing any media bundle) → `201 { project_id, project_name, counts, issues, media }` |
+| DELETE | `/backups/:id`                                     | backup creator / admin | removes file + row → `{ ok: true }`                                                                       |
 
-Backups are stored as `<app_data>/backups/backup-<uuid>.json`; the `backups` table (migration 0012)
-tracks id, source project, path, and `counts_json`.
+Backups are stored as `<app_data>/backups/backup-<uuid>.json` plus an optional media bundle
+(`<app_data>/backups/backup-<uuid>/media/...`); the `backups` table (migration 0012) tracks id,
+source project, path, and `counts_json`.
 
 ## Testing
 

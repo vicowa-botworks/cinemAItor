@@ -56,12 +56,14 @@ The product track follows `MASTER-PLAN.md`.
       logger (warn/error sink; logging failures can never break a request); DIA-004 storage report
       (per-directory usage, content-store dedup, orphan files, missing version media); DIA-005
       redacted diagnostics export (no `*_secret` config keys); DIA-006 project backup (JSON bundle
-      under `backups/` + `backups` table record, media manifest with presence/size; schema 2 adds
-      storyboards/panels, scenes/shots, prompt-version history, and resolved references); DIA-007
-      restore (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/
+      under `backups/` + `backups` table record, media manifest with presence/size, sibling media
+      bundle dir for transferability; schema 2 adds storyboards/panels, scenes/shots, prompt-version
+      history, and resolved references; schema 3 adds full timeline snapshots); DIA-007 restore
+      (fresh ids, slug-collision-safe, FK-remapped assets/versions/aliases/tags/
       timelines/tracks/items/markers plus all creative objects and their prompt/reference links,
-      per-file missing-media and dangling-link reports); DIA-008 crash recovery (already covered by
-      the lease + stale-recovery of the job/render runners, tested)
+      SHA-256-verified media-bundle import, per-file missing-media and dangling-link reports);
+      DIA-008 crash recovery (already covered by the lease + stale-recovery of the job/render
+      runners, tested)
 - [x] Audio generation (Milestone 7 part 1, AUD-009/010/011): `POST /api/v1/audio/generate`
       generates music / voiceover (text to speech) / SFX from a prompt via the generation pipeline
       (kind → task type `music` / `voice` / `audio`), each call targeting a fresh `audio` asset;
@@ -268,12 +270,19 @@ The product track follows `MASTER-PLAN.md`.
       dropped and reported; snapshots in pre-schema-3 backups (count-only) are skipped and reported.
       Backup `counts.snapshots` now counts the snapshots carried by the document (the earlier
       `snapshots_skipped` field is gone)
+- [x] Media-bundle backup (Workstream 13 follow-up): the backup export now also writes a media
+      bundle next to the JSON — `backups/backup-<id>/media/<h0:2>/<h2:4>/<hash>.<ext>` (the
+      content-store layout, one copy per referenced file still in the store) — so a backup + bundle
+      is transferable between hosts. Restore imports the bundle first (each file re-verified by
+      SHA-256; corrupt copies skipped + reported, present files deduplicated) and then resolves
+      media against the content store as before; the response gains a
+      `media: { restored, reused, corrupted }` summary. Pre-bundle single-file backups remain
+      restorable; deleting a backup removes the bundle too
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 13 (Diagnostics) follow-up: backup of media binaries (transferable bundles)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
       project templates, advanced storage management, ducking, audio cleanup, subtitle generation
       from dialogue/voiceover, A/B + version comparison improvements, model benchmark
