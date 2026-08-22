@@ -68,8 +68,8 @@ app-root (main router)
 ├── login-form (v1 auth: login / bootstrap)
 ├── project-list (project dashboard)
 │   ├── project-card (individual project)
-│   └── project-form (create)
-├── project-detail (project settings, edit, delete)
+│   └── project-form (create; template picker pre-creates a starting timeline)
+├── project-detail (project settings, edit, delete; shows the project's template)
 │   └── project-form (edit)
 ├── asset-list (global library + per-project via #/project/:id/assets)
 │   ├── asset-card (tile with lazy blob-preview thumbnail)
@@ -144,10 +144,13 @@ server.ts (entry point)
 │   └── GET /me
 ├── Project routes (/api/v1/projects/*, auth middleware)
 │   ├── GET / (list accessible)
-│   ├── POST / (create)
+│   ├── POST / (create; optional template_id materializes a starting timeline)
 │   ├── GET /:id
 │   ├── PATCH /:id
 │   └── DELETE /:id (soft delete)
+├── Template routes (/api/v1/templates, auth middleware)
+│   ├── GET / (system-seeded starting structures; read-only)
+│   └── (see docs/projects.md "Project templates")
 ├── Asset routes (/api/v1/assets/*, auth middleware)
 │   ├── CRUD + upload + versions + restore + aliases + tags + preview
 │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
@@ -239,6 +242,8 @@ server.ts (entry point)
 - `schema.ts`: Legacy CRUD functions with parameterized queries (SQL injection safe)
 - `projects.ts`: Project repository + project permission checks
 - `assets.ts`: Asset/alias/tag/version repository + asset permission checks
+- `templates.ts`: Global project templates — structure parsing/validation, list/get, and
+  `applyTemplateStructure` (creates the starting timeline + tracks with compensation)
 
 ### Storage layer:
 

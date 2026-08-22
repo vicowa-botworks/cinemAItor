@@ -12,6 +12,7 @@ import {
   type ProjectUpdates,
   updateProject,
 } from "@cinemaItor/db/projects.ts";
+import { applyTemplateStructure, getTemplate } from "@cinemaItor/db/templates.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
 async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
@@ -159,7 +160,22 @@ export const projectRouter = new Router()
     const userId = (ctx as AuthedContext).userId;
     if (!userId) throw unauthorized("Authentication required");
     const input = validateProjectInput(await readJsonBody(ctx));
+    // An explicit template must exist before the project is created, and its
+    // structure is materialized right after (compensated by project removal
+    // if materialization fails).
+    const template = input.template_id ? getTemplate(input.template_id) : undefined;
+    if (input.template_id && !template) {
+      throw badRequest(`unknown template_id: ${input.template_id}`);
+    }
     const project = createProject(input, userId);
+    if (template) {
+      try {
+        applyTemplateStructure(userId, project.id, template);
+      } catch (error) {
+        deleteProject(project.id, userId);
+        throw error;
+      }
+    }
     ctx.response.status = 201;
     ctx.response.body = project;
   })

@@ -101,6 +101,7 @@ export class ProjectDetail extends LitElement {
     error: {},
     editing: {},
     deleting: {},
+    templateNames: {},
   };
 
   constructor() {
@@ -111,6 +112,7 @@ export class ProjectDetail extends LitElement {
     this.error = "";
     this.editing = false;
     this.deleting = false;
+    this.templateNames = {};
   }
 
   async connectedCallback() {
@@ -132,6 +134,19 @@ export class ProjectDetail extends LitElement {
     }
   }
 
+  async _loadTemplates() {
+    if (this._templatesLoaded) return;
+    this._templatesLoaded = true;
+    try {
+      const templates = await api.listTemplates();
+      this.templateNames = Object.fromEntries(
+        templates.map((t) => [t.id, t.name]),
+      );
+    } catch {
+      // Templates are optional context; a failed lookup just hides the name.
+    }
+  }
+
   async _loadProject() {
     if (!this.projectId) return;
     this.loading = true;
@@ -140,6 +155,7 @@ export class ProjectDetail extends LitElement {
       this.project = await api.getProject(this.projectId);
       this._loadedId = this.project.id;
       this.editing = false;
+      if (this.project.template_id) await this._loadTemplates();
     } catch (err) {
       this.error = err.message || "Failed to load project";
       this._loadedId = this.projectId;
@@ -234,6 +250,11 @@ export class ProjectDetail extends LitElement {
             <span class="meta-tag">${(p.audio_sample_rate / 1000).toFixed(
               1,
             )} kHz audio</span>
+            ${p.template_id
+              ? html`<span class="meta-tag">Template: ${
+                this.templateNames[p.template_id] ?? p.template_id
+              }</span>`
+              : ""}
           </div>
           ${p.description ? html`<p class="description">${p.description}</p>` : ""}
           <div class="actions">
