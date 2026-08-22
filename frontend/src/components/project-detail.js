@@ -7,7 +7,6 @@ export class ProjectDetail extends LitElement {
     .detail-container {
       max-width: 900px;
       margin: 0 auto;
-      padding: 30px 20px;
     }
 
     .back-btn {

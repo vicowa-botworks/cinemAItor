@@ -36,6 +36,7 @@ export class AppRoot extends LitElement {
 
     .view {
       min-height: calc(100vh - 70px);
+      padding: 30px 20px;
     }
   `;
 

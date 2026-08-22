@@ -8,7 +8,6 @@ export class ProjectList extends LitElement {
     .project-list-container {
       max-width: 1200px;
       margin: 0 auto;
-      padding: 30px 20px;
     }
 
     .list-header {

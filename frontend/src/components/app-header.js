@@ -1,5 +1,18 @@
 import { css, html, LitElement } from "lit";
 
+const NAV_ROUTES = {
+  "/projects": ["/projects", "/project/"],
+  "/assets": ["/assets", "/asset/"],
+  "/storyboards": ["/storyboards", "/storyboard/"],
+  "/scenes": ["/scenes", "/scene/", "/review/"],
+  "/prompts": ["/prompts"],
+  "/models": ["/models"],
+  "/jobs": ["/jobs"],
+  "/timelines": ["/timelines", "/timeline/"],
+  "/diagnostics": ["/diagnostics"],
+  "/login": ["/login"],
+};
+
 export class AppHeader extends LitElement {
   static styles = css`
     header {
@@ -80,6 +93,17 @@ export class AppHeader extends LitElement {
     super();
     this.userName = "";
     this.isLoggedIn = false;
+    this._onHashChange = () => this.requestUpdate();
+  }
+
+  connectedCallback() {
+    super.connectedCallback?.();
+    window.addEventListener("hashchange", this._onHashChange);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback?.();
+    window.removeEventListener("hashchange", this._onHashChange);
   }
 
   setUserData(name, loggedIn) {
@@ -98,12 +122,14 @@ export class AppHeader extends LitElement {
                 <a href="#/projects" class="${this._isActive(
                   "/projects",
                 )}">Projects</a>
-                <a href="#/assets" class="${this._isActive("/assets")}">Assets</a>
+                <a href="#/assets" class="${this._isActive(
+                  "/assets",
+                )}">Assets</a>
                 <a href="#/storyboards" class="${this._isActive(
-                  "/storyboard",
+                  "/storyboards",
                 )}">Storyboards</a>
                 <a href="#/scenes" class="${this._isActive(
-                  "/scene",
+                  "/scenes",
                 )}">Scenes</a>
                 <a href="#/prompts" class="${this._isActive(
                   "/prompts",
@@ -113,7 +139,7 @@ export class AppHeader extends LitElement {
                 )}">Models</a>
                 <a href="#/jobs" class="${this._isActive("/jobs")}">Jobs</a>
                 <a href="#/timelines" class="${this._isActive(
-                  "/timeline",
+                  "/timelines",
                 )}">Timelines</a>
                 <a href="#/diagnostics" class="${this._isActive(
                   "/diagnostics",
@@ -133,9 +159,24 @@ export class AppHeader extends LitElement {
     `;
   }
 
-  _isActive(path) {
-    const current = window.location.hash || "#/login";
-    return current.includes(path) ? "active" : "";
+  _activeRoute() {
+    const hash = window.location.hash || "#/login";
+    const path = hash.split("?")[0].replace(/^#/, "");
+    // #/project/:id/assets renders the asset list, so it is the Assets tab.
+    if (
+      path === "/assets" || path.startsWith("/asset/") ||
+      /\/project\/[^/]+\/assets$/.test(path)
+    ) {
+      return "/assets";
+    }
+    for (const [route, prefixes] of Object.entries(NAV_ROUTES)) {
+      if (prefixes.some((p) => path === p || path.startsWith(p))) return route;
+    }
+    return null;
+  }
+
+  _isActive(route) {
+    return this._activeRoute() === route ? "active" : "";
   }
 
   _goHome() {
