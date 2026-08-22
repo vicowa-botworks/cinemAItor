@@ -8,11 +8,10 @@ import { getDb } from "../db/database.ts";
 // prompt version history and resolved references. Media binaries are never
 // copied: versions keep their content hash, so a restore can verify which
 // files are still in the content store and report the ones that are missing.
-// Snapshots are intentionally not restored (their serialized state embeds
-// the old ids) and are counted as an issue.
 //
 // Schema 2 adds the creative-object sections; schema 1 backups restore with
-// empty creative sections.
+// empty creative sections. Schema 3 adds full timeline snapshots; snapshots
+// in older backups are skipped and reported as issues.
 // ---------------------------------------------------------------------------
 
 export interface BackupProjectData {
@@ -99,8 +98,26 @@ export interface BackupTimelineData {
     status: string;
     created_at: string;
   }[];
-  markers: { time: number; label: string | null; notes: string | null }[];
-  snapshots: number; // count only — snapshots embed old ids and are not restored
+  markers: {
+    id: string;
+    time: number;
+    label: string | null;
+    notes: string | null;
+  }[];
+  /**
+   * Schema 3: full snapshot rows, restored with remapped ids. Schema 1/2
+   * documents carry a plain count here instead (skipped on restore).
+   */
+  snapshots: BackupSnapshotData[] | number;
+}
+
+export interface BackupSnapshotData {
+  id: string;
+  name: string;
+  notes: string | null;
+  created_at: string;
+  /** Parsed `snapshot_data_json`; null when the stored JSON was unreadable. */
+  snapshot_data: Record<string, unknown> | null;
 }
 
 export interface BackupShotData {
@@ -196,7 +213,7 @@ export interface BackupReferenceData {
 }
 
 export interface ProjectBackupData {
-  schema: 1 | 2;
+  schema: 1 | 2 | 3;
   created_at: string;
   project: BackupProjectData;
   assets: BackupAssetData[];
@@ -216,7 +233,7 @@ export interface BackupCounts {
   tracks: number;
   items: number;
   markers: number;
-  snapshots_skipped: number;
+  snapshots: number;
   storyboards: number;
   panels: number;
   scenes: number;
@@ -381,15 +398,39 @@ export function buildProjectBackupData(projectId: string): ProjectBackupData {
         .prepare("SELECT * FROM timeline_markers WHERE timeline_id = ? ORDER BY time")
         .all(timelineId) as unknown as Row[]
     ).map((m) => ({
+      id: asString(m.id) as string,
       time: Number(m.time ?? 0),
       label: asString(m.label),
       notes: asString(m.notes),
     }));
-    const snapshots = db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM timeline_snapshots WHERE timeline_id = ?",
-      )
-      .get(timelineId) as unknown as { n: number };
+    const snapshots: BackupSnapshotData[] = (
+      db
+        .prepare(
+          `SELECT id, name, notes, created_at, snapshot_data_json
+           FROM timeline_snapshots WHERE timeline_id = ? ORDER BY created_at`,
+        )
+        .all(timelineId) as unknown as Row[]
+    ).map((s) => {
+      let parsed: Record<string, unknown> | null = null;
+      const raw = asString(s.snapshot_data_json);
+      if (raw) {
+        try {
+          const value: unknown = JSON.parse(raw);
+          if (value && typeof value === "object" && !Array.isArray(value)) {
+            parsed = value as Record<string, unknown>;
+          }
+        } catch {
+          // Unreadable snapshot data: kept in the backup, reported on restore.
+        }
+      }
+      return {
+        id: asString(s.id) as string,
+        name: asString(s.name) ?? "Snapshot",
+        notes: asString(s.notes),
+        created_at: asString(s.created_at) ?? "",
+        snapshot_data: parsed,
+      };
+    });
 
     timelines.push({
       id: timelineId,
@@ -400,7 +441,7 @@ export function buildProjectBackupData(projectId: string): ProjectBackupData {
       tracks,
       items,
       markers,
-      snapshots: Number(snapshots.n ?? 0),
+      snapshots,
     });
   }
 
@@ -565,7 +606,7 @@ export function buildProjectBackupData(projectId: string): ProjectBackupData {
   }
 
   return {
-    schema: 2,
+    schema: 3,
     created_at: new Date().toISOString(),
     project,
     assets,
@@ -587,7 +628,10 @@ export function backupCounts(data: ProjectBackupData): BackupCounts {
     tracks: data.timelines.reduce((n, t) => n + t.tracks.length, 0),
     items: data.timelines.reduce((n, t) => n + t.items.length, 0),
     markers: data.timelines.reduce((n, t) => n + t.markers.length, 0),
-    snapshots_skipped: data.timelines.reduce((n, t) => n + t.snapshots, 0),
+    snapshots: data.timelines.reduce(
+      (n, t) => n + (typeof t.snapshots === "number" ? t.snapshots : t.snapshots.length),
+      0,
+    ),
     storyboards: data.storyboards?.length ?? 0,
     panels: data.storyboards?.reduce((n, b) => n + b.panels.length, 0) ?? 0,
     scenes: data.scenes?.length ?? 0,
@@ -638,6 +682,82 @@ export interface RestoreResult {
   issues: string[];
 }
 
+interface RemappedSnapshot {
+  /** Snapshot payload ready for `replaceTimelineState`. */
+  data: Record<string, unknown>;
+  /** Tracks/items/markers dropped because their targets were not restored. */
+  dropped: number;
+}
+
+/**
+ * Rewrite the ids embedded in a snapshot payload to the restored objects'
+ * id. Entries whose targets (track, item, marker, media version) were not
+ * part of this restore are dropped and counted.
+ */
+function remapSnapshotData(
+  raw: Record<string, unknown> | null,
+  trackMap: Map<string, string>,
+  itemMap: Map<string, string>,
+  markerMap: Map<string, string>,
+  versionMap: Map<string, string>,
+): RemappedSnapshot | null {
+  if (!raw) return null;
+  const lookup = (
+    map: Map<string, string>,
+    id: unknown,
+  ): string | undefined => (typeof id === "string" ? map.get(id) : undefined);
+
+  const dropped = { tracks: 0, items: 0, markers: 0 };
+
+  const tracks = (Array.isArray(raw.tracks) ? raw.tracks : [])
+    .filter((t): t is Record<string, unknown> => typeof t === "object" && t !== null)
+    .map((t): Record<string, unknown> | null => {
+      const id = lookup(trackMap, t.id);
+      if (!id) {
+        dropped.tracks++;
+        return null;
+      }
+      return { ...t, id };
+    })
+    .filter((t): t is Record<string, unknown> => t !== null);
+
+  const trackIds = new Set(tracks.map((t) => t.id as string));
+  const items = (Array.isArray(raw.items) ? raw.items : [])
+    .filter((i): i is Record<string, unknown> => typeof i === "object" && i !== null)
+    .map((i): Record<string, unknown> | null => {
+      const id = lookup(itemMap, i.id);
+      const trackId = lookup(trackMap, i.track_id);
+      const versionId = i.asset_version_id ? lookup(versionMap, i.asset_version_id) : undefined;
+      if (!id || !trackId || !trackIds.has(trackId) || !versionId) {
+        dropped.items++;
+        return null;
+      }
+      return { ...i, id, track_id: trackId, asset_version_id: versionId };
+    })
+    .filter((i): i is Record<string, unknown> => i !== null);
+
+  const markers = (Array.isArray(raw.markers) ? raw.markers : [])
+    .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
+    .map((m): Record<string, unknown> | null => {
+      const id = lookup(markerMap, m.id);
+      if (!id) {
+        dropped.markers++;
+        return null;
+      }
+      return { ...m, id };
+    })
+    .filter((m): m is Record<string, unknown> => m !== null);
+
+  const data: Record<string, unknown> = { ...raw };
+  data.tracks = tracks;
+  data.items = items;
+  data.markers = markers;
+  return {
+    data,
+    dropped: dropped.tracks + dropped.items + dropped.markers,
+  };
+}
+
 function uniqueSlug(base: string): string {
   const db = getDb();
   const exists = (slug: string) => {
@@ -671,15 +791,17 @@ function uniqueAlias(base: string): string {
  * Restore a backup into a brand-new project owned by `userId`. All ids are
  * fresh UUIDs; foreign keys (assets inside a project, versions, tracks,
  * items, creative objects, prompt versions, references) are remapped.
- * Timeline snapshots are skipped (they embed the old ids) and reported as
- * issues, as are versions whose media is missing and creative links whose
- * targets were not part of the backup.
+ * Schema 3 snapshots are restored with their embedded ids remapped to the
+ * restored objects (snapshot entries referring to objects outside the
+ * backup are dropped and reported). Snapshots from schema 1/2 backups are
+ * skipped and reported, as are versions whose media is missing and creative
+ * links whose targets were not part of the backup.
  */
 export function restoreProjectBackup(
   data: ProjectBackupData,
   options: RestoreOptions,
 ): RestoreResult {
-  if (data.schema !== 1 && data.schema !== 2) {
+  if (data.schema !== 1 && data.schema !== 2 && data.schema !== 3) {
     throw new Error(`Unsupported backup schema: ${String(data.schema)}`);
   }
   const db = getDb();
@@ -1139,6 +1261,12 @@ export function restoreProjectBackup(
       `INSERT INTO timeline_markers (id, timeline_id, time, label, notes, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
+    const insertSnapshot = db.prepare(
+      `INSERT INTO timeline_snapshots (
+        id, timeline_id, name, snapshot_data_json, notes, created_at,
+        created_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
 
     for (const timeline of data.timelines) {
       const newTimelineId = crypto.randomUUID();
@@ -1153,6 +1281,8 @@ export function restoreProjectBackup(
       );
 
       const trackMap = new Map<string, string>();
+      const itemMap = new Map<string, string>();
+      const markerMap = new Map<string, string>();
       for (const track of timeline.tracks) {
         const newTrackId = crypto.randomUUID();
         trackMap.set(track.id, newTrackId);
@@ -1194,8 +1324,10 @@ export function restoreProjectBackup(
           );
           continue;
         }
+        const newItemId = crypto.randomUUID();
+        itemMap.set(item.id, newItemId);
         (insertItem.run as (...params: unknown[]) => unknown)(
-          crypto.randomUUID(),
+          newItemId,
           newTimelineId,
           newTrackId,
           newVersionId,
@@ -1218,8 +1350,10 @@ export function restoreProjectBackup(
       }
 
       for (const marker of timeline.markers) {
+        const newMarkerId = crypto.randomUUID();
+        markerMap.set(marker.id, newMarkerId);
         insertMarker.run(
-          crypto.randomUUID(),
+          newMarkerId,
           newTimelineId,
           marker.time,
           marker.label,
@@ -1228,10 +1362,42 @@ export function restoreProjectBackup(
         );
       }
 
-      if (timeline.snapshots > 0) {
+      const snapshots = Array.isArray(timeline.snapshots) ? timeline.snapshots : [];
+      if (!Array.isArray(timeline.snapshots) && timeline.snapshots > 0) {
         issues.push(
-          `timeline "${timeline.name}": ${timeline.snapshots} snapshot(s) skipped (they embed original ids)`,
+          `timeline "${timeline.name}": ${timeline.snapshots} snapshot(s) skipped (backup predates snapshot restore)`,
         );
+      }
+      for (const snapshot of snapshots) {
+        const remapped = remapSnapshotData(
+          snapshot.snapshot_data,
+          trackMap,
+          itemMap,
+          markerMap,
+          versionMap,
+        );
+        if (!remapped) {
+          issues.push(
+            `snapshot "${snapshot.name}" in timeline "${timeline.name}": skipped (no readable snapshot data)`,
+          );
+          continue;
+        }
+        (insertSnapshot.run as (...params: unknown[]) => unknown)(
+          crypto.randomUUID(),
+          newTimelineId,
+          snapshot.name,
+          JSON.stringify(remapped.data),
+          snapshot.notes,
+          snapshot.created_at || now,
+          options.userId,
+        );
+        if (remapped.dropped > 0) {
+          issues.push(
+            `snapshot "${snapshot.name}" in timeline "${timeline.name}": ${remapped.dropped} entr${
+              remapped.dropped === 1 ? "y" : "ies"
+            } dropped (not part of backup)`,
+          );
+        }
       }
     }
 

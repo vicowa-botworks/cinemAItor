@@ -3,7 +3,16 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import * as schema from "../src/db/schema.ts";
 import { getDb, resetDb } from "../src/db/database.ts";
 import { addAlias, addTag, createAsset, createAssetVersion } from "../src/db/assets.ts";
-import { createItem, createMarker, createTimeline, createTrack } from "../src/db/timelines.ts";
+import {
+  createItem,
+  createMarker,
+  createSnapshot,
+  createTimeline,
+  createTrack,
+  listItems,
+  listTracks,
+  restoreSnapshot,
+} from "../src/db/timelines.ts";
 import { createPanel, createStoryboard } from "../src/db/storyboards.ts";
 import { createScene, createShot } from "../src/db/scenes.ts";
 import { createProject } from "../src/db/projects.ts";
@@ -25,6 +34,8 @@ let appData: string;
 let assetId: string;
 let versionId: string;
 let timelineId: string;
+let trackId: string;
+let itemId: string;
 let storyboardId: string;
 let panelId: string;
 let sceneId: string;
@@ -104,26 +115,19 @@ describe("project backup and restore", () => {
       project_id: projectId,
       name: "Main",
     }).id;
-    const track = createTrack(owner, timelineId, {
+    trackId = createTrack(owner, timelineId, {
       track_type: "video",
       name: "V1",
-    });
-    createItem(owner, timelineId, {
-      track_id: track.id,
+    }).id;
+    itemId = createItem(owner, timelineId, {
+      track_id: trackId,
       asset_version_id: versionId,
       start_time: 0,
       end_time: 4,
-    });
+    }).id;
     createMarker(owner, timelineId, { time: 2, label: "beat" });
-    // Snapshots embed ids and are skipped by restore.
-    getDb()
-      .prepare(
-        `INSERT INTO timeline_snapshots (
-          id, timeline_id, name, snapshot_data_json, notes, created_at,
-          created_by_user_id
-        ) VALUES (?, ?, 'snap1', '{}', NULL, datetime('now'), ?)`,
-      )
-      .run(crypto.randomUUID(), timelineId, owner);
+    // Snapshot of the live state: its payload embeds the old object ids.
+    createSnapshot(owner, timelineId, { name: "snap1" });
 
     // Creative objects with prompt versions that reference the hero alias.
     storyboardId = createStoryboard(owner, {
@@ -162,7 +166,7 @@ describe("project backup and restore", () => {
 
   it("builds a backup of the project subtree only", () => {
     const data = buildProjectBackupData(projectId);
-    assertEquals(data.schema, 2);
+    assertEquals(data.schema, 3);
     assertEquals(data.project.id, projectId);
     assertEquals(data.project.name, "Backup Film");
     assertEquals(data.assets.length, 1);
@@ -180,7 +184,15 @@ describe("project backup and restore", () => {
     assertEquals(timeline.items.length, 1);
     assertEquals(timeline.items[0].asset_version_id, versionId);
     assertEquals(timeline.markers.length, 1);
-    assertEquals(timeline.snapshots, 1);
+    assert(Array.isArray(timeline.snapshots));
+    assertEquals(timeline.snapshots.length, 1);
+    const snapshot = timeline.snapshots[0];
+    assertEquals(snapshot.name, "snap1");
+    assert(snapshot.snapshot_data);
+    const snapTracks = snapshot.snapshot_data.tracks as Record<string, unknown>[];
+    assertEquals(snapTracks.map((t) => t.id), [trackId]);
+    const snapItems = snapshot.snapshot_data.items as Record<string, unknown>[];
+    assertEquals(snapItems.map((i) => i.id), [itemId]);
 
     assertEquals(data.storyboards.length, 1);
     const board = data.storyboards[0];
@@ -210,7 +222,7 @@ describe("project backup and restore", () => {
       tracks: 1,
       items: 1,
       markers: 1,
-      snapshots_skipped: 1,
+      snapshots: 1,
       storyboards: 1,
       panels: 1,
       scenes: 1,
@@ -363,9 +375,56 @@ describe("project backup and restore", () => {
     assertEquals(refRow.asset_version_id, restoredVersionId);
     assertEquals(refRow.raw_text, "@hero");
 
-    // Only the snapshot-skip issue is expected.
-    assertEquals(result.issues.length, 1);
-    assert(result.issues[0].includes("snapshot(s) skipped"));
+    // Schema 3: the snapshot is restored with every embedded id remapped.
+    assertEquals(result.issues.length, 0);
+    const snapRow = (
+      db
+        .prepare(
+          `SELECT s.* FROM timeline_snapshots s
+           JOIN timelines t ON t.id = s.timeline_id
+           WHERE t.project_id = ?`,
+        )
+        .get(result.project_id)
+    ) as Record<string, unknown>;
+    assertEquals(snapRow.name, "snap1");
+    assertEquals(snapRow.created_by_user_id, collaborator);
+    const snapData = JSON.parse(String(snapRow.snapshot_data_json)) as {
+      tracks: Record<string, unknown>[];
+      items: Record<string, unknown>[];
+      markers: Record<string, unknown>[];
+    };
+    assertEquals(snapData.tracks.map((t) => t.id), [itemRow.track_id]);
+    assertEquals(snapData.items.map((i) => i.id), [itemRow.id]);
+    assertEquals(snapData.items[0].track_id, itemRow.track_id);
+    assertEquals(snapData.items[0].asset_version_id, restoredVersionId);
+    const restoredMarkerId = String(
+      (
+        db
+          .prepare(
+            `SELECT m.id FROM timeline_markers m
+             JOIN timelines t ON t.id = m.timeline_id
+             WHERE t.project_id = ?`,
+          )
+          .get(result.project_id) as Record<string, unknown>
+      ).id,
+    );
+    assertEquals(snapData.markers.map((m) => m.id), [restoredMarkerId]);
+    assertEquals(result.counts.snapshots, 1);
+
+    // The remapped payload round-trips through the app's own restore path.
+    const restoredTimeline = (
+      db
+        .prepare("SELECT id FROM timelines WHERE project_id = ?")
+        .get(result.project_id) as Record<string, unknown>
+    ).id as string;
+    const afterRestore = restoreSnapshot(
+      collaborator,
+      restoredTimeline,
+      String(snapRow.id),
+    );
+    assertEquals(afterRestore.duration, 4);
+    assertEquals(listTracks(restoredTimeline, collaborator).length, 1);
+    assertEquals(listItems(restoredTimeline, collaborator).length, 1);
   });
 
   it("reports missing media instead of failing the restore", () => {
@@ -419,13 +478,36 @@ describe("project backup and restore", () => {
     void scenes;
     void prompts;
     void references;
-    const v1 = { ...rest, schema: 1 } as unknown as ProjectBackupData;
+    const v1Snapshots = rest.timelines[0].snapshots;
+    const v1 = {
+      ...rest,
+      schema: 1,
+      timelines: [{
+        ...rest.timelines[0],
+        snapshots: Array.isArray(v1Snapshots) ? v1Snapshots.length : v1Snapshots,
+      }],
+    } as unknown as ProjectBackupData;
 
     const result = restoreProjectBackup(v1, {
       userId: collaborator,
       resolveContent: (h) => getContentStore().resolveExisting(h),
     });
     const db = getDb();
+    assert(
+      result.issues.some((issue) => issue.includes("snapshot(s) skipped")),
+    );
+    const snapshotCount = Number(
+      (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM timeline_snapshots s
+             JOIN timelines t ON t.id = s.timeline_id
+             WHERE t.project_id = ?`,
+          )
+          .get(result.project_id) as Record<string, unknown>
+      ).n,
+    );
+    assertEquals(snapshotCount, 0);
     const boardCount = Number(
       (
         db
@@ -508,6 +590,73 @@ describe("project backup and restore", () => {
       ).n,
     );
     assertEquals(refCount, 2);
+  });
+
+  it("restores schema 2 backups and skips the count-only snapshots", () => {
+    const data = buildProjectBackupData(projectId);
+    const timeline = data.timelines[0];
+    const snapshotCount = Array.isArray(timeline.snapshots)
+      ? timeline.snapshots.length
+      : timeline.snapshots;
+    const v2 = {
+      ...data,
+      schema: 2,
+      timelines: [{ ...timeline, snapshots: snapshotCount }],
+    } as unknown as ProjectBackupData;
+
+    const result = restoreProjectBackup(v2, {
+      userId: collaborator,
+      resolveContent: (h) => getContentStore().resolveExisting(h),
+    });
+    assert(
+      result.issues.some(
+        (issue) =>
+          issue.includes("1 snapshot(s) skipped") &&
+          issue.includes("backup predates snapshot restore"),
+      ),
+    );
+    const restoredSnapshots = Number(
+      (
+        getDb()
+          .prepare(
+            `SELECT COUNT(*) AS n FROM timeline_snapshots s
+             JOIN timelines t ON t.id = s.timeline_id
+             WHERE t.project_id = ?`,
+          )
+          .get(result.project_id) as Record<string, unknown>
+      ).n,
+    );
+    assertEquals(restoredSnapshots, 0);
+    assertEquals(result.counts.snapshots, 1);
+  });
+
+  it("drops snapshot entries whose objects are missing from the backup", () => {
+    const data = buildProjectBackupData(projectId);
+    // Erase the live item from the backup, but keep its snapshot.
+    data.timelines[0].items = [];
+
+    const result = restoreProjectBackup(data, {
+      userId: collaborator,
+      resolveContent: (h) => getContentStore().resolveExisting(h),
+    });
+    assert(
+      result.issues.some((issue) => issue.includes("snap1") && issue.includes("1 entry dropped")),
+    );
+    const snapRow = (
+      getDb()
+        .prepare(
+          `SELECT s.* FROM timeline_snapshots s
+           JOIN timelines t ON t.id = s.timeline_id
+           WHERE t.project_id = ?`,
+        )
+        .get(result.project_id)
+    ) as Record<string, unknown>;
+    const snapData = JSON.parse(String(snapRow.snapshot_data_json)) as {
+      items: unknown[];
+      markers: unknown[];
+    };
+    assertEquals(snapData.items.length, 0);
+    assertEquals(snapData.markers.length, 1);
   });
 });
 

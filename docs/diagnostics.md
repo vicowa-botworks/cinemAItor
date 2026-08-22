@@ -25,22 +25,26 @@ DIA-001…DIA-008).
   _subtree_ — project, project-scoped assets with their versions/aliases/tags, timelines with
   tracks/items/markers, and the creative objects — storyboards + panels, scenes + shots, the full
   `prompt_versions` history for those objects, and the resolved `asset_references` — into a
-  versioned JSON document (`schema: 2`; schema-1 backups remain restorable, the creative sections
-  are simply absent). Global-scope assets, jobs and renders are intentionally out of scope; asset
-  references keep global asset ids (they ride along with the prompt scope). A **media manifest**
-  (`hash → present/size`) lets the operator see exactly which content-addressed files a restore will
-  need.
+  versioned JSON document (`schema: 3`; schema-1 backups remain restorable with the creative
+  sections simply absent, and pre-schema-3 backups with count-only snapshots). Schema 3 adds the
+  timeline **snapshots** themselves, with their serialized state. Global-scope assets, jobs and
+  renders are intentionally out of scope; asset references keep global asset ids (they ride along
+  with the prompt scope). A **media manifest** (`hash → present/size`) lets the operator see exactly
+  which content-addressed files a restore will need.
 - **Restore** (DIA-007): `restoreProjectBackup()` re-creates the subtree under **fresh UUIDs** in a
   new project (the creator is the restoring user). Slugs/alias slugs are made unique on collision.
-  Every FK is remapped — asset → version → alias/tag, timeline → track → item → marker, and
-  storyboard → panel / scene → shot, prompt versions per creative scope, and the creative pointers
-  (panel/scene/shot `prompt_version_id`, preview/clip/generated-asset version ids, `linked_scene_id`
-  / `linked_shot_id`, `scene.storyboard_id`) plus reference `source_id` (prompt version) /
-  `asset_id` / `asset_version_id`. A link whose target was not part of the backup is nulled and
-  reported in `issues` rather than failing the restore. Media is re-resolved against the content
-  store (`resolveExisting` verifies the file is actually on disk); missing files do **not** fail the
-  restore — the version row is still created (so item ordering is preserved) and each gap is
-  reported in `issues`, as are skipped timeline snapshots.
+  Every FK is remapped — asset → version → alias/tag, timeline → track → item → **marker** →
+  snapshot, and storyboard → panel / scene → shot, prompt versions per creative scope, and the
+  creative pointers (panel/scene/shot `prompt_version_id`, preview/clip/generated-asset version ids,
+  `linked_scene_id` / `linked_shot_id`, `scene.storyboard_id`) plus reference `source_id` (prompt
+  version) / `asset_id` / `asset_version_id`. Schema-3 snapshots are restored with every embedded id
+  (track / item / marker / media version) rewritten to the restored objects, so `restoreSnapshot`
+  works on the restored timeline; snapshot entries whose targets were not part of the backup are
+  dropped from the payload and reported, as are snapshots from pre-schema-3 backups. A link whose
+  target was not part of the backup is nulled and reported in `issues` rather than failing the
+  restore. Media is re-resolved against the content store (`resolveExisting` verifies the file is
+  actually on disk); missing files do **not** fail the restore — the version row is still created
+  (so item ordering is preserved) and each gap is reported in `issues`.
 - **Crash recovery** (DIA-008): already provided by the generation-job and render-job runners — both
   use leases (`lease_owner` / `lease_expires_at`) and `recoverStale*Jobs()` re-queues jobs whose
   lease expired, so a crashed process leaves no stuck work (covered by the job/render runner tests).
