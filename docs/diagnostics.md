@@ -51,7 +51,10 @@ DIA-001…DIA-008).
   response carries a `media: { restored, reused, corrupted }` summary. Media is then re-resolved
   against the content store (`resolveExisting` verifies the file is actually on disk); missing files
   do **not** fail the restore — the version row is still created (so item ordering is preserved) and
-  each gap is reported in `issues`.
+  each gap is reported in `issues`. Text overlay items (versionless, carrying `item_text` +
+  `text_style`) are captured in the backup document and restored as-is; only media items whose
+  version was not part of the backup are dropped and reported — including inside restored snapshot
+  payloads.
 - **Crash recovery** (DIA-008): already provided by the generation-job and render-job runners — both
   use leases (`lease_owner` / `lease_expires_at`) and `recoverStale*Jobs()` re-queues jobs whose
   lease expired, so a crashed process leaves no stuck work (covered by the job/render runner tests).

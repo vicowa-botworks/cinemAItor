@@ -346,7 +346,9 @@ The `prompts` table is structured to support:
 
 - **Backend**: Unit tests for schema layer, integration tests for routes
 - **Frontend**: Unit tests for API client, component tests with mock DOM
-- **E2E**: Not yet implemented; consider Cypress or Playwright
+- **E2E**: HTTP-level MVP acceptance flow (`backend/tests/mvp_acceptance.test.ts`) drives the full
+  studio journey over live routes (auth → media → jobs → timeline → render/export → backup/restore);
+  a browser-level E2E (Cypress or Playwright) is not implemented yet
 
 ### Deployment
 
