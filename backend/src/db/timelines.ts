@@ -1,7 +1,7 @@
 import { getDb } from "./database.ts";
 import { badRequest, notFound } from "../errors.ts";
 import { getProjectAccessible } from "./projects.ts";
-import { getAssetVersion } from "./assets.ts";
+import { getAssetById, getAssetVersion } from "./assets.ts";
 
 export const TRACK_TYPES = [
   "video",
@@ -644,6 +644,9 @@ export interface ItemInput {
 
 export const TEXT_TRACK_TYPES = ["text", "subtitle"] as const;
 
+/** Track types that carry the rendered output video. */
+export const VIDEO_TRACK_TYPES = ["video", "overlay"] as const;
+
 /** Track types whose placed items are mixed into the rendered output audio. */
 export const AUDIO_TRACK_TYPES = [
   "dialogue",
@@ -652,6 +655,45 @@ export const AUDIO_TRACK_TYPES = [
   "sfx",
   "ambience",
 ] as const;
+
+/**
+ * Asset kind expected for the track type group, or `null` when the group is
+ * unconstrained. Video tracks only accept video assets, audio tracks only
+ * audio assets; the other track types (effect, transition, …) are reserved
+ * for later work and stay unconstrained for now.
+ */
+function expectedAssetType(trackType: string): "video" | "audio" | null {
+  if ((VIDEO_TRACK_TYPES as readonly string[]).includes(trackType)) return "video";
+  if ((AUDIO_TRACK_TYPES as readonly string[]).includes(trackType)) return "audio";
+  return null;
+}
+
+function assertAssetTypeMatches(
+  trackType: string,
+  version: { asset_id: string },
+): void {
+  const expected = expectedAssetType(trackType);
+  if (!expected) return;
+  const asset = getAssetById(version.asset_id);
+  if (!asset) {
+    throw badRequest("asset_version_id references a version without an asset");
+  }
+  if (asset.asset_type !== expected) {
+    throw badRequest(
+      `${trackType} tracks need ${expected} assets, but "${asset.display_name}" is ${asset.asset_type}`,
+    );
+  }
+}
+
+/** Validate a version id for placement on a track: it must exist and its asset kind must match. */
+export function validateVersionForTrack(
+  trackType: string,
+  versionId: string,
+): void {
+  const version = getAssetVersion(versionId);
+  if (!version) throw badRequest("asset_version_id does not reference a version");
+  assertAssetTypeMatches(trackType, version);
+}
 
 const MAX_TEXT_LENGTH = 512;
 const TEXT_POSITIONS = ["top", "middle", "bottom"] as const;
@@ -733,6 +775,7 @@ function requireVersionForItem(
   if (input.asset_version_id) {
     const version = getAssetVersion(input.asset_version_id);
     if (!version) throw badRequest("asset_version_id does not reference a version");
+    assertAssetTypeMatches(track.track_type, version);
     return version.id;
   }
   // Text items may be versionless; media tracks require a version.
@@ -853,6 +896,7 @@ export function updateItem(
   if (nextVersionId) {
     const version = getAssetVersion(nextVersionId);
     if (!version) throw badRequest("asset_version_id does not reference a version");
+    assertAssetTypeMatches(nextTrack.track_type, version);
   }
   const isTextTrack = (TEXT_TRACK_TYPES as readonly string[]).includes(nextTrack.track_type);
   const nextText = patch.text !== undefined ? patch.text : item.item_text;

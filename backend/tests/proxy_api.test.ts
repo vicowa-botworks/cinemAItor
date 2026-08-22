@@ -250,7 +250,17 @@ describe("proxy workflow api", () => {
       baseUrl = base;
       return (async () => {
         // A version with a stored proxy but no master file (evicted media).
-        const versionId = createAssetVersion(audioAssetId, ownerId, {
+        const videoAsset = createAsset(
+          {
+            unique_slug: `proxyclip_${Math.random().toString(36).slice(2, 8)}`,
+            display_name: "Proxy Clip",
+            asset_type: "video",
+            library_scope: "project",
+            project_id: projectId,
+          },
+          ownerId,
+        );
+        const versionId = createAssetVersion(videoAsset.id, ownerId, {
           content_hash: null,
           file_path: null,
           format: "mp4",

@@ -208,11 +208,19 @@ The product track follows `MASTER-PLAN.md`.
       pre-change state, and the header Undo/Redo buttons plus `Ctrl+Z` / `Ctrl+Shift+Z` (outside
       text fields) replay stored states through the endpoint; a failed restore rolls the step back
       onto the stack it came from
+- [x] Basic audio track (Workstream 10 follow-up): media-kind matching enforced on item create, item
+      update, and full-state restore (400 on mismatch) — `video`/`overlay` tracks accept only video
+      assets, `dialogue`/`voiceover`/`music`/`sfx`/`ambience` tracks only audio assets, the reserved
+      `effect`/`transition` types stay open — so a misplaced clip can no longer silently vanish from
+      the render output. The editor's placement picker offers only matching assets for the selected
+      track (audio tracks additionally list globally generated audio, fetched once per load and
+      shared with the waveform + preview paths), clears a stale selection when the track changes,
+      and prefills the placement duration from the selected version's ffprobe audio metadata (also
+      fixed the picker's blank option labels, which read `a.name` instead of `display_name`)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
-- [ ] Workstream 10 follow-up: basic audio track (playback preview + undo/redo shipped above)
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Thumbnails in the timeline view (STO-007..008) — waveforms now ship with phase 7, asset
       proxies with the proxy workflow above

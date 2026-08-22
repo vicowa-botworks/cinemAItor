@@ -96,7 +96,9 @@ app-root (main router)
 ├── review-board (job candidate comparison; approve / reject / shortlist + notes)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
 ├── timeline-detail (tracks with lock/mute + mixer gain + swap reorder, clip/text placement via
-│   │               picker + move/resize + speed/volume/fades/transition/color-grade
+│   │               kind-filtered picker (audio tracks offer project + global generated audio,
+│   │               duration prefilled from ffprobe metadata) + move/resize +
+│   │               speed/volume/fades/transition/color-grade
 │   │               fx panel, waveform strip on audio items, markers, snapshots/restore,
 │   │               undo/redo (in-memory history replayed through the atomic full-state
 │   │               restore endpoint),
@@ -186,8 +188,9 @@ server.ts (entry point)
  │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
   │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db) + placed items (move/trim/
- │   │   speed/transform/fades/transitions/color grade), text overlays (text/subtitle
- │   │   tracks), item duplicate, duration recompute, markers
+  │   │   speed/transform/fades/transitions/color grade), text overlays (text/subtitle
+  │   │   tracks), item duplicate, duration recompute, markers; media-kind matching on item
+  │   │   create/update/restore (video tracks need video assets, audio tracks need audio assets)
    │   ├── Full-state snapshots with restore
    │   ├── Atomic full-state restore `POST /:id/state` (duration/settings/tracks/items/markers in
    │   │   one transaction; per-row validation like the item routes; duplicate ids rejected) —
