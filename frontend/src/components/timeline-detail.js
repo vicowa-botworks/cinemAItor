@@ -394,6 +394,21 @@ export class TimelineDetail extends LitElement {
       margin: 0;
     }
 
+    .track-duck {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+      font-size: 11px;
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+    }
+
+    .track-duck input[type="range"] {
+      width: 72px;
+      margin: 0;
+    }
+
     .track-actions {
       margin-left: auto;
       display: flex;
@@ -1038,6 +1053,22 @@ export class TimelineDetail extends LitElement {
     this._recordChange(`Gain on track "${track.name}"`);
     try {
       await api.updateTimelineTrack(this._timelineId, track.id, { gain_db: gainDb });
+      await this._load();
+    } catch (e) {
+      this.error = e.message ?? "Failed to update track.";
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async _setTrackDuck(track, input) {
+    const duckDb = Number(input.value);
+    if (!Number.isFinite(duckDb)) return;
+    if (duckDb === Number(track.duck_db ?? 0)) return;
+    this.busy = true;
+    this._recordChange(`Duck on track "${track.name}"`);
+    try {
+      await api.updateTimelineTrack(this._timelineId, track.id, { duck_db: duckDb });
       await this._load();
     } catch (e) {
       this.error = e.message ?? "Failed to update track.";
@@ -1754,6 +1785,26 @@ export class TimelineDetail extends LitElement {
     `;
   }
 
+  _renderTrackDuck(track) {
+    if (track.track_type !== "music") return html``;
+    const duck = Number(track.duck_db ?? 0);
+    return html`
+      <label
+        class="track-duck"
+        title="Ducking depth in dB: music lowers by this amount while dialogue plays">
+        <input
+          type="range"
+          min="0"
+          max="60"
+          step="1"
+          .value=${String(duck)}
+          ?disabled=${this.busy}
+          @change=${(e) => this._setTrackDuck(track, e.currentTarget)}>
+        <span>${duck.toFixed(0)} dB</span>
+      </label>
+    `;
+  }
+
   _renderTrackRow(track) {
     const color = TRACK_COLORS[track.track_type] ?? "#64748b";
     const index = this.tracks.indexOf(track);
@@ -1765,6 +1816,7 @@ export class TimelineDetail extends LitElement {
             class="track-type"
             style="color:${color};">${track.track_type}</span>
           ${this._renderTrackGain(track)}
+          ${this._renderTrackDuck(track)}
           <div class="track-actions">
             <button
               class="icon-btn ${track.locked ? "on" : ""}"

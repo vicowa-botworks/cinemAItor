@@ -20,6 +20,7 @@ import {
   listTracks,
   TEXT_TRACK_TYPES,
   type TimelineItem,
+  type Track,
 } from "../db/timelines.ts";
 import {
   type AssetVersion,
@@ -37,6 +38,7 @@ import {
   RenderCancelledError,
   RenderFailedError,
   type RenderPlan,
+  round4,
 } from "./render_engine.ts";
 
 export interface RenderRunnerOptions {
@@ -216,14 +218,16 @@ async function buildPlan(
     )
     .map((t) => t.id);
   const trackGainDb = new Map(tracks.map((t) => [t.id, Number(t.gain_db) || 0]));
-  const pendingAudioItems = items
+  const trackById = new Map(tracks.map((t) => [t.id, t])) as Map<string, Track>;
+  const audioSourceItems = items
     .filter(
       (i) =>
         i.status !== "archived" && i.asset_version_id !== null &&
         audioTrackIds.includes(i.track_id),
     )
-    .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id))
-    .map(async (i) => {
+    .sort((a, b) => a.start_time - b.start_time || a.id.localeCompare(b.id));
+  const builtAudioItems = await Promise.all(
+    audioSourceItems.map(async (i) => {
       const version = getAssetVersion(i.asset_version_id as string);
       // Same proxy semantics as video: draft renders prefer stored proxies,
       // final renders use the master.
@@ -242,10 +246,15 @@ async function buildPlan(
         throw new RenderFailedError(`No file for asset version ${i.asset_version_id}`);
       }
       return planAudioItem(i, { file_path, source }, version, trackGainDb.get(i.track_id) ?? 0);
-    });
-  const rawAudioItems = await Promise.all(pendingAudioItems);
+    }),
+  );
   // Items fully clipped out by their version's trim window are dropped.
-  const audioItems = rawAudioItems.filter((a): a is RenderAudioItem => a !== null);
+  const audioEntries = audioSourceItems
+    .map((i, k) => ({ item: i, audio: builtAudioItems[k] }))
+    .filter((e): e is { item: TimelineItem; audio: RenderAudioItem } => e.audio !== null);
+  const audioItems = audioEntries.map((e) => e.audio);
+  // Music items duck under the audible spans of the rendered dialogue (AUD-013).
+  applyDuckWindows(audioEntries, trackById);
   if (audioOnly && audioItems.length === 0) {
     throw new RenderFailedError("Timeline has no audio-track items to export");
   }
@@ -332,12 +341,64 @@ async function buildVideoSourceEdit(
 }
 
 /**
- * Map a placed audio-track item onto a render audio item: the item's own
- * source_offset / speed / fades on top of the version's non-destructive
- * adjustments (trim window, gain_db) and the track's mixer gain (gain_db,
- * AUD-007). Returns null when the item sits fully outside the trimmed
- * source window (nothing to play).
+ * Clip dialogue spans (timeline seconds) to an item's lifetime, then merge
+ * overlapping or touching windows into item-local seconds (relative to the
+ * item's start).
  */
+export function duckWindowsFor(
+  itemStart: number,
+  itemDuration: number,
+  dialogueSpans: { start: number; end: number }[],
+): { start: number; end: number }[] {
+  const local = dialogueSpans
+    .map((s) => ({
+      start: Math.max(0, s.start - itemStart),
+      end: Math.min(itemDuration, s.end - itemStart),
+    }))
+    .filter((w) => w.end > w.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: { start: number; end: number }[] = [];
+  for (const w of local) {
+    const last = merged[merged.length - 1];
+    if (last && w.start <= last.end) {
+      last.end = round4(Math.max(last.end, w.end));
+    } else {
+      merged.push({ start: round4(w.start), end: round4(w.end) });
+    }
+  }
+  return merged;
+}
+
+/**
+ * AUD-013 ducking: stamp each music-track audio item with merged duck
+ * windows derived from the rendered dialogue items' timeline spans. Items on
+ * tracks without a duck amount, or with no audible dialogue, keep their level.
+ */
+function applyDuckWindows(
+  audioEntries: { item: TimelineItem; audio: RenderAudioItem }[],
+  trackById: Map<string, Track>,
+): void {
+  const dialogueSpans = audioEntries
+    .filter((e) => trackById.get(e.item.track_id)?.track_type === "dialogue")
+    .map((e) => ({ start: e.item.start_time, end: e.item.end_time }));
+  if (dialogueSpans.length === 0) return;
+  for (const entry of audioEntries) {
+    const track = trackById.get(entry.item.track_id);
+    if (track?.track_type !== "music") continue;
+    const duckDb = Number(track.duck_db) || 0;
+    if (duckDb <= 0) continue;
+    const windows = duckWindowsFor(
+      entry.item.start_time,
+      entry.audio.duration,
+      dialogueSpans,
+    );
+    if (windows.length > 0) {
+      entry.audio.duck_db = duckDb;
+      entry.audio.duck_windows = windows;
+    }
+  }
+}
+
 function planAudioItem(
   item: TimelineItem,
   file: { file_path: string; source: "proxy" | "master" },

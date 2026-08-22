@@ -95,7 +95,8 @@ app-root (main router)
 │   │            clip playback, embedded audio generation)
 ├── review-board (job candidate comparison; approve / reject / shortlist + notes)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
-├── timeline-detail (tracks with lock/mute + mixer gain + swap reorder, clip/text placement via
+├── timeline-detail (tracks with lock/mute + mixer gain + ducking + swap reorder,
+│   │               clip/text placement via
 │   │               kind-filtered picker (audio tracks offer project + global generated audio,
 │   │               duration prefilled from ffprobe metadata) + move/resize +
 │   │               speed/volume/fades/transition/color-grade
@@ -107,7 +108,7 @@ app-root (main router)
 ├── timeline-preview (browser-side timeline playback: play/pause/stop, 0.25×–2× rate, in/out
 │   │             loop range; proxy-first media with master fallback, render-source track
 │   │             selection, per-clip speed/fades, CSS-approximated color grade, audio mix from
-│   │             track + version gain/trim + fades, text/subtitle overlays)
+│   │             track + version gain/trim + fades + dialogue ducking, text/subtitle overlays)
 ├── undo-history (bounded in-memory undo/redo stack + detail→state flatten, unit-tested;
 │   │             consumed by timeline-detail)
 ├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
@@ -188,7 +189,7 @@ server.ts (entry point)
  │   ├── Non-destructive trim/gain adjustments (applied at render time); waveform endpoint
  │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
-  │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db) + placed items (move/trim/
+  │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db, duck_db) + placed items (move/trim/
   │   │   speed/transform/fades/transitions/color grade), text overlays (text/subtitle
   │   │   tracks), item duplicate, duration recompute, markers; media-kind matching on item
   │   │   create/update/restore (video tracks need video assets, audio tracks need audio assets)
@@ -204,7 +205,9 @@ server.ts (entry point)
   │   │   source — the plan builder ffprobes each item's file and routes tail-trimmed
   │   │   clips to the fx pass for a frame-accurate cut), ffmpeg fx pass (source trim/speed,
   │   │   transitions/fades/grade, `drawtext` text overlays, audio-track mix via
-  │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC), ffmpeg audio-only export for `wav`
+  │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC, with ducking: music items drop by the
+  │   │   track's `duck_db` under audible dialogue via a frame-evaluated `volume` stage), ffmpeg
+  │   │   audio-only export for `wav`
   │   │   presets (`amix=duration=longest` → `pcm_s16le`, no video), or deterministic mock (auto
   │   │   by availability, `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running, polled during
   │   │   ffmpeg runs); progress from ffmpeg `-progress pipe:1` out_time; structured logs
