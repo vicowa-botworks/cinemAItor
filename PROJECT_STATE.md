@@ -197,11 +197,22 @@ The product track follows `MASTER-PLAN.md`.
       linear factor — the preview uses the same 10^(dB/20) scale after fixing the playback module's
       2^(dB/20) scale mismatch), so the preview and the render match. Migrations
       `0016_track_gain.sql`
+- [x] Timeline undo/redo (Workstream 10 follow-up): `POST /api/v1/timelines/:id/state` atomically
+      replaces a timeline's full state in one transaction (duration/settings, tracks, items,
+      markers) — each row re-validated like the single-item create/update routes (ranges, speed,
+      fades, text overlay placement, gain), with duplicate ids and dangling `track_id`s rejected up
+      front (400, nothing applied); row ids in the body are kept, so undo restores the same row
+      identity, not just the data. The editor stores an in-memory, per-visit history
+      (`frontend/src/undo-history.js`, bounded to the last 50 changes, unit-tested, lost on refresh
+      — durable checkpoints remain snapshots): every track/item/marker mutation pushes the
+      pre-change state, and the header Undo/Redo buttons plus `Ctrl+Z` / `Ctrl+Shift+Z` (outside
+      text fields) replay stored states through the endpoint; a failed restore rolls the step back
+      onto the stack it came from
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-ups: frame-accurate cuts, render farm / multiple render runners
-- [ ] Workstream 10 follow-ups: undo/redo, basic audio track (playback preview shipped above)
+- [ ] Workstream 10 follow-up: basic audio track (playback preview + undo/redo shipped above)
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Thumbnails in the timeline view (STO-007..008) — waveforms now ship with phase 7, asset
       proxies with the proxy workflow above

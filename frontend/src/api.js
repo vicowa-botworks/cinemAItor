@@ -702,6 +702,13 @@ class ApiClient {
     );
   }
 
+  restoreTimelineState(timelineId, state) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/state`,
+      { method: "POST", body: JSON.stringify(state) },
+    );
+  }
+
   restoreTimelineSnapshot(timelineId, snapshotId) {
     return this.request(
       `/timelines/${encodeURIComponent(timelineId)}/snapshots/${

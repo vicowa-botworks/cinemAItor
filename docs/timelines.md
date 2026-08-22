@@ -1,7 +1,8 @@
 # Timeline Editor
 
 Project-scoped timelines: ordered tracks, placed asset-version items, markers, and restorable
-snapshots (Workstream 10, Milestone 5).
+snapshots (Workstream 10, Milestone 5), plus client-side undo/redo driven by an atomic full-state
+restore endpoint.
 
 ## Concepts
 
@@ -82,6 +83,27 @@ the source of truth for final output.
   drag-scrubs in addition to click-to-set; the playhead line follows the preview at ~10 Hz while
   playing.
 
+## Undo/redo (frontend) and full-state restore
+
+`POST /timelines/:id/state` replaces the timeline's full state atomically (a single transaction:
+timeline duration/settings, tracks, items, markers):
+
+- Body: `{duration?, settings?, tracks: [...], items: [...], markers: [...]}` — the three arrays are
+  required; each entry is the detail-response row (client-supplied `id` preserved, items flat with
+  `track_id`, track rows without nested `items`).
+- Every row is validated exactly like its single-item create/update route (track type/order,
+  locked/muted, gain range, item ranges/speed/fades, text overlays, marker time), and duplicate ids
+  within a section are rejected — a malformed state fails outright with 400 and nothing is applied.
+- Row ids in the body are kept as-is, so undo restores not only the same data but the same row
+  identity (a deleted track/item is still reachable by its original id).
+- Returns the full timeline detail, like the other restore endpoints.
+
+The timeline editor keeps an in-memory per-visit history (`undo-history.js`, bounded to the last 50
+changes, lost on refresh — durable checkpoints remain snapshots). Every track/item/marker mutation
+pushes the pre-change state, and the header Undo/Redo buttons (plus `Ctrl+Z` / `Ctrl+Shift+Z`
+outside text fields) send the stored state back through the state endpoint; a failed restore rolls
+the step back onto the stack it came from.
+
 ## Endpoints
 
 | Method | Endpoint                                              | Description                                                                                                                             |
@@ -101,6 +123,7 @@ the source of truth for final output.
 | POST   | `/api/v1/timelines/:id/markers`                       | Create marker `{time, label?, notes?}`                                                                                                  |
 | GET    | `/api/v1/timelines/:id/markers`                       | List markers                                                                                                                            |
 | DELETE | `/api/v1/timelines/:id/markers/:markerId`             | Delete marker                                                                                                                           |
+| POST   | `/api/v1/timelines/:id/state`                         | Restore full state atomically (undo/redo; duration/settings/tracks/items/markers)                                                       |
 | POST   | `/api/v1/timelines/:id/snapshots`                     | Create snapshot `{name, notes?}`                                                                                                        |
 | GET    | `/api/v1/timelines/:id/snapshots`                     | List snapshots (newest first)                                                                                                           |
 | POST   | `/api/v1/timelines/:id/snapshots/:snapshotId/restore` | Restore snapshot (returns full detail)                                                                                                  |

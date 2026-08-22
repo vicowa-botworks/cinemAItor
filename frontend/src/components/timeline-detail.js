@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { jobEvents } from "../job-events.js";
+import { detailToState, UndoHistory } from "../undo-history.js";
 import "./audio-dialog.js";
 
 const SCALE = 60;
@@ -628,6 +629,9 @@ export class TimelineDetail extends LitElement {
     this._renderTimer = null;
     this._drag = null;
     this._unsubscribeEvents = null;
+    this._currentDetail = null;
+    this._historyApplying = false;
+    this._history = new UndoHistory({ onChange: () => this.requestUpdate() });
   }
 
   async connectedCallback() {
@@ -637,6 +641,8 @@ export class TimelineDetail extends LitElement {
         (window.location.hash.match(/#\/timeline\/([^/?]+)/) ?? [])[1] ??
           "",
       );
+    this._history.clear();
+    window.addEventListener("keydown", this._onHistoryKeydown);
     await this._load();
     this._unsubscribeEvents = jobEvents.subscribe((ev) => this._onLiveEvent(ev));
   }
@@ -650,6 +656,7 @@ export class TimelineDetail extends LitElement {
     window.removeEventListener("pointerup", this._onDragUp);
     window.removeEventListener("pointermove", this._onRulerScrubMove);
     window.removeEventListener("pointerup", this._onRulerScrubEnd);
+    window.removeEventListener("keydown", this._onHistoryKeydown);
   }
 
   async _load() {
@@ -693,11 +700,67 @@ export class TimelineDetail extends LitElement {
   }
 
   _applyDetail(detail) {
+    this._currentDetail = detail;
     this.timeline = detail.timeline;
     this.tracks = (detail.tracks ?? []).slice().sort(
       (a, b) => a.track_order - b.track_order,
     );
     this.markers = detail.markers ?? [];
+  }
+
+  // --- undo / redo ---
+
+  // Push the current full state as the next undo target. Called right before
+  // every track/item/marker mutation the server accepts.
+  _recordChange(label) {
+    if (this._currentDetail) {
+      this._history.push(detailToState(this._currentDetail), label);
+    }
+  }
+
+  _onHistoryKeydown = (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+    const t = e.target;
+    if (
+      t &&
+      (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+        t.isContentEditable)
+    ) {
+      return;
+    }
+    e.preventDefault();
+    if (e.shiftKey) this._redo();
+    else this._undo();
+  };
+
+  async _undo() {
+    if (this._historyApplying) return;
+    const state = this._history.undo();
+    if (!state) return;
+    await this._applyHistoryState(state);
+  }
+
+  async _redo() {
+    if (this._historyApplying) return;
+    const state = this._history.redo();
+    if (!state) return;
+    await this._applyHistoryState(state);
+  }
+
+  async _applyHistoryState(state) {
+    this._historyApplying = true;
+    this.busy = true;
+    this.error = "";
+    try {
+      await api.restoreTimelineState(this._timelineId, state);
+      await this._load();
+    } catch (e) {
+      this._history.rollback(state);
+      this.error = e.message ?? "Failed to restore timeline state.";
+    } finally {
+      this._historyApplying = false;
+      this.busy = false;
+    }
   }
 
   _buildClipNames() {
@@ -869,6 +932,7 @@ export class TimelineDetail extends LitElement {
     };
     this.busy = true;
     this.error = "";
+    this._recordChange(`Add track "${body.name}"`);
     try {
       await api.createTimelineTrack(this._timelineId, body);
       this.newTrackName = "";
@@ -881,7 +945,11 @@ export class TimelineDetail extends LitElement {
   }
 
   async _toggleTrackFlag(track, key) {
+    const label = key === "muted"
+      ? `${track.muted ? "Unmute" : "Mute"} track "${track.name}"`
+      : `${track.locked ? "Unlock" : "Lock"} track "${track.name}"`;
     this.busy = true;
+    this._recordChange(label);
     try {
       await api.updateTimelineTrack(
         this._timelineId,
@@ -901,6 +969,7 @@ export class TimelineDetail extends LitElement {
     if (!Number.isFinite(gainDb)) return;
     if (gainDb === Number(track.gain_db ?? 0)) return;
     this.busy = true;
+    this._recordChange(`Gain on track "${track.name}"`);
     try {
       await api.updateTimelineTrack(this._timelineId, track.id, { gain_db: gainDb });
       await this._load();
@@ -916,6 +985,7 @@ export class TimelineDetail extends LitElement {
     const other = this.tracks[index + dir];
     if (!other) return;
     this.busy = true;
+    this._recordChange(`Reorder track "${track.name}"`);
     try {
       // The backend swap-semantics move the target-position track here.
       await api.updateTimelineTrack(
@@ -940,6 +1010,7 @@ export class TimelineDetail extends LitElement {
       return;
     }
     this.busy = true;
+    this._recordChange(`Delete track "${track.name}"`);
     try {
       await api.deleteTimelineTrack(this._timelineId, track.id);
       if (this.placeTrackId === track.id) this.placeTrackId = "";
@@ -1015,6 +1086,9 @@ export class TimelineDetail extends LitElement {
     }
     this.placing = true;
     this.placeError = "";
+    this._recordChange(
+      `Add ${isTextTrack(track) ? "text" : "clip"} to "${track.name}"`,
+    );
     try {
       const item = await api.createTimelineItem(this._timelineId, body);
       this.showPlace = false;
@@ -1092,6 +1166,7 @@ export class TimelineDetail extends LitElement {
     const id = this.selectedItemId;
     if (!id) return;
     this.busy = true;
+    this._recordChange("Move item");
     try {
       await api.updateTimelineItem(this._timelineId, id, {
         start_time: start,
@@ -1147,6 +1222,7 @@ export class TimelineDetail extends LitElement {
     body.color_grade = Object.keys(grade).length > 0 ? grade : null;
     this.savingFx = true;
     this.fxError = "";
+    this._recordChange("Adjust item");
     try {
       await api.updateTimelineItem(this._timelineId, this.selectedItemId, body);
       await this._load();
@@ -1162,6 +1238,7 @@ export class TimelineDetail extends LitElement {
   async _duplicateItem() {
     if (!this.selectedItemId) return;
     this.busy = true;
+    this._recordChange("Duplicate item");
     try {
       const item = await api.duplicateTimelineItem(
         this._timelineId,
@@ -1180,6 +1257,7 @@ export class TimelineDetail extends LitElement {
     if (!this.selectedItemId) return;
     if (!window.confirm("Delete this item?")) return;
     this.busy = true;
+    this._recordChange("Delete item");
     try {
       await api.deleteTimelineItem(this._timelineId, this.selectedItemId);
       this.selectedItemId = null;
@@ -1220,6 +1298,7 @@ export class TimelineDetail extends LitElement {
 
   async _addMarker() {
     this.busy = true;
+    this._recordChange("Add marker");
     try {
       await api.createTimelineMarker(this._timelineId, {
         time: this.playhead,
@@ -1236,6 +1315,7 @@ export class TimelineDetail extends LitElement {
 
   async _deleteMarker(marker) {
     this.busy = true;
+    this._recordChange("Delete marker");
     try {
       await api.deleteTimelineMarker(this._timelineId, marker.id);
       await this._load();
@@ -1268,6 +1348,7 @@ export class TimelineDetail extends LitElement {
       return;
     }
     this.busy = true;
+    this._recordChange(`Restore snapshot "${snapshot.name}"`);
     try {
       const detail = await api.restoreTimelineSnapshot(
         this._timelineId,
@@ -1413,6 +1494,20 @@ export class TimelineDetail extends LitElement {
                 Rename
               </button>
             `}
+          <button
+            class="btn-small"
+            title=${this._history.undoLabel || "Undo (Ctrl+Z)"}
+            ?disabled=${!this._history.canUndo || this.busy}
+            @click=${this._undo}>
+            Undo
+          </button>
+          <button
+            class="btn-small"
+            title=${this._history.redoLabel || "Redo (Ctrl+Shift+Z)"}
+            ?disabled=${!this._history.canRedo || this.busy}
+            @click=${this._redo}>
+            Redo
+          </button>
           <button
             class="btn-small"
             style="margin-left:auto;"

@@ -414,6 +414,265 @@ describe("timelines api", () => {
     });
   });
 
+  it("full-state restore replaces tracks/items/markers (undo support)", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const tl = await req(
+          "POST",
+          "/api/v1/timelines",
+          { project_id: projectId, name: "Main" },
+          ownerToken,
+        );
+        assertEquals(tl.status, 201);
+        const timelineId = (tl.json as { id: string }).id;
+
+        const trackRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/tracks`,
+          { track_type: "video", name: "V1" },
+          ownerToken,
+        );
+        assertEquals(trackRes.status, 201);
+        const trackId = (trackRes.json as { id: string }).id;
+
+        const itemRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/items`,
+          {
+            track_id: trackId,
+            asset_version_id: versionId,
+            start_time: 0,
+            end_time: 4,
+            fade_in: 0.25,
+          },
+          ownerToken,
+        );
+        assertEquals(itemRes.status, 201);
+
+        const textTrack = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/tracks`,
+          { track_type: "text", name: "Captions" },
+          ownerToken,
+        );
+        assertEquals(textTrack.status, 201);
+        const textTrackId = (textTrack.json as { id: string }).id;
+        const textItem = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/items`,
+          {
+            track_id: textTrackId,
+            asset_version_id: null,
+            text: "Hello, world",
+            text_style: { font_size: 24, position: "bottom" },
+            start_time: 1,
+            end_time: 3,
+          },
+          ownerToken,
+        );
+        assertEquals(textItem.status, 201);
+
+        const markerRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/markers`,
+          { time: 2, label: "act-1" },
+          ownerToken,
+        );
+        assertEquals(markerRes.status, 201);
+
+        // Capture the full state (flattened, as the client undo sends it).
+        const detail = await req("GET", `/api/v1/timelines/${timelineId}`, undefined, ownerToken);
+        assertEquals(detail.status, 200);
+        const d = detail.json as {
+          timeline: { duration: number; settings: unknown };
+          tracks: { items: unknown[]; id: string }[];
+          markers: unknown[];
+        };
+        const state = {
+          duration: d.timeline.duration,
+          settings: d.timeline.settings ?? null,
+          tracks: d.tracks.map(({ items: _items, ...track }) => track),
+          items: d.tracks.flatMap((t) => t.items),
+          markers: d.markers,
+        };
+        const itemId = (itemRes.json as { id: string }).id;
+        const delItem = await req(
+          "DELETE",
+          `/api/v1/timelines/${timelineId}/items/${itemId}`,
+          undefined,
+          ownerToken,
+        );
+        assertEquals(delItem.status, 200);
+
+        // Restore the captured state (what the client undo button sends).
+        const restore = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          state,
+          ownerToken,
+        );
+        assertEquals(restore.status, 200);
+        const restored = restore.json as {
+          tracks: { id: string; items: { id: string; item_text: string | null }[] }[];
+          markers: { label: string | null }[];
+          timeline: { duration: number };
+        };
+        const vItems = restored.tracks.find((t) => t.id === trackId)!.items;
+        assertEquals(vItems.some((i) => i.id === itemId), true);
+        const tItems = restored.tracks.find((t) => t.id === textTrackId)!.items;
+        assertEquals(tItems.some((i) => i.item_text === "Hello, world"), true);
+        assertEquals(restored.markers.some((m) => m.label === "act-1"), true);
+        assertEquals(restored.timeline.duration, 4);
+      })();
+    });
+  });
+
+  it("full-state restore rejects invalid payloads", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const tl = await req(
+          "POST",
+          "/api/v1/timelines",
+          { project_id: projectId, name: "Main" },
+          ownerToken,
+        );
+        assertEquals(tl.status, 201);
+        const timelineId = (tl.json as { id: string }).id;
+        const trackRes = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/tracks`,
+          { track_type: "video", name: "V1" },
+          ownerToken,
+        );
+        const trackId = (trackRes.json as { id: string }).id;
+
+        const track = {
+          id: trackId,
+          track_type: "video",
+          name: "V1",
+          track_order: 0,
+          locked: false,
+          muted: false,
+          gain_db: 0,
+        };
+        const item = (start: number, end: number) => ({
+          id: crypto.randomUUID(),
+          track_id: trackId,
+          asset_version_id: versionId,
+          start_time: start,
+          end_time: end,
+        });
+
+        const notArray = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          { tracks: "nope", items: [], markers: [] },
+          ownerToken,
+        );
+        assertEquals(notArray.status, 400);
+
+        const badTrack = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          {
+            tracks: [{ ...track, track_type: "bogus" }],
+            items: [],
+            markers: [],
+          },
+          ownerToken,
+        );
+        assertEquals(badTrack.status, 400);
+
+        const badPlacement = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          {
+            tracks: [track],
+            items: [item(4, 2)],
+            markers: [],
+          },
+          ownerToken,
+        );
+        assertEquals(badPlacement.status, 400);
+
+        const orphanItem = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          {
+            tracks: [track],
+            items: [{ ...item(0, 1), track_id: "missing-track" }],
+            markers: [],
+          },
+          ownerToken,
+        );
+        assertEquals(orphanItem.status, 400);
+
+        const dupTrack = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          {
+            tracks: [track, { ...track }],
+            items: [],
+            markers: [],
+          },
+          ownerToken,
+        );
+        assertEquals(dupTrack.status, 400);
+
+        const sameItem = item(0, 1);
+        const dupItem = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          {
+            tracks: [track],
+            items: [sameItem, { ...sameItem }],
+            markers: [],
+          },
+          ownerToken,
+        );
+        assertEquals(dupItem.status, 400);
+
+        // A valid restore of a subset still works (drops the missing rows).
+        const ok = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/state`,
+          { tracks: [track], items: [item(0, 2)], markers: [] },
+          ownerToken,
+        );
+        assertEquals(ok.status, 200);
+        const restored = ok.json as {
+          tracks: { items: unknown[] }[];
+          timeline: { duration: number };
+        };
+        assertEquals(restored.tracks[0].items.length, 1);
+        assertEquals(restored.timeline.duration, 2);
+      })();
+    });
+  });
+
+  it("full-state restore requires write access", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const unauth = await req(
+          "POST",
+          "/api/v1/timelines/nope/state",
+          { tracks: [], items: [], markers: [] },
+        );
+        assertEquals(unauth.status, 401);
+        const missing = await req(
+          "POST",
+          "/api/v1/timelines/nope/state",
+          { tracks: [], items: [], markers: [] },
+          ownerToken,
+        );
+        assertEquals(missing.status, 404);
+      })();
+    });
+  });
+
   it("list endpoints respect permissions and unknown targets 404", async () => {
     await withServer((base) => {
       baseUrl = base;
