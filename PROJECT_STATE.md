@@ -2,8 +2,9 @@
 
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
-migration through phase 7 — audio generation + waveforms and the diagnostics panel shipped, legacy
-demo surface removed; remaining: skills, templates, advanced storage, audio polish, model benchmark)
+migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
+project templates and advanced storage management shipped, legacy demo surface removed; remaining:
+audio cleanup, subtitle generation, A/B + version comparison, model benchmark)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -334,14 +335,28 @@ The product track follows `MASTER-PLAN.md`.
       one field per declared input seeded from defaults) whose run history updates on live WebSocket
       job events plus a 2.5 s poll to terminal state, showing per-step job ids; 23 new backend test
       steps, 12 new frontend API client test steps
+- [x] Advanced storage management (STO-010/011/012, Workstream 14): the storage report
+      (`services/diagnostics.ts`) gains `projects[]` — per-project media usage over every
+      content-addressed file referenced by that project's asset versions, with a global
+      `project_id: null` row and shared (deduped) files counted once per owner — plus
+      `top_assets[]`, the heaviest assets by summed version bytes (capped at 10).
+      `GET /api/v1/diagnostics/storage?verify=1` additionally re-hashes the entire content store and
+      returns `integrity: { verified, corrupted: [{ file_path }] }` flagging any file whose content
+      drifted from its content-addressed SHA-256 name (without the flag integrity is `null` and the
+      walk stays cheap). `POST /api/v1/diagnostics/storage/cleanup` (admin-only, `storage`
+      diagnostic entry per run) removes regenerable caches — the previews, proxies and thumbnails
+      directories — and, only with `include_orphaned_media: true`, content files no version
+      references; referenced media is never touched. The diagnostics panel storage card shows the
+      per-project table, an integrity chip, a Verify button, an orphaned-media checkbox and a Clean
+      cache button; 5 new backend test steps (service + route), 0 new frontend steps
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: advanced storage
-      management, audio cleanup, subtitle generation from dialogue/voiceover, A/B + version
-      comparison improvements, model benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: audio cleanup,
+      subtitle generation from dialogue/voiceover, A/B + version comparison improvements, model
+      benchmark
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues
@@ -378,3 +393,6 @@ The product track follows `MASTER-PLAN.md`.
 - MVP acceptance flow (E2E over HTTP) + backup text-overlay restore fix: Sat Aug 22 2026
 - Ducking (AUD-013, music lowers under dialogue in preview + renders): Sat Aug 22 2026
 - Project templates (global starting structures applied at project creation): Sat Aug 22 2026
+- Skill System v1 (named, versioned JSON workflows chaining generation jobs): Sun Aug 23 2026
+- Advanced storage management (per-project + top-asset usage, `?verify=1` checksum integrity, cache
+  cleanup): Sun Aug 23 2026

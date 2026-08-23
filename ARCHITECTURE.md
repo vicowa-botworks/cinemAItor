@@ -122,7 +122,8 @@ app-root (main router)
 ├── timeline-playback (shared pure playback math: active visual/audio/text at time, source time,
 │   │                  fade factors, grade→CSS filter mapping, in/out range — unit-tested)
 └── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
-    diagnostic bundle export, project backup/restore)
+    diagnostic bundle export, project backup/restore, storage management — per-project
+    usage, `?verify=1` checksum integrity and admin cache cleanup)
 ```
 
 **Key design decisions:**
@@ -229,7 +230,12 @@ server.ts (entry point)
    │   ├── Output validation report; exports with provenance as asset + immutable version
    │   └── (see docs/renders.md)
   ├── Diagnostics routes (/api/v1/diagnostics/*, auth middleware)
-  │   ├── GET /hardware (CPU/RAM/GPU/OS), GET /models (health batch), GET /storage
+  │   ├── GET /hardware (CPU/RAM/GPU/OS), GET /models (health batch),
+  │   │   GET /storage (usage/orphans/missing media + per-project `projects[]` +
+  │   │   top-asset `top_assets[]`; `?verify=1` adds a content-store checksum `integrity`
+  │   │   block) (STO-010/011)
+  │   ├── POST /storage/cleanup (admin; removes regenerable preview/proxy/thumbnail caches and,
+  │   │   optionally, orphaned media — referenced media untouched) (STO-012)
   │   ├── GET /logs (filtered `diagnostics` rows), POST /export (admin; redacted JSON on disk)
    │   ├── Project backup/restore (DIA-006/007): POST /backups, GET /backups,
    │   │   POST /backups/:id/restore, DELETE /backups/:id — schema-3 bundles cover assets,

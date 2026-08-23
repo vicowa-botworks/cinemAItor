@@ -250,6 +250,11 @@ export class DiagnosticsPanel extends LitElement {
     restoreTarget: { state: true },
     restoreName: { state: true },
     restoreMsg: { state: true },
+    verifyBusy: { state: true },
+    verifyError: { state: true },
+    cleanOrphans: { state: true },
+    cleanupBusy: { state: true },
+    cleanupMsg: { state: true },
   };
 
   constructor() {
@@ -275,6 +280,11 @@ export class DiagnosticsPanel extends LitElement {
     this.restoreTarget = null;
     this.restoreName = "";
     this.restoreMsg = null;
+    this.verifyBusy = false;
+    this.verifyError = "";
+    this.cleanOrphans = false;
+    this.cleanupBusy = false;
+    this.cleanupMsg = null;
   }
 
   async connectedCallback() {
@@ -395,6 +405,43 @@ export class DiagnosticsPanel extends LitElement {
   async _deleteBackup(backup) {
     this.backups = this.backups.filter((b) => b.id !== backup.id);
     await api.deleteBackup(backup.id).catch(() => {});
+  }
+
+  async _verifyStorage() {
+    this.verifyBusy = true;
+    this.verifyError = "";
+    try {
+      // verify=1 returns the full report with an integrity section.
+      this.storage = await api.getDiagnosticsStorage({ verify: true });
+    } catch (e) {
+      this.verifyError = e.message ?? "Integrity check failed.";
+    } finally {
+      this.verifyBusy = false;
+    }
+  }
+
+  async _cleanupCache() {
+    this.cleanupBusy = true;
+    this.cleanupMsg = null;
+    try {
+      const r = await api.cleanupStorageCache({
+        includeOrphanedMedia: this.cleanOrphans,
+      });
+      const parts = r.directories
+        .filter((d) => d.files > 0)
+        .map((d) => `${d.path}: ${d.files}`);
+      const detail = (parts.length ? parts.join(", ") : "no cache files removed") +
+        (r.orphaned_media.files > 0 ? `, orphaned media: ${r.orphaned_media.files}` : "");
+      this.cleanupMsg = {
+        ok: true,
+        text: `Removed ${r.total_files} file(s), freed ${formatBytes(r.bytes_freed)} (${detail}).`,
+      };
+      this.storage = await api.getDiagnosticsStorage().catch(() => this.storage);
+    } catch (e) {
+      this.cleanupMsg = { ok: false, text: e.message ?? "Cleanup failed." };
+    } finally {
+      this.cleanupBusy = false;
+    }
   }
 
   render() {
@@ -555,6 +602,57 @@ export class DiagnosticsPanel extends LitElement {
                 )}
               </tbody>
             </table>
+            ${(s.projects?.length ?? 0) > 0
+              ? html`
+                <div class="notice" style="margin-top:12px;margin-bottom:6px;">
+                  Usage by project (shared files count for each owner)
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Files</th>
+                      <th>Size</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${s.projects.map(
+                      (p) =>
+                        html`
+                          <tr>
+                            <td>${p.name ??
+                              (p.project_id ? "Deleted project" : "Global (non-project)")}</td>
+                            <td>${p.files}</td>
+                            <td>${formatBytes(p.bytes)}</td>
+                          </tr>
+                        `,
+                    )}
+                  </tbody>
+                </table>
+              `
+              : html`<div class="notice" style="margin-top:12px;">
+                  No project-scoped media usage yet.
+                </div>`}
+            ${s.integrity
+              ? s.integrity.corrupted.length === 0
+                ? html`<div class="notice" style="margin-top:8px;">
+                  <span class="chip ok">Integrity OK</span>
+                   ${s.integrity.verified} content file(s) verified against their
+                  hashes.
+                </div>`
+                : html`<div class="issues" style="margin-top:8px;">
+                  <span class="chip bad">
+                    ${s.integrity.corrupted.length} of ${s.integrity.verified}
+                    file(s) corrupted
+                  </span>
+                  ${
+                  s.integrity.corrupted.slice(0, 5).map(
+                    (c) => html`<div>· ${c.file_path}</div>`,
+                  )
+                }
+                  ${s.integrity.corrupted.length > 5 ? html`<div>· …</div>` : nothing}
+                </div>`
+              : nothing}
             ${s.content_store.orphaned.length > 0
               ? html`<div class="issues">
                 Orphaned content files (${s.content_store.orphaned.length}):
@@ -566,6 +664,39 @@ export class DiagnosticsPanel extends LitElement {
             ${s.missing_versions.length > 0
               ? html`<div class="issues">
                 Missing media on disk: ${s.missing_versions.length} version(s)
+              </div>`
+              : nothing}
+            <div class="filters" style="margin-top:12px;">
+              <button
+                class="btn btn-secondary btn-small"
+                ?disabled=${this.verifyBusy}
+                @click=${this._verifyStorage}>
+                ${this.verifyBusy ? "Verifying…" : "Verify content store"}
+              </button>
+              <label style="display:flex;align-items:center;gap:6px;">
+                <input
+                  type="checkbox"
+                  style="padding:0;width:14px;height:14px;"
+                  .checked=${this.cleanOrphans}
+                  @change=${(e) => (this.cleanOrphans = e.target.checked)}>
+                Remove orphaned media too
+              </label>
+              <button
+                class="btn btn-danger btn-small"
+                ?disabled=${this.cleanupBusy}
+                @click=${this._cleanupCache}>
+                ${this.cleanupBusy ? "Cleaning…" : "Clean cache"}
+              </button>
+              <span class="notice" style="margin:0;">
+                Clean cache removes regenerable previews, proxies and
+                thumbnails${this.cleanOrphans ? " and unreferenced media" : ""}
+                (admin only).
+              </span>
+            </div>
+            ${this.verifyError ? html`<div class="error">${this.verifyError}</div>` : nothing}
+            ${this.cleanupMsg
+              ? html`<div class="${this.cleanupMsg.ok ? "notice" : "error"}">
+                ${this.cleanupMsg.text}
               </div>`
               : nothing}
           `

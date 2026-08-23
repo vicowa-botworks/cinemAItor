@@ -4,6 +4,7 @@ import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.
 import { getUserById } from "@cinemaItor/db/schema.ts";
 import { badRequest, conflict, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import {
+  cleanupStorageCache,
   exportDiagnostics,
   hardwareReport,
   logsReport,
@@ -56,8 +57,33 @@ export const diagnosticsRouter = new Router()
   })
   .get("/api/v1/diagnostics/storage", authMiddleware, async (ctx, _next) => {
     requireUserId(ctx);
-    ctx.response.body = await storageReport();
+    const params = (ctx.request.url as unknown as URL).searchParams;
+    const verify = params.has("verify") && params.get("verify") !== "0";
+    ctx.response.body = await storageReport({ verify });
   })
+  .post(
+    "/api/v1/diagnostics/storage/cleanup",
+    authMiddleware,
+    async (ctx, _next) => {
+      const userId = requireUserId(ctx);
+      const user = getUserById(userId);
+      if (!user || user.role !== "admin") {
+        throw forbidden("Admin role required for storage cleanup");
+      }
+      let body: Record<string, unknown> = {};
+      if (ctx.request.body.type() === "json") {
+        try {
+          body = await ctx.request.body.json();
+        } catch {
+          throw badRequest("Request body must be JSON");
+        }
+      }
+      const includeOrphanedMedia = typeof body.include_orphaned_media === "boolean" &&
+        body.include_orphaned_media;
+      ctx.response.status = 200;
+      ctx.response.body = await cleanupStorageCache({ includeOrphanedMedia });
+    },
+  )
   .get("/api/v1/diagnostics/logs", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
     const search = ctx.request.url as unknown as URL;
