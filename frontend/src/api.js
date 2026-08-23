@@ -242,6 +242,12 @@ class ApiClient {
     );
   }
 
+  getAssetVersionPreviewUrl(id, versionId) {
+    return this.fetchMediaUrl(
+      `/assets/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/preview`,
+    );
+  }
+
   /**
    * Fetch a version thumbnail (server-generated JPEG: one frame at `at`
    * seconds, scaled to `width` px) and resolve it to a blob: URL. `at` is

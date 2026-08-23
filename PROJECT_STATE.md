@@ -4,8 +4,8 @@
 
 migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
 project templates, advanced storage management, audio cleanup (denoise/normalize), subtitle
-generation (voiceover/dialogue → SRT) and the model benchmark shipped, legacy demo surface removed;
-remaining: A/B + version comparison)
+generation (voiceover/dialogue → SRT), the model benchmark and A/B + version comparison shipped,
+legacy demo surface removed)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -388,13 +388,28 @@ The product track follows `MASTER-PLAN.md`.
       gains a per-model Benchmark button + per-task results table (job polled to terminal, then
       refreshed); 6 new backend test steps (units + API authz/errors/e2e), 1 new frontend API client
       test step
+- [x] A/B + version comparison (Workstream 14, completing its exit criterion "compare versions and
+      references more effectively"). Two compare surfaces over one shared module
+      (`frontend/src/compare.js`): - **Review board candidate A/B**: each candidate card gets an A/B
+      toggle (max two; a third pick replaces the oldest). With two selected an A/B pane appears
+      above the list: both media previews side by side, each candidate's current decision chip,
+      one-click Approve/Unapprove (approve promotes per the review model), the existing notes
+      preview, and — for video/audio — synced transport (Play/Pause/Stop both + seek mirroring via
+      `CompareSync`, 0.25 s drift threshold). Selections are per job view. - **Asset detail version
+      A/B**: version rows get an A/B toggle; the pane below the version list shows both versions
+      side by side (new per-version preview endpoint
+      `GET /api/v1/assets/:id/versions/:versionId/preview` — 404 for unknown id or a stored-file
+      version), a metadata diff table (differs rows highlighted), and synced transport for
+      video/audio assets. Blob URLs are revoked on pair change / asset change / disconnect. - Shared
+      utilities: `toggleComparePair` / `resolveComparePair` (pair selection), `versionCompareRows`
+      (field differ), `CompareSync` (multi-player transport with seek mirroring), `isTimeMedia`;
+      unit-tested in `frontend/tests/compare.test.js` (25 steps). +1 backend test step (per-version
+      preview route), +1 frontend API client test step
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: A/B + version
-      comparison improvements
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues

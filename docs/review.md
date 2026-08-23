@@ -25,3 +25,19 @@ approve/reject, promote-to-active, shortlist, notes.
 Decisions are replaceable (same version + new decision replaces the row) and shortlist toggles off
 by posting again while shortlisted. All mutations are audited (`review.approve` / `review.reject` /
 `review.shortlist` / `review.clear`).
+
+## A/B comparison (UI)
+
+The review board supports picking two candidates for a side-by-side A/B comparison:
+
+- Each candidate card has an **A/B** toggle selecting up to two candidates (a third pick replaces
+  the oldest selection — `toggleComparePair` in `frontend/src/compare.js`).
+- With two selected, an **A/B comparison** pane appears above the candidate list: both media
+  previews side by side, the current decision chip for each, a one-click **Approve / Unapprove**
+  (approve promotes, per the model above), and the existing notes preview.
+- For video/audio candidates the pane offers synced transport — **Play both / Pause both / Stop
+  both** and seek mirroring (`CompareSync`, drift threshold 0.25 s) — so both candidates play on a
+  locked timeline while judging them.
+- Selections are per job view; switching jobs clears them. The shared compare utilities live in
+  `frontend/src/compare.js` (unit-tested in `frontend/tests/compare.test.js`) and are reused by the
+  Asset Detail version comparison (see `docs/assets.md`).
