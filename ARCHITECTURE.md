@@ -108,7 +108,8 @@ app-root (main router)
 │   │                 live preview polling)
 ├── scene-list (scene list + create; project/storyboard filters; Import script — paste/load a
 │   │             screenplay, preview the parsed Fountain-lite scenes, bulk-create them as
-│   │             draft scenes with prompts (SCN-015, parser in script-parse.js))
+│   │             draft scenes with prompts (SCN-015, parser in script-parse.js); continuity
+│   │             check panel (MS-8) — project continuity report with severity-chipped issues)
 ├── script-parse (shared pure Fountain-lite screenplay parser + scene-input mapping —
 │   │              unit-tested, DOM-free; consumed by scene-list import UI)
 ├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
@@ -213,8 +214,11 @@ server.ts (entry point)
  │   ├── Prompt versioning + reference resolution on creative objects
  │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; runner
  │   │   links preview/clip outputs back to panels and shots
- │   ├── POST /projects/:id/scenes/from-script — bulk-create draft scenes from a parsed
- │   │   script (SCN-015; validated, max 200 entries, prompts attached)
+│   ├── POST /projects/:id/scenes/from-script — bulk-create draft scenes from a parsed
+│   │   script (SCN-015; validated, max 200 entries, prompts attached)
+│   ├── GET /projects/:id/continuity (MS-8) — deterministic read-only continuity report over
+│   │   the project's panels/scenes/shots (services/continuity.ts): link mismatches,
+│   │   time-of-day/lighting jumps, stale clips, duration mismatch, unlinked panels
  │   └── (see docs/storyboards.md)
   ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
   │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes

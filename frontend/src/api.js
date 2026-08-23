@@ -562,6 +562,10 @@ class ApiClient {
     );
   }
 
+  checkContinuity(projectId) {
+    return this.request(`/projects/${encodeURIComponent(projectId)}/continuity`);
+  }
+
   getScene(id) {
     return this.request(`/scenes/${encodeURIComponent(id)}`);
   }

@@ -255,6 +255,44 @@ export class SceneList extends LitElement {
       font-size: 13px;
       color: #15803d;
     }
+
+    .continuity-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 13px;
+    }
+
+    .severity-chip {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 10px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+
+    .severity-chip.error {
+      background-color: rgba(239, 68, 68, 0.15);
+      color: #b91c1c;
+    }
+
+    .severity-chip.warning {
+      background-color: rgba(249, 168, 37, 0.15);
+      color: #b45309;
+    }
+
+    .severity-chip.info {
+      background-color: var(--color-surface-hover);
+      color: var(--color-text-muted);
+    }
+
+    .continuity-label {
+      font-weight: 600;
+    }
   `;
 
   static properties = {
@@ -276,6 +314,11 @@ export class SceneList extends LitElement {
     importBusy: { state: true },
     importError: { state: true },
     importedCount: { state: true },
+    showContinuity: { state: true },
+    continuityProject: { state: true },
+    continuityReport: { state: true },
+    continuityBusy: { state: true },
+    continuityError: { state: true },
   };
 
   constructor() {
@@ -309,6 +352,11 @@ export class SceneList extends LitElement {
     this.importBusy = false;
     this.importError = "";
     this.importedCount = 0;
+    this.showContinuity = false;
+    this.continuityProject = "";
+    this.continuityReport = null;
+    this.continuityBusy = false;
+    this.continuityError = "";
   }
 
   async connectedCallback() {
@@ -372,6 +420,9 @@ export class SceneList extends LitElement {
               }
             }}>
             Import script
+          </button>
+          <button class="btn btn-secondary" @click=${this._toggleContinuity}>
+            Continuity
           </button>
         </div>
 
@@ -568,6 +619,68 @@ export class SceneList extends LitElement {
           `
           : null}
 
+        ${this.showContinuity
+          ? html`
+            <div class="import-panel">
+              <div class="create-grid">
+                <div class="field">
+                  <label>Project</label>
+                  <select
+                    .value=${this.continuityProject}
+                    @change=${(e) => (this.continuityProject = e.target.value)}>
+                    ${this.projects.map(
+                      (p) => html`<option value=${p.id}>${p.name}</option>`,
+                    )}
+                  </select>
+                </div>
+              </div>
+              <div class="filters">
+                <button
+                  class="btn"
+                  ?disabled=${this.continuityBusy || this.continuityProject === ""}
+                  @click=${this._runContinuity}>
+                  ${this.continuityBusy ? "Checking..." : "Run check"}
+                </button>
+                <button
+                  class="btn btn-secondary"
+                  ?disabled=${this.continuityBusy}
+                  @click=${this._closeContinuity}>
+                  Close
+                </button>
+              </div>
+              ${this.continuityError
+                ? html`<div class="error-text">${this.continuityError}</div>`
+                : null}
+              ${this.continuityReport
+                ? this.continuityReport.issues.length === 0
+                  ? html`<div class="import-success">
+                      No continuity issues found.
+                    </div>`
+                  : html`
+                    <div class="import-preview">
+                      ${this.continuityReport.issues.map(
+                        (i) =>
+                          html`
+                            <div class="continuity-row">
+                              <span class="severity-chip ${i.severity}">
+                                ${i.severity}
+                              </span>
+                              <span>
+                                <span class="continuity-label"
+                                  >${i.object_label} · ${i.rule}</span
+                                >
+                                ${i.message}
+                              </span>
+                            </div>
+                          `,
+                      )}
+                    </div>
+                  `
+                : null}
+            </div>
+          `
+          : null}
+
         ${this.scenes.length === 0
           ? html`
             <div class="empty">
@@ -710,6 +823,37 @@ export class SceneList extends LitElement {
       this.importError = err.message || "Failed to import script.";
     } finally {
       this.importBusy = false;
+    }
+  }
+
+  _toggleContinuity() {
+    this.showContinuity = !this.showContinuity;
+    this.continuityError = "";
+    if (this.showContinuity) {
+      if (!this.continuityProject) {
+        this.continuityProject = this.projectFilter || this.projects[0]?.id || "";
+      }
+      this._runContinuity();
+    }
+  }
+
+  _closeContinuity() {
+    this.showContinuity = false;
+    this.continuityReport = null;
+    this.continuityError = "";
+  }
+
+  async _runContinuity() {
+    if (!this.continuityProject) return;
+    this.continuityBusy = true;
+    this.continuityError = "";
+    try {
+      this.continuityReport = await api.checkContinuity(this.continuityProject);
+    } catch (err) {
+      this.continuityReport = null;
+      this.continuityError = err.message || "Continuity check failed.";
+    } finally {
+      this.continuityBusy = false;
     }
   }
 }

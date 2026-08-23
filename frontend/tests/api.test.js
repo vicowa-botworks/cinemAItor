@@ -559,6 +559,13 @@ describe("ApiClient", () => {
       const body = JSON.parse(captured[0].options.body);
       assertEquals(body.scenes[0].name, "INT. OFFICE - DAY");
     });
+
+    it("checkContinuity requests the project continuity report", async () => {
+      await api.checkContinuity("p 1");
+      assertEquals(captured[0].url, "/api/v1/projects/p%201/continuity");
+      assertEquals(captured[0].options.method, undefined);
+      assertEquals(captured[0].options.body, undefined);
+    });
   });
 
   describe("v1 review endpoints", () => {
