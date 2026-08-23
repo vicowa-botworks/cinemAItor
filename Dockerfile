@@ -16,19 +16,25 @@ RUN useradd --create-home --uid 1000 app \
 
 WORKDIR /app
 
-COPY backend/deno.json backend/deno.lock backend/
+# Note: deno.lock files are intentionally not committed in this repo, so the
+# image resolves jsr/npm dependencies at build time (same as CI).
+COPY backend/deno.json backend/
 COPY backend/src backend/src/
-COPY frontend/deno.json frontend/deno.lock frontend/
+COPY frontend/deno.json frontend/
 COPY frontend/index.html frontend/index.html
 COPY frontend/src frontend/src/
 COPY docker docker/
 
-USER app
+# Cache the module graph as root (deno writes a generated deno.lock next to
+# each root-owned config), then hand everything to the runtime user.
 RUN cd /app/backend && deno cache src/server.ts
 RUN cd /app/frontend && deno cache src/server.js
 # Pre-warm the sqlite driver's native library download so runtime does not
 # need network access for it.
 RUN cd /app/backend && deno eval "import { Database } from '@db/sqlite'; const db = new Database(':memory:'); console.log('sqlite plugin loaded');"
+
+RUN chown -R app:app /app /deno-deps
+USER app
 
 ENV PORT=8123 \
     FRONTEND_PORT=8124 \
