@@ -21,14 +21,15 @@ Import, generation, versioning, non-destructive trim/gain and waveform access fo
 
 ## Endpoints
 
-| Method | Endpoint                                                   | Description                                                                                                                                                           |
-| ------ | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, settings?}` → `202 {job_id, job_type, asset_id, model_id}`     |
-| POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1                                     |
-| GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                              |
-| POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                                                    |
-| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration); edited from the Asset Detail "Audio adjustments" section (waveform, trim window, gain, reset) |
-| GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                                                          |
+| Method | Endpoint                                                   | Description                                                                                                                                                                      |
+| ------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, settings?}` → `202 {job_id, job_type, asset_id, model_id}`                |
+| POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1                                                |
+| GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                                         |
+| POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                                                               |
+| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration); edited from the Asset Detail "Audio adjustments" section (waveform, trim window, gain, reset)            |
+| GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                                                                     |
+| POST   | `/api/v1/audio/assets/:id/versions/:versionId/cleanup`     | Audio cleanup (AUD-012): `{denoise?: true, normalize?: true}` — at least one required → `202 {job_id, job_type, asset_id, source_version_id, source_version_number, operations}` |
 
 All endpoints require authentication; mutations follow asset write permissions (project scope
 included).
@@ -42,3 +43,24 @@ included).
   and candidates are compared/promoted through the review workflow.
 - Scoping: `scene_id` (scene write) implies the scene's project; otherwise `project_id` (project
   write) is required. The job records `project_id`/`scene_id` for provenance.
+
+## Cleanup (AUD-012)
+
+Denoise and/or normalize an existing audio version into a **new version** of the same asset — the
+source version is never modified. Edited from the Asset Detail "Audio cleanup" section (denoise /
+normalize checkboxes).
+
+- Request body: `{denoise?: true, normalize?: true}` — at least one operation is required (unknown
+  keys and empty bodies are rejected with 400).
+- Runs as a model-less `audio_cleanup` job through the job queue (same lease/recovery semantics as
+  other jobs; cancellable while queued or running). The job runner executes the pass with ffmpeg:
+  - **denoise** — `afftdn` spectral-denoise pass (runs first).
+  - **normalize** — EBU R128 single pass, `loudnorm=I=-16:TP=-1.5:LRA=11`.
+- The cleaned file is kept in the source format (`mp3 | aac | m4a | flac | ogg`, otherwise `wav`),
+  stored in the content store, and re-analyzed for duration/waveform metadata.
+- On hosts without ffmpeg the job completes with a deterministic mock output so the queue,
+  versioning, and provenance paths stay testable (CI-safe).
+- On success the new version is non-active, noted as `Cleanup of vN (…)` with the job id, and
+  recorded in the version's technical metadata under the `cleanup` key (`operations`, `engine`,
+  `source_version_id/number`, `job_id`). Proxy generation is queued for it automatically; promotion
+  happens through the normal version restore flow.

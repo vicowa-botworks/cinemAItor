@@ -814,6 +814,18 @@ class ApiClient {
     );
   }
 
+  cleanupAudioVersion(assetId, versionId, operations) {
+    return this.request(
+      `/audio/assets/${encodeURIComponent(assetId)}/versions/${
+        encodeURIComponent(versionId)
+      }/cleanup`,
+      {
+        method: "POST",
+        body: JSON.stringify(operations),
+      },
+    );
+  }
+
   // --- diagnostics / ops ---
 
   getDiagnosticsHardware() {

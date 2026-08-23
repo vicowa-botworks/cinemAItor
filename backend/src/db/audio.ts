@@ -1,6 +1,13 @@
 import { getDb } from "./database.ts";
 import { type AssetVersion, getAssetVersion } from "./assets.ts";
 
+export const AUDIO_ASSET_TYPES = ["audio", "music", "sfx", "voiceover", "ambience"] as const;
+export type AudioAssetType = (typeof AUDIO_ASSET_TYPES)[number];
+
+export function isAudioAssetType(value: string): value is AudioAssetType {
+  return (AUDIO_ASSET_TYPES as readonly string[]).includes(value);
+}
+
 export interface AudioVersionView {
   version: AssetVersion;
   audio: Record<string, unknown> | null;

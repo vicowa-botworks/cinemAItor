@@ -3,8 +3,8 @@
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
 migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
-project templates and advanced storage management shipped, legacy demo surface removed; remaining:
-audio cleanup, subtitle generation, A/B + version comparison, model benchmark)
+project templates, advanced storage management and audio cleanup (denoise/normalize) shipped, legacy
+demo surface removed; remaining: subtitle generation, A/B + version comparison, model benchmark)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -349,14 +349,27 @@ The product track follows `MASTER-PLAN.md`.
       references; referenced media is never touched. The diagnostics panel storage card shows the
       per-project table, an integrity chip, a Verify button, an orphaned-media checkbox and a Clean
       cache button; 5 new backend test steps (service + route), 0 new frontend steps
+- [x] Audio cleanup (AUD-012, Workstream 14): denoise/normalize an existing audio version into a new
+      (non-active) version of the same asset.
+      `POST /api/v1/audio/assets/:id/versions/:versionId/cleanup` accepts `{denoise?, normalize?}`
+      (at least one required; unknown keys and empty bodies → 400) and enqueues a model-less
+      `audio_cleanup` job (write-authorized; the source version is never touched). The job runner
+      drives ffmpeg: `afftdn` spectral denoise (first) and EBU R128 single-pass normalize
+      (`loudnorm=I=-16:TP=-1.5:LRA=11`), keeping the source format (mp3/aac/m4a/flac/ogg, else wav);
+      without ffmpeg a deterministic mock output keeps the pipeline testable (CI-safe). The cleaned
+      file is re-analyzed, stored in the content store with cleanup provenance in
+      `technical_metadata_json` (operations, engine, source version, job id), noted
+      `Cleanup of vN (…)`, and queued for proxy generation. Asset Detail gains an "Audio cleanup"
+      section (denoise/normalize checkboxes → job, polled to terminal, versions refreshed on
+      success); 18 new backend test steps (service units + fake-ffmpeg runner e2e + API
+      authz/errors), 1 new frontend API client test step
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: audio cleanup,
-      subtitle generation from dialogue/voiceover, A/B + version comparison improvements, model
-      benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: subtitle generation
+      from dialogue/voiceover, A/B + version comparison improvements, model benchmark
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues

@@ -328,6 +328,20 @@ export class AssetDetail extends LitElement {
       gap: 12px;
     }
 
+    .cleanup-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .cleanup-row label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+
     @media (max-width: 700px) {
       .audio-row {
         grid-template-columns: 1fr;
@@ -349,6 +363,8 @@ export class AssetDetail extends LitElement {
     audioPeaks: { state: true },
     audioForm: { state: true },
     audioSaving: { state: true },
+    cleanupForm: { state: true },
+    cleanupBusy: { state: true },
   };
 
   constructor() {
@@ -366,6 +382,8 @@ export class AssetDetail extends LitElement {
     this.audioPeaks = null;
     this.audioForm = { start: "", end: "", gain: "" };
     this.audioSaving = false;
+    this.cleanupForm = { denoise: true, normalize: true };
+    this.cleanupBusy = false;
   }
 
   willUpdate(changed) {
@@ -390,6 +408,8 @@ export class AssetDetail extends LitElement {
     this.audioPeaks = null;
     this.audioForm = { start: "", end: "", gain: "" };
     this.audioSaving = false;
+    this.cleanupForm = { denoise: true, normalize: true };
+    this.cleanupBusy = false;
   }
 
   _revokePreview() {
@@ -528,6 +548,67 @@ export class AssetDetail extends LitElement {
   _onAudioReset() {
     this.audioForm = { start: "", end: "", gain: "" };
     this._saveAudioAdjustments();
+  }
+
+  // --- audio cleanup (denoise / normalize → new version) ---
+
+  _onCleanupSubmit(e) {
+    e.preventDefault();
+    this._runCleanup();
+  }
+
+  _pollJob(jobId, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    return (async () => {
+      for (;;) {
+        const job = await api.getJob(jobId);
+        if (["succeeded", "failed", "cancelled"].includes(job.status)) {
+          return job;
+        }
+        if (Date.now() > deadline) throw new Error("Cleanup job timed out");
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    })();
+  }
+
+  async _runCleanup() {
+    const version = this.asset?.active_version;
+    if (!version || this.cleanupBusy) return;
+    const operations = {};
+    if (this.cleanupForm.denoise) operations.denoise = true;
+    if (this.cleanupForm.normalize) operations.normalize = true;
+    if (Object.keys(operations).length === 0) {
+      this.error = "Pick at least one cleanup operation.";
+      this.notice = "";
+      return;
+    }
+    this.cleanupBusy = true;
+    this.error = "";
+    this.notice = "";
+    try {
+      const result = await api.cleanupAudioVersion(
+        this.assetId,
+        version.id,
+        operations,
+      );
+      const job = await this._pollJob(result.job_id, 180_000);
+      if (job.status !== "succeeded") {
+        this.error = job.error_text || `Cleanup ended ${job.status}.`;
+        return;
+      }
+      const [asset, versions] = await Promise.all([
+        api.getAsset(this.assetId),
+        api.listAssetVersions(this.assetId),
+      ]);
+      this.asset = asset;
+      this.versions = versions;
+      await this._refreshAudio();
+      this.notice = "Cleanup complete — the cleaned version is listed below.";
+    } catch (err) {
+      this.error = err.message || "Failed to run cleanup";
+    } finally {
+      this.cleanupBusy = false;
+    }
   }
 
   _audioWaveform() {
@@ -932,6 +1013,51 @@ export class AssetDetail extends LitElement {
                   <button type="button" class="btn btn-secondary"
                     ?disabled=${this.audioSaving} @click=${this._onAudioReset}>
                     Reset (full window, 0 dB)
+                  </button>
+                </div>
+              </form>
+            </div>
+          `
+          : ""}
+
+        ${this._isAudioAsset() && asset?.active_version
+          ? html`
+            <div class="section">
+              <h3>Audio cleanup</h3>
+              <p class="waveform-note">
+                Creates a new version of this asset (the original is kept). Denoise
+                runs a spectral-denoise pass; normalize targets -16 LUFS (EBU R128,
+                single pass).
+              </p>
+              <form @submit=${this._onCleanupSubmit}>
+                <div class="cleanup-row">
+                  <label>
+                    <input type="checkbox" name="denoise" .checked=${this
+                      .cleanupForm.denoise}
+                      @change=${(
+                        e,
+                      ) => (this.cleanupForm = {
+                        ...this.cleanupForm,
+                        denoise: e.target.checked,
+                      })} />
+                    Denoise
+                  </label>
+                  <label>
+                    <input type="checkbox" name="normalize" .checked=${this
+                      .cleanupForm.normalize}
+                      @change=${(
+                        e,
+                      ) => (this.cleanupForm = {
+                        ...this.cleanupForm,
+                        normalize: e.target.checked,
+                      })} />
+                    Normalize to -16 LUFS
+                  </label>
+                </div>
+                <div class="preview-actions" style="margin-top:2px;">
+                  <button type="submit" class="btn"
+                    ?disabled=${this.cleanupBusy || this.audioSaving}>
+                    ${this.cleanupBusy ? "Cleaning..." : "Run cleanup (new version)"}
                   </button>
                 </div>
               </form>

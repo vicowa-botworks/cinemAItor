@@ -1,5 +1,6 @@
 import {
   addJobEvent,
+  AUDIO_CLEANUP_JOB_TYPE,
   claimJob,
   countRunningJobs,
   createJob,
@@ -11,6 +12,14 @@ import {
   recoverStaleJobs,
   updateJobProgress,
 } from "../db/jobs.ts";
+import { isAudioAssetType } from "../db/audio.ts";
+import {
+  type CleanupOperations,
+  cleanupOperationsLabel,
+  cleanupOutputFormat,
+  generateAudioCleanup,
+} from "./audio_cleanup.ts";
+import { analyzeAudioFile, buildAudioMetadata } from "./audio_info.ts";
 import { getModel, touchModelLastUsed } from "../db/models.ts";
 import {
   type AssetVersion,
@@ -192,6 +201,115 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
     }
   }
 
+  /** Execute a queued audio cleanup job: denoise/normalize the source
+   * version into a new version of the same asset. */
+  async function executeAudioCleanupJob(job: GenerationJob): Promise<void> {
+    const jobId = job.id;
+    const userId = job.created_by_user_id ?? 0;
+    try {
+      if (!job.asset_id) {
+        throw new Error("Cleanup job requires an asset_id");
+      }
+      const input = job.input_asset_versions[0];
+      if (!input) {
+        throw new Error("Cleanup job requires an input asset version");
+      }
+      const version = getAssetVersionByNumber(job.asset_id, input.version_number);
+      if (!version) {
+        throw new Error(`Asset version ${input.version_number} no longer exists`);
+      }
+      const asset = getAssetById(job.asset_id);
+      if (!asset || asset.status === "deleted") {
+        throw new Error("Target asset has been deleted");
+      }
+      if (!isAudioAssetType(asset.asset_type)) {
+        throw new Error("Asset is not an audio asset");
+      }
+      if (!version.file_path) {
+        throw new Error("Version has no stored master file");
+      }
+      await Deno.stat(version.file_path);
+
+      const settings = job.settings ?? {};
+      const operations: CleanupOperations = {
+        denoise: settings.denoise === true,
+        normalize: settings.normalize === true,
+      };
+      if (!operations.denoise && !operations.normalize) {
+        throw new Error("Cleanup job has no operations");
+      }
+
+      const out = cleanupOutputFormat(version.format ?? "wav");
+      const store = getContentStore();
+      await Deno.mkdir(store.layout.cache, { recursive: true });
+      // ffmpeg infers the output format from the file extension, so the
+      // scratch path must carry the target extension.
+      const tempPath = `${store.layout.cache}/.audclean-${job.id}.${out.extension}`;
+      const hooks = {
+        onProgress(progress: number, message: string | null): void {
+          updateJobProgress(jobId, progress);
+          if (message) addJobEvent(jobId, "progress", message, { progress });
+        },
+        isCancelled(): boolean {
+          return getJob(jobId)?.status === "cancelling";
+        },
+      };
+      try {
+        const result = await generateAudioCleanup(
+          version.file_path,
+          tempPath,
+          operations,
+          version.format ?? "wav",
+          job.id,
+          hooks,
+        );
+        const stored = await store.put(
+          tempPath,
+          `clean-${version.id.slice(0, 8)}.${result.extension}`,
+        );
+        const analysis = await analyzeAudioFile(tempPath);
+        const metadata = {
+          ...buildAudioMetadata(analysis),
+          cleanup: {
+            operations,
+            engine: result.engine,
+            source_version_id: version.id,
+            source_version_number: version.version_number,
+            job_id: jobId,
+          },
+        };
+        const cleaned = createAssetVersion(job.asset_id, userId, {
+          content_hash: stored.hash,
+          file_path: stored.path,
+          format: result.extension,
+          mime_type: result.mime_type,
+          file_size: stored.size,
+          technical_metadata_json: JSON.stringify(metadata),
+          notes: `Cleanup of v${version.version_number} (${
+            cleanupOperationsLabel(operations)
+          }) by job ${jobId}`,
+          make_active: false,
+        });
+        queueProxyGeneration(job.asset_id, cleaned, userId, job.project_id);
+        addJobEvent(jobId, "cleanup.generated", "Cleanup version stored", {
+          version_id: cleaned.id,
+          engine: result.engine,
+        });
+        finishJob(jobId, "succeeded", {
+          outputAssetVersionId: cleaned.id,
+          candidateCount: 1,
+          candidateVersionIds: [cleaned.id],
+          progress: 100,
+        });
+      } finally {
+        await Deno.remove(tempPath).catch(() => {});
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      finishJob(jobId, "failed", { errorText: message });
+    }
+  }
+
   /** Run one claimed job to a terminal state. */
   async function executeJob(job: GenerationJob): Promise<void> {
     const jobId = job.id;
@@ -199,6 +317,10 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
     try {
       if (job.job_type === PROXY_JOB_TYPE) {
         await executeProxyJob(job);
+        return;
+      }
+      if (job.job_type === AUDIO_CLEANUP_JOB_TYPE) {
+        await executeAudioCleanupJob(job);
         return;
       }
       const model = getModel(job.model_id!);
