@@ -133,6 +133,9 @@ buffers the whole file in memory (chunked streaming, constant memory while hashi
 - `Content-Type: application/octet-stream`
 - `X-File-Name`: percent-encoded filename (the body's extension drives MIME/format detection)
 - `X-Upload-Notes` (optional): percent-encoded version notes
+- `X-Technical-Metadata` (optional, percent-encoded JSON, `/assets/:id/upload` only): merged under
+  the version's `technical_metadata_json`. The 3D view-export flow uses it for `provenance` metadata
+  on derived image versions (see `docs/3d.md`).
 
 The same protocol is used by `POST /api/v1/audio/upload` and the raw path of
 `POST /api/v1/audio/assets/:id/versions` (which additionally accepts `X-Asset-Type`,

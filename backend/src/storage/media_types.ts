@@ -36,6 +36,9 @@ const TYPES_BY_EXT: Record<string, MediaType> = {
   glb: { mime: "model/gltf-binary", format: "glb" },
   gltf: { mime: "model/gltf+json", format: "gltf" },
   obj: { mime: "model/obj", format: "obj" },
+  usd: { mime: "model/usd", format: "usd" },
+  usdz: { mime: "model/vnd.usdz+zip", format: "usdz" },
+  stl: { mime: "model/stl", format: "stl" },
 };
 
 /** Infer MIME type and format name from a filename or extension. */

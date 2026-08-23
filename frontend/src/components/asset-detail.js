@@ -13,6 +13,7 @@ import {
   toggleComparePair,
   versionCompareRows,
 } from "../compare.js";
+import { modelFormatForFile } from "../model-views.js";
 
 const STATUS_OPTIONS = ["draft", "approved", "rejected", "archived"];
 
@@ -321,6 +322,16 @@ export class AssetDetail extends LitElement {
       font-size: 12px;
     }
 
+    .exported-views {
+      margin: 10px 0 0;
+      padding-left: 18px;
+    }
+
+    .exported-views li {
+      font-size: 13px;
+      margin: 4px 0;
+    }
+
     .danger-zone {
       border-color: var(--color-error);
     }
@@ -537,6 +548,10 @@ export class AssetDetail extends LitElement {
     this.comparePreviews = new Map();
     this._compareSync = new CompareSync();
     this.dependencies = null;
+    this.viewerError = "";
+    this.viewsBusy = false;
+    this.exportedViews = [];
+    this._viewerModule = null;
   }
 
   willUpdate(changed) {
@@ -570,6 +585,9 @@ export class AssetDetail extends LitElement {
     this.comparePreviews = new Map();
     this._compareSync?.clear();
     this.dependencies = null;
+    this.viewerError = "";
+    this.viewsBusy = false;
+    this.exportedViews = [];
   }
 
   _revokePreview() {
@@ -778,6 +796,20 @@ export class AssetDetail extends LitElement {
       this.preview = await api.getAssetPreviewUrl(asset.id);
     } catch {
       this.preview = null;
+      return;
+    }
+    if (this.preview?.type?.startsWith("model/")) {
+      // three.js comes from the import map CDN; load it lazily so a CDN or
+      // WebGL failure degrades only the 3D preview.
+      if (!this._viewerModule) {
+        this._viewerModule = import("./model-viewer.js")
+          .catch((err) => {
+            console.error("model-viewer failed to load:", err);
+            this._viewerModule = null;
+            this.viewerError = "The 3D viewer failed to load (three.js CDN unavailable?)";
+            this.requestUpdate();
+          });
+      }
     }
   }
 
@@ -810,6 +842,89 @@ export class AssetDetail extends LitElement {
 
   _isAudioAsset() {
     return AUDIO_TYPES.includes(this.asset?.asset_type);
+  }
+
+  _isModelAsset() {
+    return this.asset?.asset_type === "model";
+  }
+
+  _modelFormatSupported() {
+    const version = this.asset?.active_version;
+    if (!version) return false;
+    return modelFormatForFile(version.format || this.preview?.type) !== null;
+  }
+
+  // --- 3D view export (derived image assets) ---
+
+  async _acquireViewAsset(asset, view, slug, displayName) {
+    try {
+      return await api.createAsset({
+        unique_slug: slug,
+        display_name: displayName,
+        asset_type: "image",
+        library_scope: asset.library_scope,
+        project_id: asset.project_id,
+      });
+    } catch (err) {
+      // Re-export: the view slug already exists, so store the new render as a
+      // new version of that asset instead of failing.
+      if (err.status !== 409) throw err;
+      const matches = await api.listAssets({ q: slug });
+      const existing = matches.find(
+        (a) => a.unique_slug === slug && a.status !== "deleted",
+      );
+      if (!existing) throw err;
+      return existing;
+    }
+  }
+
+  async _onExportViews() {
+    const asset = this.asset;
+    const viewer = this.renderRoot?.querySelector("model-viewer");
+    if (!asset?.active_version || !viewer) return;
+    this.viewsBusy = true;
+    this.error = "";
+    this.notice = "";
+    try {
+      const views = await viewer.exportViews();
+      if (!views) {
+        this.error = "The 3D model has not finished loading — try again in a moment.";
+        return;
+      }
+      const created = [];
+      for (const { view, blob } of views) {
+        const slug = `${asset.unique_slug}_${view}`;
+        const file = new File([blob], `${slug}.png`, { type: "image/png" });
+        const target = await this._acquireViewAsset(
+          asset,
+          view,
+          slug,
+          `${asset.display_name} — ${view} view`,
+        );
+        const metadata = {
+          provenance: {
+            kind: "derived_view",
+            view,
+            source_asset_id: asset.id,
+            source_asset_name: asset.display_name,
+            source_version_number: asset.active_version.version_number,
+          },
+        };
+        await api.uploadAsset(
+          target.id,
+          file,
+          `Derived ${view} view of @${asset.unique_slug} v${asset.active_version.version_number}`,
+          metadata,
+        );
+        created.push({ view, slug, assetId: target.id });
+      }
+      this.exportedViews = created;
+      this.notice = `Exported ${created.length} views as image assets.`;
+    } catch (err) {
+      this.error = err.message || "View export failed";
+    } finally {
+      this.viewsBusy = false;
+    }
   }
 
   _audioDuration() {
@@ -1184,6 +1299,18 @@ export class AssetDetail extends LitElement {
     if (type.startsWith("audio/")) {
       return html`<audio src=${this.preview.url} controls></audio>`;
     }
+    if (type.startsWith("model/")) {
+      const fmt = modelFormatForFile(version.format || type);
+      if (!fmt) {
+        return html`<div class="preview-box"><span>3D preview not available
+            for ${version.format ?? "this format"} (glb, gltf and obj are
+            supported)</span></div>`;
+      }
+      if (this.viewerError) {
+        return html`<div class="preview-box"><span class="error">${this.viewerError}</span></div>`;
+      }
+      return html`<model-viewer src=${this.preview.url} format=${fmt}></model-viewer>`;
+    }
     return html`<div class="preview-box"><span>No inline preview for ${
       type || "this type"
     }</span></div>`;
@@ -1436,7 +1563,7 @@ export class AssetDetail extends LitElement {
                 <div class="field">
                   <label for="v-file">File</label>
                   <input id="v-file" name="file" type="file"
-                    accept="image/*,video/*,audio/*" required />
+                    accept="image/*,video/*,audio/*,.glb,.gltf,.obj,.fbx,.usd,.usdz,.stl" required />
                 </div>
                 <div class="field">
                   <label for="v-notes">Notes</label>
@@ -1447,6 +1574,42 @@ export class AssetDetail extends LitElement {
             </form>
           </div>
         </div>
+
+        ${this._isModelAsset() && asset?.active_version && this._modelFormatSupported()
+          ? html`
+            <div class="section">
+              <h3>Export derived views</h3>
+              <p class="waveform-note">
+                Renders the front, side, top and perspective views of the
+                active model as 1024px PNG images and stores each as an image
+                asset (<code>@${asset.unique_slug}&lt;view&gt;</code>) that can
+                be used as an @reference in prompts, panels and shots.
+              </p>
+              <div class="preview-actions">
+                <button class="btn" ?disabled=${this.viewsBusy}
+                  @click=${this._onExportViews}>
+                  ${this.viewsBusy ? "Exporting views..." : "Export 4 views"}
+                </button>
+              </div>
+              ${this.exportedViews.length
+                ? html`<ul class="exported-views">
+                    ${
+                  this.exportedViews.map(
+                    (v) =>
+                      html`
+                        <li>
+                          <a href="#/asset/${encodeURIComponent(v.assetId)}">@${v
+                            .slug}</a>
+                          <span class="dep-dim">${v.view}</span>
+                        </li>
+                      `,
+                  )
+                }
+                  </ul>`
+                : ""}
+            </div>
+          `
+          : ""}
 
         ${this._isAudioAsset() && asset?.active_version
           ? html`

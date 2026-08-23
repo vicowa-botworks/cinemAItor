@@ -82,7 +82,13 @@ app-root (main router)
   │   │              audio cleanup (denoise/normalize → new version, AUD-012),
   │   │              subtitle generation (transcribe → SRT candidates on a new subtitle asset, AUD-014),
   │   │              "Used in" dependency view + delete warnings (AST-015),
+  │   │              3D model preview (model-viewer) + export derived views → image assets
+  │   │              `@<model>_<view>` usable as @references (MS-8, see docs/3d.md),
   │   │              tags, aliases, delete)
+├── model-viewer (three.js 3D preview for glb/gltf/obj asset versions: orbit/zoom, grid +
+│   │            lights, model-fit framing; `exportViews()` renders front/side/top/perspective
+│   │            1024px PNGs — dynamically imported, CDN/WebGL failure degrades only this preview)
+├── model-views (shared pure camera-pose math for 3D view exports — unit-tested, DOM-free)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, broken-reference repair
 │   │              (retarget a missing token to a live asset in the draft text),
@@ -169,7 +175,8 @@ server.ts (entry point)
 │   ├── GET / (system-seeded starting structures; read-only)
 │   └── (see docs/projects.md "Project templates")
 ├── Asset routes (/api/v1/assets/*, auth middleware)
- │   ├── CRUD + upload + versions + restore + aliases + tags + preview
+ │   ├── CRUD + upload (raw bytes; optional `X-Technical-Metadata` JSON header) + versions
+ │   │   + restore + aliases + tags + preview
  │   │   + per-version preview (GET /:id/versions/:versionId/preview, A/B compare)
  │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
  │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot

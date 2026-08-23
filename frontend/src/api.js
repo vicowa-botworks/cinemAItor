@@ -190,7 +190,7 @@ class ApiClient {
     return this.request(`/assets/${encodeURIComponent(id)}/dependencies`);
   }
 
-  async uploadAsset(id, file, notes) {
+  async uploadAsset(id, file, notes, metadata) {
     // Raw-bytes streaming upload: the file IS the request body (nothing is
     // buffered server-side). Metadata travels percent-encoded in headers.
     const headers = {
@@ -199,6 +199,11 @@ class ApiClient {
     };
     if (notes) {
       headers["X-Upload-Notes"] = encodeURIComponent(notes);
+    }
+    if (metadata !== undefined) {
+      headers["X-Technical-Metadata"] = encodeURIComponent(
+        JSON.stringify(metadata),
+      );
     }
     return this.request(`/assets/${encodeURIComponent(id)}/upload`, {
       method: "POST",

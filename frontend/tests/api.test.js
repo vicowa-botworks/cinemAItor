@@ -186,6 +186,24 @@ describe("ApiClient", () => {
       assertEquals(options.headers["X-File-Name"], encodeURIComponent("b.png"));
     });
 
+    it("uploadAsset percent-encodes optional technical metadata", async () => {
+      const file = new File(["bytes"], "c.glb", { type: "model/gltf-binary" });
+      const metadata = { provenance: { kind: "derived_view", view: "front" } };
+      await api.uploadAsset("a-1", file, "take", metadata);
+      const { options } = captured[0];
+      assertEquals(
+        JSON.parse(decodeURIComponent(options.headers["X-Technical-Metadata"])),
+        metadata,
+      );
+    });
+
+    it("uploadAsset omits the metadata header when no metadata is given", async () => {
+      const file = new File(["bytes"], "d.png", { type: "image/png" });
+      await api.uploadAsset("a-1", file);
+      const { options } = captured[0];
+      assertEquals(options.headers["X-Technical-Metadata"], undefined);
+    });
+
     it("listAssetVersions requests /api/v1/assets/:id/versions", async () => {
       await api.listAssetVersions("a-1");
       assertEquals(captured[0].url, "/api/v1/assets/a-1/versions");

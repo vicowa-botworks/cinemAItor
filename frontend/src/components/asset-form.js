@@ -263,6 +263,7 @@ export class AssetForm extends LitElement {
               <option value="sfx">sfx</option>
               <option value="voiceover">voiceover</option>
               <option value="ambience">ambience</option>
+              <option value="model">model (3D)</option>
               <option value="__custom">custom...</option>
             </select>
           </div>

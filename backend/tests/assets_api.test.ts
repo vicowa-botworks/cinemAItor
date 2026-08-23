@@ -86,6 +86,7 @@ function upload(
   bytes: Uint8Array<ArrayBuffer>,
   filename: string,
   notes?: string,
+  metadata?: string | Record<string, unknown>,
 ): Promise<Response> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
@@ -93,6 +94,11 @@ function upload(
     "X-File-Name": encodeURIComponent(filename),
   };
   if (notes) headers["X-Upload-Notes"] = encodeURIComponent(notes);
+  if (metadata !== undefined) {
+    headers["X-Technical-Metadata"] = encodeURIComponent(
+      typeof metadata === "string" ? metadata : JSON.stringify(metadata),
+    );
+  }
   return fetch(`${baseUrl}/api/v1/assets/${assetId}/upload`, {
     method: "POST",
     headers,
@@ -594,6 +600,96 @@ describe("assets api", () => {
 
         const after = await get(`/api/v1/assets/${created.id}`, ownerToken);
         assertEquals(after.status, 404);
+      })();
+    });
+  });
+
+  it("stores version technical metadata from the upload header", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const slug = uniqueSlug("statue");
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            { unique_slug: slug, display_name: "Statue", asset_type: "model" },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        const up = await upload(
+          created.id,
+          ownerToken,
+          randomImageBytes(64),
+          "statue.glb",
+          "scanned on site",
+          {
+            provenance: {
+              kind: "derived_view",
+              view: "front",
+              source_asset_id: "asset-123",
+              source_version_number: 2,
+            },
+          },
+        );
+        assertEquals(up.status, 201);
+        const body = (await up.json()) as {
+          version: {
+            version_number: number;
+            mime_type: string;
+            format: string;
+            technical_metadata_json: string | null;
+          };
+        };
+        assertEquals(body.version.version_number, 1);
+        assertEquals(body.version.mime_type, "model/gltf-binary");
+        assertEquals(body.version.format, "glb");
+        assertEquals(JSON.parse(body.version.technical_metadata_json ?? "null"), {
+          provenance: {
+            kind: "derived_view",
+            view: "front",
+            source_asset_id: "asset-123",
+            source_version_number: 2,
+          },
+        });
+      })();
+    });
+  });
+
+  it("rejects malformed technical metadata headers on upload", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const slug = uniqueSlug("statue");
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            { unique_slug: slug, display_name: "Statue", asset_type: "model" },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        const notJson = await upload(
+          created.id,
+          ownerToken,
+          randomImageBytes(64),
+          "statue.glb",
+          undefined,
+          "not json {",
+        );
+        assertEquals(notJson.status, 400);
+
+        const array = await upload(
+          created.id,
+          ownerToken,
+          randomImageBytes(64),
+          "statue.glb",
+          undefined,
+          JSON.stringify(["an", "array"]),
+        );
+        assertEquals(array.status, 400);
+        const arrayBody = (await array.json()) as { error: { message: string } };
+        assert(arrayBody.error.message.includes("JSON object"));
       })();
     });
   });

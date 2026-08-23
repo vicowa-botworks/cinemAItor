@@ -11,7 +11,9 @@ the model benchmark and A/B + version comparison, skill system v1, project templ
 storage management, production hardening (auth rate limiting, chunked upload streaming), asset
 dependency tracking (AST-015, "Used in" + real delete warnings), and broken reference repair (Prompt
 Studio repair flow). Remaining deferred items: render farm and real model adapters (both explicitly
-out of MVP scope). Next: Milestone 8 (Advanced Studio Features).
+out of MVP scope). Milestone 8 (Advanced Studio Features) is underway: 3D support — the first MS-8
+item — is in (model import, in-browser three.js preview, and derived view export as `@`-references;
+see `docs/3d.md`). Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -460,6 +462,15 @@ The product track follows `MASTER-PLAN.md`.
       audited path for re-pointing rows on saved versions. Pure span-rewrite helper
       `replaceReferenceToken` in `frontend/src/reference-repair.js` (unit-tested, +9 frontend
       steps); all 365 backend + 228 frontend test steps green
+- [x] 3D support (first Milestone 8 item): `model` asset type with registered media types
+      (glb/gltf/obj + fbx/usd/usdz/stl stored without preview), raw-bytes upload now accepts an
+      optional percent-encoded `X-Technical-Metadata` JSON header, a `model-viewer` web component
+      (three.js via import map, dynamically imported so a CDN/WebGL failure only degrades the 3D
+      preview) renders glb/gltf/obj versions with orbit/zoom + grid + lights, and **Export derived
+      views** renders front/side/top/perspective 1024px PNGs stored as image assets
+      `@<model>_<view>` (re-exports become new versions of the view asset) usable as `@`-references
+      in prompts, panels and shots. Pure camera-pose math in `frontend/src/model-views.js`
+      (unit-tested); backend 367 + frontend 245 test steps green — see `docs/3d.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -514,3 +525,5 @@ The product track follows `MASTER-PLAN.md`.
   2026
 - Asset dependency tracking (AST-015, `/assets/:id/dependencies` + "Used in" view + delete
   warnings): Sun Aug 23 2026
+- 3D support (MS-8: model import, three.js preview, derived view export as `@`-references): Sun Aug
+  23 2026
