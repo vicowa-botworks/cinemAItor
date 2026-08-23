@@ -12,6 +12,7 @@ import "./components/asset-upload.js";
 import "./components/prompt-editor.js";
 import "./components/model-manager.js";
 import "./components/job-monitor.js";
+import "./components/skills-list.js";
 import "./components/storyboard-list.js";
 import "./components/storyboard-detail.js";
 import "./components/scene-list.js";
@@ -188,6 +189,12 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "jobs";
+    } else if (hash === "#/skills") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "skills";
     } else if (hash.startsWith("#/storyboard/")) {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
@@ -297,6 +304,8 @@ export class AppRoot extends LitElement {
         return html`<model-manager></model-manager>`;
       case "jobs":
         return html`<job-monitor></job-monitor>`;
+      case "skills":
+        return html`<skills-list></skills-list>`;
       case "storyboards":
         return html`<storyboard-list></storyboard-list>`;
       case "storyboard-detail":

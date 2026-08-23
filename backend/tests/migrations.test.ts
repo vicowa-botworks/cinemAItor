@@ -83,6 +83,7 @@ describe("migrations", () => {
         "0016_track_gain.sql",
         "0017_track_ducking.sql",
         "0018_project_templates.sql",
+        "0019_skill_system.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -106,12 +107,13 @@ describe("migrations", () => {
         "0016_track_gain.sql",
         "0017_track_ducking.sql",
         "0018_project_templates.sql",
+        "0019_skill_system.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        18,
+        19,
       );
     } finally {
       db.close();
@@ -141,6 +143,7 @@ describe("migrations", () => {
       "0016_track_gain.sql",
       "0017_track_ducking.sql",
       "0018_project_templates.sql",
+      "0019_skill_system.sql",
     ]);
   });
 

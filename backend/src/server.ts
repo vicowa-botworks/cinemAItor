@@ -11,6 +11,7 @@ import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
+import { skillsRouter } from "@cinemaItor/routes/skills.ts";
 import { templateRouter } from "@cinemaItor/routes/templates.ts";
 import { promptRouter } from "@cinemaItor/routes/prompts.ts";
 import { referenceRouter } from "@cinemaItor/routes/references.ts";
@@ -20,6 +21,7 @@ import { createLogger } from "@cinemaItor/logger.ts";
 import { createDiagnosticLogSink } from "@cinemaItor/db/diagnostics.ts";
 import { errorHandler } from "@cinemaItor/errors.ts";
 import { getDb } from "@cinemaItor/db/database.ts";
+import { seedSystemSkills } from "@cinemaItor/db/skills.ts";
 import { ensureLayout } from "@cinemaItor/storage/paths.ts";
 import { type JobRunner, startJobRunner } from "@cinemaItor/services/job_runner.ts";
 import { type RenderRunner, startRenderRunner } from "@cinemaItor/services/render_runner.ts";
@@ -70,6 +72,7 @@ export function createApp(
   const diagnosticSink = createDiagnosticLogSink();
   const logger = createLogger(config.logLevel, { component: "http" }, diagnosticSink);
   getDb();
+  seedSystemSkills();
   ensureLayout(config.appDataDir);
 
   const jobRunner = startJobRunner({
@@ -90,6 +93,7 @@ export function createApp(
   app.use(healthRouter.routes());
   app.use(authRouter.routes());
   app.use(projectRouter.routes());
+  app.use(skillsRouter.routes());
   app.use(templateRouter.routes());
   app.use(assetRouter.routes());
   app.use(audioRouter.routes());
@@ -105,6 +109,7 @@ export function createApp(
   app.use(referenceRouter.routes());
   app.use(healthRouter.allowedMethods());
   app.use(authRouter.allowedMethods());
+  app.use(skillsRouter.allowedMethods());
   app.use(projectRouter.allowedMethods());
   app.use(assetRouter.allowedMethods());
   app.use(audioRouter.allowedMethods());
