@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { parseScript, scriptToSceneInputs } from "../script-parse.js";
 
 export class SceneList extends LitElement {
   static styles = css`
@@ -189,6 +190,71 @@ export class SceneList extends LitElement {
       color: var(--color-text-muted);
       font-size: 14px;
     }
+
+    .import-panel {
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 760px;
+    }
+
+    .import-panel textarea {
+      min-height: 180px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      white-space: pre;
+    }
+
+    .import-hint {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .import-warnings {
+      font-size: 12px;
+      color: var(--color-warning, #b45309);
+    }
+
+    .import-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 10px;
+    }
+
+    .preview-row {
+      border-left: 2px solid var(--color-primary);
+      padding-left: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .preview-heading {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .preview-excerpt {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .import-success {
+      font-size: 13px;
+      color: #15803d;
+    }
   `;
 
   static properties = {
@@ -203,6 +269,13 @@ export class SceneList extends LitElement {
     creating: { state: true },
     createError: { state: true },
     form: { state: true },
+    showImport: { state: true },
+    importText: { state: true },
+    importProject: { state: true },
+    importParsed: { state: true },
+    importBusy: { state: true },
+    importError: { state: true },
+    importedCount: { state: true },
   };
 
   constructor() {
@@ -229,6 +302,13 @@ export class SceneList extends LitElement {
       prompt: "",
       target_duration: "",
     };
+    this.showImport = false;
+    this.importText = "";
+    this.importProject = this.projectFilter || "";
+    this.importParsed = null;
+    this.importBusy = false;
+    this.importError = "";
+    this.importedCount = 0;
   }
 
   async connectedCallback() {
@@ -279,6 +359,19 @@ export class SceneList extends LitElement {
                 this.projects[0]?.id || "";
             }}>
             New scene
+          </button>
+          <button
+            class="btn btn-secondary"
+            @click=${() => {
+              this.showImport = !this.showImport;
+              this.importError = "";
+              this.importedCount = 0;
+              this.importParsed = null;
+              if (!this.importProject) {
+                this.importProject = this.projectFilter || this.projects[0]?.id || "";
+              }
+            }}>
+            Import script
           </button>
         </div>
 
@@ -371,6 +464,106 @@ export class SceneList extends LitElement {
                   ? html`<span class="error-text">${this.createError}</span>`
                   : null}
               </div>
+            </div>
+          `
+          : null}
+
+        ${this.showImport
+          ? html`
+            <div class="import-panel">
+              <div class="create-grid">
+                <div class="field">
+                  <label>Project</label>
+                  <select
+                    .value=${this.importProject}
+                    @change=${(e) => (this.importProject = e.target.value)}>
+                    ${this.projects.map(
+                      (p) => html`<option value=${p.id}>${p.name}</option>`,
+                    )}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Or load a .fountain / .txt file</label>
+                  <input
+                    type="file"
+                    accept=".txt,.fountain,.md,text/plain"
+                    @change=${this._onImportFile}>
+                </div>
+              </div>
+              <div class="field">
+                <label>Script text</label>
+                <textarea
+                  rows="8"
+                  .value=${this.importText}
+                  @input=${(e) => (this.importText = e.target.value)}
+                  placeholder="INT. OFFICE - DAY&#10;&#10;She reads the report.&#10;&#10;LEA&#10;We found it."></textarea>
+              </div>
+              <div class="import-hint">
+                Fountain-lite: INT./EXT. lines start scenes; short all-caps lines (after a
+                blank line) start dialogue; "(...)" are parentheticals.
+              </div>
+              <div class="filters">
+                <button
+                  class="btn"
+                  ?disabled=${this.importBusy || this.importText.trim() === ""}
+                  @click=${this._previewScript}>
+                  Preview
+                </button>
+                <button
+                  class="btn btn-secondary"
+                  ?disabled=${this.importBusy}
+                  @click=${this._closeImport}>
+                  Close
+                </button>
+              </div>
+              ${this.importError ? html`<div class="error-text">${this.importError}</div>` : null}
+              ${this.importParsed && this.importParsed.scenes.length === 0
+                ? html`<div class="error-text">No scenes found in that text.</div>`
+                : null}
+              ${this.importParsed && this.importParsed.warnings.length > 0
+                ? html`<div class="import-warnings">
+                  ${this.importParsed.warnings.join(" · ")}
+                </div>`
+                : null}
+              ${this.importParsed && this.importParsed.scenes.length > 0
+                ? html`
+                  <div class="import-preview">
+                    ${this.importParsed.scenes.map(
+                      (s) =>
+                        html`
+                          <div class="preview-row">
+                            <span class="preview-heading">${s.heading}</span>
+                            <span class="preview-excerpt">
+                              ${s.action.trim().slice(0, 120) ||
+                                (s.dialogue.length > 0
+                                  ? `${s.dialogue.length} dialogue block${
+                                    s.dialogue.length === 1 ? "" : "s"
+                                  }`
+                                  : "")}
+                            </span>
+                          </div>
+                        `,
+                    )}
+                  </div>
+                  <div class="filters">
+                    <button
+                      class="btn"
+                      ?disabled=${this.importBusy || !this.importProject}
+                      @click=${this._importScenes}>
+                      ${this.importBusy
+                        ? "Importing..."
+                        : `Create ${this.importParsed.scenes.length} scene${
+                          this.importParsed.scenes.length === 1 ? "" : "s"
+                        }`}
+                    </button>
+                  </div>
+                `
+                : null}
+              ${this.importedCount > 0
+                ? html`<div class="import-success">
+                  Created ${this.importedCount} scenes.
+                </div>`
+                : null}
             </div>
           `
           : null}
@@ -471,6 +664,52 @@ export class SceneList extends LitElement {
       this.createError = err.message || "Failed to create scene.";
     } finally {
       this.creating = false;
+    }
+  }
+
+  _closeImport() {
+    this.showImport = false;
+    this.importText = "";
+    this.importParsed = null;
+    this.importError = "";
+    this.importedCount = 0;
+  }
+
+  async _onImportFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      this.importText = await file.text();
+      this._previewScript();
+    } catch (err) {
+      this.importError = err.message || "Could not read that file.";
+    } finally {
+      e.target.value = "";
+    }
+  }
+
+  _previewScript() {
+    this.importError = "";
+    this.importedCount = 0;
+    this.importParsed = parseScript(this.importText);
+  }
+
+  async _importScenes() {
+    if (!this.importProject || !this.importParsed) return;
+    this.importBusy = true;
+    this.importError = "";
+    try {
+      const inputs = scriptToSceneInputs(this.importParsed.scenes);
+      const res = await api.importScriptScenes(this.importProject, inputs);
+      this.importedCount = res.created?.length ?? inputs.length;
+      this.importText = "";
+      this.importParsed = null;
+      this.projectFilter = this.importProject;
+      await this._load();
+    } catch (err) {
+      this.importError = err.message || "Failed to import script.";
+    } finally {
+      this.importBusy = false;
     }
   }
 }

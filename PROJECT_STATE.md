@@ -13,7 +13,9 @@ dependency tracking (AST-015, "Used in" + real delete warnings), and broken refe
 Studio repair flow). Remaining deferred items: render farm and real model adapters (both explicitly
 out of MVP scope). Milestone 8 (Advanced Studio Features) is underway: 3D support — the first MS-8
 item — is in (model import, in-browser three.js preview, and derived view export as `@`-references;
-see `docs/3d.md`). Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
+see `docs/3d.md`), followed by the script importer (SCN-015: paste a screenplay, preview the parsed
+Fountain-lite scenes, bulk-create them as draft scenes with prompts). Remaining MS-8 items are
+tracked in `MASTER-PLAN.md`.
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -471,6 +473,15 @@ The product track follows `MASTER-PLAN.md`.
       `@<model>_<view>` (re-exports become new versions of the view asset) usable as `@`-references
       in prompts, panels and shots. Pure camera-pose math in `frontend/src/model-views.js`
       (unit-tested); backend 367 + frontend 245 test steps green — see `docs/3d.md`
+- [x] Script import (SCN-015, second Milestone 8 item):
+      `POST
+      /api/v1/projects/:id/scenes/from-script` bulk-creates draft scenes (validated, max
+      200, project write permission) each with a deterministic "Film scene draft" prompt; pure
+      Fountain-lite parser in `frontend/src/script-parse.js` (INT./EXT. scene headings, action,
+      character dialogue with parentheticals, `FADE IN` boilerplate, synthetic `Scene N` fallback) +
+      `scene-list.js` import panel (paste or load `.fountain`/`.txt`, preview with warnings,
+      one-click bulk create). Parser unit-tested (+19 frontend steps); backend 378 + frontend 266
+      test steps green — see `docs/storyboards.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -527,3 +538,5 @@ The product track follows `MASTER-PLAN.md`.
   warnings): Sun Aug 23 2026
 - 3D support (MS-8: model import, three.js preview, derived view export as `@`-references): Sun Aug
   23 2026
+- Script import (SCN-015, MS-8: fountain-lite parser + scene-list import UI + bulk scene-create
+  route): Sun Aug 23 2026

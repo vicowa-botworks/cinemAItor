@@ -2,6 +2,7 @@ import { Router } from "@oak/oak/router";
 import type { Context } from "@oak/oak";
 import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
 import {
+  bulkCreateScenes,
   createScene,
   createShot,
   creativePromptFor,
@@ -12,6 +13,7 @@ import {
   listScenes,
   listShots,
   type SceneInput,
+  type ScriptSceneInput,
   type ShotInput,
   updateScene,
   updateShot,
@@ -125,6 +127,17 @@ export const sceneRouter = new Router()
     const scene = await createScene(userId, input);
     ctx.response.status = 201;
     ctx.response.body = sceneWithPrompt(userId, scene.id);
+  })
+  .post("/api/v1/projects/:id/scenes/from-script", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const projectId = idParam(ctx, "id");
+    const body = await readJsonBody(ctx);
+    if (!Array.isArray(body.scenes)) {
+      throw badRequest("scenes must be an array");
+    }
+    const created = await bulkCreateScenes(userId, projectId, body.scenes as ScriptSceneInput[]);
+    ctx.response.status = 201;
+    ctx.response.body = { created: created.map((scene) => sceneWithPrompt(userId, scene.id)) };
   })
   .get("/api/v1/scenes/:id", authMiddleware, (ctx, _next) => {
     const userId = requireUserId(ctx);
