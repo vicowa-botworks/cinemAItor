@@ -58,6 +58,12 @@ export class ProjectForm extends LitElement {
       font-weight: 500;
     }
 
+    .form-group .hint {
+      font-weight: 400;
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
     .form-group input,
     .form-group select,
     .form-group textarea {
@@ -132,6 +138,8 @@ export class ProjectForm extends LitElement {
     frameRate: {},
     resolution: {},
     sampleRate: {},
+    template: {},
+    templates: {},
   };
 
   constructor() {
@@ -145,6 +153,17 @@ export class ProjectForm extends LitElement {
     this.frameRate = 24;
     this.resolution = "1920x1080";
     this.sampleRate = 48000;
+    this.template = "";
+    this.templates = [];
+  }
+
+  async firstUpdated() {
+    if (this.project) return;
+    try {
+      this.templates = await api.listTemplates();
+    } catch {
+      this.templates = [];
+    }
   }
 
   willUpdate(changed) {
@@ -172,6 +191,7 @@ export class ProjectForm extends LitElement {
       resolution_width: res.width,
       resolution_height: res.height,
       audio_sample_rate: Number(this.sampleRate),
+      ...(this.template ? { template_id: this.template } : {}),
     };
   }
 
@@ -273,6 +293,27 @@ export class ProjectForm extends LitElement {
               )}
             </select>
           </div>
+
+          ${this.project ? html`` : html`
+            <div class="form-group full">
+              <label for="pf-template">Project template
+                <span class="hint">Optional — pre-creates a timeline with
+                  matching audio tracks</span></label>
+              <select id="pf-template" .value=${this.template}
+                @change=${(e) => (this.template = e.target.value)}>
+                <option value="">None (empty project)</option>
+                ${this.templates.map(
+                  (t) =>
+                    html`
+                      <option value=${t.id} ?selected=${t.id ===
+                        this.template}>
+                        ${t.name} — ${t.description}
+                      </option>
+                    `,
+                )}
+              </select>
+            </div>
+          `}
         </div>
 
         <div class="form-actions">

@@ -141,6 +141,10 @@ class ApiClient {
     });
   }
 
+  listTemplates() {
+    return this.request("/templates");
+  }
+
   // --- v1 assets ---
 
   listAssets(filter = {}) {

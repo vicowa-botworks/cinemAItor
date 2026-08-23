@@ -11,6 +11,7 @@ import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
+import { templateRouter } from "@cinemaItor/routes/templates.ts";
 import { promptRouter } from "@cinemaItor/routes/prompts.ts";
 import { referenceRouter } from "@cinemaItor/routes/references.ts";
 import { healthRouter } from "@cinemaItor/routes/health.ts";
@@ -89,6 +90,7 @@ export function createApp(
   app.use(healthRouter.routes());
   app.use(authRouter.routes());
   app.use(projectRouter.routes());
+  app.use(templateRouter.routes());
   app.use(assetRouter.routes());
   app.use(audioRouter.routes());
   app.use(modelRouter.routes());
