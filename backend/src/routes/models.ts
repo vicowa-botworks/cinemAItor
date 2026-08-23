@@ -7,6 +7,7 @@ import { getUserById } from "@cinemaItor/db/schema.ts";
 import {
   deleteModel,
   getModel,
+  listBenchmarkResults,
   listModels,
   MODEL_SOURCES,
   registerModel,
@@ -23,6 +24,7 @@ import {
   verifyModelFile,
 } from "@cinemaItor/services/model_files.ts";
 import { checkModelHealth } from "@cinemaItor/services/model_health.ts";
+import { requestBenchmark } from "@cinemaItor/services/model_benchmark.ts";
 import { detectHardware, modelRequirementWarnings } from "@cinemaItor/services/hardware.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
@@ -286,4 +288,17 @@ export const modelRouter = new Router()
     );
     if (!updated) throw notFound("Model not found");
     ctx.response.body = { ...result, model: updated };
+  })
+  .post("/api/v1/models/:id/benchmark", authMiddleware, (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const id = requireIdParam(ctx);
+    const result = requestBenchmark(id, userId);
+    ctx.response.status = 202;
+    ctx.response.body = result;
+  })
+  .get("/api/v1/models/:id/benchmarks", authMiddleware, (ctx, _next) => {
+    requireUserId(ctx);
+    const id = requireIdParam(ctx);
+    if (!getModel(id)) throw notFound("Model not found");
+    ctx.response.body = { benchmarks: listBenchmarkResults(id) };
   });

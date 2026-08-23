@@ -279,6 +279,37 @@ export class ModelManager extends LitElement {
       font-size: 12px;
       color: var(--color-text-muted);
     }
+
+    .bench-wrap {
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    .bench-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--color-text-muted);
+    }
+
+    .bench-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+    }
+
+    .bench-table th,
+    .bench-table td {
+      text-align: left;
+      padding: 3px 10px 3px 0;
+      border-bottom: 1px solid var(--color-border);
+      white-space: nowrap;
+    }
+
+    .bench-table th {
+      color: var(--color-text-muted);
+      font-weight: 500;
+    }
   `;
 
   static properties = {
@@ -293,6 +324,8 @@ export class ModelManager extends LitElement {
     enabledFilter: { state: true },
     taskFilter: { state: true },
     query: { state: true },
+    benchmarks: { state: true },
+    benchBusyId: { state: true },
   };
 
   constructor() {
@@ -308,6 +341,8 @@ export class ModelManager extends LitElement {
     this.enabledFilter = "";
     this.taskFilter = "";
     this.query = "";
+    this.benchmarks = {};
+    this.benchBusyId = null;
     this._queryTimer = null;
   }
 
@@ -487,6 +522,8 @@ export class ModelManager extends LitElement {
           `
           : null}
 
+        ${this._renderBenchmarks(m)}
+
         <div class="model-actions">
           <button
             class="btn-small"
@@ -515,6 +552,20 @@ export class ModelManager extends LitElement {
                     : `"${m.name}": verification failed — ${res.message}`,
               )}>
             Verify checksum
+          </button>
+          <button
+            class="btn-small"
+            ?disabled=${this.busyId === m.id ||
+              this.benchBusyId === m.id ||
+              !m.installed_at ||
+              !m.enabled}
+            title=${!m.installed_at
+              ? "Install the model first"
+              : !m.enabled
+              ? "Enable the model first"
+              : "Run a deterministic benchmark job for each input-less task type"}
+            @click=${() => this._runBenchmark(m)}>
+            ${this.benchBusyId === m.id ? "Benchmarking..." : "Benchmark"}
           </button>
           ${this.isAdmin
             ? html`
@@ -556,9 +607,28 @@ export class ModelManager extends LitElement {
     try {
       await this._loadModels();
       await this._loadHardware();
+      await this._loadBenchmarks();
     } finally {
       this.loading = false;
     }
+  }
+
+  async _loadBenchmarks() {
+    if (this.models.length === 0) {
+      this.benchmarks = {};
+      return;
+    }
+    const settled = await Promise.all(
+      this.models.map(async (m) => {
+        try {
+          const { benchmarks } = await api.getModelBenchmarks(m.id);
+          return [m.id, benchmarks];
+        } catch {
+          return [m.id, []];
+        }
+      }),
+    );
+    this.benchmarks = Object.fromEntries(settled);
   }
 
   async _loadModels() {
@@ -664,6 +734,81 @@ export class ModelManager extends LitElement {
     }
   }
 
+  _renderBenchmarks(m) {
+    const rows = this.benchmarks[m.id];
+    if (!rows || rows.length === 0) return null;
+    return html`
+      <div class="bench-wrap">
+        <div class="bench-head">
+          <span>Benchmarks (latest runs first)</span>
+        </div>
+        <table class="bench-table">
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Duration</th>
+              <th>Candidates</th>
+              <th>Output</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r) =>
+              html`
+                <tr>
+                  <td>${r.task_type}</td>
+                  <td>${this._fmtMs(r.duration_ms)}</td>
+                  <td>${r.candidate_count}</td>
+                  <td>${this._fmtBytes(r.output_bytes)}</td>
+                  <td>${new Date(r.benchmarked_at).toLocaleString()}</td>
+                </tr>
+              `
+            )}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async _runBenchmark(m) {
+    this.benchBusyId = m.id;
+    this.notice = null;
+    this.error = "";
+    try {
+      const { job_id, tasks } = await api.requestModelBenchmark(m.id);
+      const job = await this._waitJob(job_id);
+      await Promise.all([this._loadModels(), this._loadBenchmarks()]);
+      if (job.status === "succeeded") {
+        this.notice = {
+          kind: "ok",
+          text: `"${m.name}" benchmark finished: ${tasks.length} task(s), ` +
+            `${job.candidate_count} candidate(s).`,
+        };
+      } else {
+        this.error = `"${m.name}" benchmark ${job.status}: ` +
+          `${job.error_text || "unknown error"}`;
+      }
+    } catch (err) {
+      this.error = err.message || "Failed to run benchmark.";
+    } finally {
+      this.benchBusyId = null;
+    }
+  }
+
+  async _waitJob(jobId) {
+    const start = Date.now();
+    for (;;) {
+      const job = await api.getJob(jobId);
+      if (["succeeded", "failed", "cancelled"].includes(job.status)) {
+        return job;
+      }
+      if (Date.now() - start > 10 * 60 * 1000) {
+        throw new Error("benchmark timed out");
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
   _healthLabel(m) {
     if (!m.health_checked_at) return "never checked";
     return m.health_status === "ok" ? "healthy" : "unhealthy";
@@ -683,6 +828,12 @@ export class ModelManager extends LitElement {
     if (bytes === null || bytes === undefined) return "unknown size";
     if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     return `${Math.ceil(bytes / 1024)} KB`;
+  }
+
+  _fmtMs(ms) {
+    if (ms >= 60000) return `${(ms / 60000).toFixed(1)} min`;
+    if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`;
+    return `${ms} ms`;
   }
 }
 

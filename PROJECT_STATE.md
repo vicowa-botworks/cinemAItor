@@ -3,9 +3,9 @@
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
 migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
-project templates, advanced storage management, audio cleanup (denoise/normalize) and subtitle
-generation (voiceover/dialogue → SRT) shipped, legacy demo surface removed; remaining: A/B + version
-comparison, model benchmark)
+project templates, advanced storage management, audio cleanup (denoise/normalize), subtitle
+generation (voiceover/dialogue → SRT) and the model benchmark shipped, legacy demo surface removed;
+remaining: A/B + version comparison)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -375,13 +375,26 @@ The product track follows `MASTER-PLAN.md`.
       pointer + duration. Asset Detail gains a "Subtitle generation" section (button → job, polled
       to terminal, link to the new subtitle asset); 8 new backend test steps (SRT unit + API
       authz/errors/e2e), 1 new frontend API client test step
+- [x] Model benchmark (Workstream 14): deterministic performance measurement per model.
+      `POST /api/v1/models/:id/benchmark` (any authenticated user — a measurement like the health
+      check, no assets are stored; 400 for uninstalled/disabled models or models without a
+      benchmarkable task) enqueues a `model_benchmark` job that generates `BENCHMARK_CANDIDATES = 2`
+      candidates per input-less task type the model supports (`text_to_image`, `text_to_video`,
+      `audio`, `music`, `voice`; image inputs + transcribe excluded in v1) using a fixed prompt per
+      task under job seed `bench-<model_id>`, and records one `model_benchmarks` row per task
+      (migration 0020) with `duration_ms` / `candidate_count` / `output_bytes` + seed + job id.
+      `GET /api/v1/models/:id/benchmarks` returns the latest 20, newest first. Removing a model
+      deletes its benchmark rows (explicit cleanup — SQLite FK enforcement is off). Model Manager
+      gains a per-model Benchmark button + per-task results table (job polled to terminal, then
+      refreshed); 6 new backend test steps (units + API authz/errors/e2e), 1 new frontend API client
+      test step
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 - [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: A/B + version
-      comparison improvements, model benchmark
+      comparison improvements
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues
@@ -423,4 +436,6 @@ The product track follows `MASTER-PLAN.md`.
   cleanup): Sun Aug 23 2026
 - Audio cleanup (AUD-012, denoise/normalize → new non-active version): Sun Aug 23 2026
 - Subtitle generation (AUD-014, transcribe voiceover/dialogue → SRT candidates on a subtitle asset):
+  Sun Aug 23 2026
+- Model benchmark (deterministic per-task benchmarks, `model_benchmarks` rows + Model Manager UI):
   Sun Aug 23 2026

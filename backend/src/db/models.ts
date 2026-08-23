@@ -393,6 +393,9 @@ export function deleteModel(userId: number, id: string): boolean {
   const existing = getModel(id);
   if (!existing) return false;
   const db = getDb();
+  // SQLite FK enforcement is off in this app, so remove benchmark rows
+  // explicitly (the migration's ON DELETE CASCADE is declarative only).
+  deleteBenchmarkResults(id);
   db.prepare("DELETE FROM models WHERE id = ?").run(id);
   logAudit(userId, "model.remove", id, { name: existing.name });
   return true;
@@ -434,4 +437,94 @@ export function touchModelLastUsed(id: string): void {
   const db = getDb();
   db.prepare("UPDATE models SET last_used_at = ?, updated_at = ? WHERE id = ?")
     .run(nowIso(), nowIso(), id);
+}
+
+/* ------------------------------------------------------------------ *
+ * Model benchmarks (WS 14: model benchmark)
+ * ------------------------------------------------------------------ */
+
+export interface ModelBenchmarkResult {
+  id: string;
+  model_id: string;
+  task_type: string;
+  benchmarked_at: string;
+  duration_ms: number;
+  candidate_count: number;
+  output_bytes: number;
+  seed: string | null;
+  job_id: string | null;
+}
+
+export interface CreateBenchmarkInput {
+  model_id: string;
+  task_type: string;
+  duration_ms: number;
+  candidate_count: number;
+  output_bytes: number;
+  seed?: string | null;
+  job_id?: string | null;
+}
+
+function rowToBenchmarkRow(row: Record<string, unknown>): ModelBenchmarkResult {
+  return {
+    id: row.id as string,
+    model_id: row.model_id as string,
+    task_type: row.task_type as string,
+    benchmarked_at: row.benchmarked_at as string,
+    duration_ms: row.duration_ms as number,
+    candidate_count: row.candidate_count as number,
+    output_bytes: row.output_bytes as number,
+    seed: asNullableString(row.seed),
+    job_id: asNullableString(row.job_id),
+  };
+}
+
+export function createBenchmarkResult(input: CreateBenchmarkInput): ModelBenchmarkResult {
+  const db = getDb();
+  const result: ModelBenchmarkResult = {
+    id: crypto.randomUUID(),
+    model_id: input.model_id,
+    task_type: input.task_type,
+    benchmarked_at: nowIso(),
+    duration_ms: input.duration_ms,
+    candidate_count: input.candidate_count,
+    output_bytes: input.output_bytes,
+    seed: input.seed ?? null,
+    job_id: input.job_id ?? null,
+  };
+  (db.prepare(
+    `INSERT INTO model_benchmarks (
+      id, model_id, task_type, benchmarked_at, duration_ms,
+      candidate_count, output_bytes, seed, job_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run as (...params: unknown[]) => unknown)(
+    result.id,
+    result.model_id,
+    result.task_type,
+    result.benchmarked_at,
+    result.duration_ms,
+    result.candidate_count,
+    result.output_bytes,
+    result.seed,
+    result.job_id,
+  );
+  return result;
+}
+
+export function listBenchmarkResults(
+  modelId: string,
+  limit = 20,
+): ModelBenchmarkResult[] {
+  const db = getDb();
+  const rows = (db.prepare(
+    `SELECT * FROM model_benchmarks
+      WHERE model_id = ?
+      ORDER BY benchmarked_at DESC, rowid DESC
+      LIMIT ?`,
+  ).all(modelId, limit)) as Record<string, unknown>[];
+  return rows.map(rowToBenchmarkRow);
+}
+
+export function deleteBenchmarkResults(modelId: string): void {
+  getDb().prepare("DELETE FROM model_benchmarks WHERE model_id = ?").run(modelId);
 }

@@ -1,6 +1,7 @@
 import {
   addJobEvent,
   AUDIO_CLEANUP_JOB_TYPE,
+  BENCHMARK_JOB_TYPE,
   claimJob,
   countRunningJobs,
   createJob,
@@ -19,6 +20,7 @@ import {
   cleanupOutputFormat,
   generateAudioCleanup,
 } from "./audio_cleanup.ts";
+import { executeBenchmarkJob } from "./model_benchmark.ts";
 import { analyzeAudioFile, buildAudioMetadata } from "./audio_info.ts";
 import { getModel, touchModelLastUsed } from "../db/models.ts";
 import {
@@ -321,6 +323,10 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
       }
       if (job.job_type === AUDIO_CLEANUP_JOB_TYPE) {
         await executeAudioCleanupJob(job);
+        return;
+      }
+      if (job.job_type === BENCHMARK_JOB_TYPE) {
+        await executeBenchmarkJob(job);
         return;
       }
       const model = getModel(job.model_id!);

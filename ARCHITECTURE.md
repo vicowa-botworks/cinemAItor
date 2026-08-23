@@ -83,7 +83,8 @@ app-root (main router)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, history view/restore)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
-│   │              health check + checksum verify, admin-gated install/enable/remove)
+│   │              health check + checksum verify, per-model benchmark run + results
+│   │              table (WS 14), admin-gated install/enable/remove)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
@@ -169,9 +170,12 @@ server.ts (entry point)
 │   ├── POST /parse (resolve @tokens), GET /audit, GET /:id, POST /:id/replace
 │   └── (see docs/references.md)
 ├── Model routes (/api/v1/models/*, auth middleware, admin for mutations)
-│   ├── Registry, install/verify (SHA-256), remove, enable/disable, /:id/health-check
-│   ├── Hardware detection + requirement warnings (/hardware)
-│   └── (see docs/models.md)
+ │   ├── Registry, install/verify (SHA-256), remove, enable/disable, /:id/health-check
+   │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)
+   │   │   + /:id/benchmarks (GET); deterministic per-task prompts, 2 candidates each,
+   │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows
+   │   ├── Hardware detection + requirement warnings (/hardware)
+   │   └── (see docs/models.md)
   ├── Job routes (/api/v1/jobs/*, auth middleware)
   │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
   │   ├── Adapters: mock (deterministic); provenance on produced asset versions
