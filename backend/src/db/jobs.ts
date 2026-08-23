@@ -26,6 +26,7 @@ export const MODEL_TASK_TYPES = [
   "audio",
   "music",
   "voice",
+  "transcribe",
 ] as const;
 
 export interface GenerationJob {

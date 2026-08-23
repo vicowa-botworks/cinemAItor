@@ -1,7 +1,14 @@
 import { badRequest, notFound } from "../errors.ts";
 import { findModelsForTask, getModel, type Model } from "../db/models.ts";
 import { createJob } from "../db/jobs.ts";
-import { createAsset, getAssetBySlug, getAssetVersion } from "../db/assets.ts";
+import {
+  createAsset,
+  getAssetById,
+  getAssetBySlug,
+  getAssetVersion,
+  hasAssetPermission,
+} from "../db/assets.ts";
+import { isAudioAssetType } from "../db/audio.ts";
 import { type CreativePrompt, creativePrompt, getPanel } from "../db/storyboards.ts";
 import { creativePromptFor, getScene } from "../db/scenes.ts";
 import { getProjectAccessible } from "../db/projects.ts";
@@ -416,5 +423,109 @@ export function generateAudio(
     job_type: taskType,
     asset_id: asset.id,
     model_id: model.id,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Subtitle generation (AUD-014): transcribe an audio (dialogue/voiceover)
+// version into SRT candidates on a fresh `subtitle` asset
+// ---------------------------------------------------------------------------
+
+export const SUBTITLE_JOB_TYPE = "transcribe";
+
+export interface SubtitleGenerateOptions {
+  model_id?: string;
+  seed?: string;
+  settings?: Record<string, unknown>;
+}
+
+export interface SubtitleGenerateResult {
+  job_id: string;
+  job_type: "transcribe";
+  asset_id: string;
+  model_id: string;
+  source_asset_id: string;
+  source_version_id: string;
+  source_version_number: number;
+}
+
+/**
+ * Queue a `transcribe` model job for an audio asset version. The job's
+ * candidates become SRT versions of a fresh global `subtitle` asset so they
+ * flow through the normal review (approve/reject/shortlist) workflow.
+ */
+export function generateSubtitles(
+  userId: number,
+  assetId: string,
+  versionId: string,
+  options: SubtitleGenerateOptions = {},
+): SubtitleGenerateResult {
+  const asset = getAssetById(assetId);
+  if (!asset || asset.status === "deleted") throw notFound("Asset not found");
+  if (!hasAssetPermission(userId, assetId, "write")) throw notFound("Asset not found");
+  if (!isAudioAssetType(asset.asset_type)) {
+    throw badRequest("Asset is not an audio asset");
+  }
+
+  const version = getAssetVersion(versionId);
+  if (!version || version.asset_id !== assetId) {
+    throw notFound("Asset version not found");
+  }
+  if (!version.file_path) {
+    throw badRequest("Asset version has no stored file");
+  }
+
+  const model = pickModel(SUBTITLE_JOB_TYPE, options.model_id);
+
+  const hex = Array.from(
+    crypto.getRandomValues(new Uint8Array(4)),
+    (b) => b.toString(16).padStart(2, "0"),
+  ).join("");
+  const subtitleAsset = createAsset(
+    {
+      unique_slug: `subtitle_${hex}`,
+      display_name: `Subtitles: ${asset.display_name}`,
+      asset_type: "subtitle",
+      library_scope: "global",
+    },
+    userId,
+  );
+
+  const settings: Record<string, unknown> = {
+    ...(options.settings ?? {}),
+    source: {
+      asset_id: assetId,
+      version_id: versionId,
+      version_number: version.version_number,
+      display_name: asset.display_name,
+    },
+  };
+  const storedMeta = version.technical_metadata_json
+    ? (JSON.parse(version.technical_metadata_json) as Record<string, unknown>)
+    : null;
+  const duration = storedMeta?.audio as Record<string, unknown> | undefined;
+  if (typeof duration?.duration === "number" && duration.duration > 0) {
+    settings.source_duration = duration.duration;
+  }
+
+  const job = createJob(userId, {
+    job_type: SUBTITLE_JOB_TYPE,
+    model_id: model.id,
+    asset_id: subtitleAsset.id,
+    project_id: asset.project_id ?? undefined,
+    prompt_text: `Transcribe "${asset.display_name}" (version ${version.version_number})`,
+    seed: options.seed,
+    settings,
+    input_asset_versions: [{ asset_id: assetId, version_number: version.version_number }],
+  });
+
+  return {
+    job_id: job.id,
+    job_type: "transcribe",
+    asset_id: subtitleAsset.id,
+    model_id: model.id,
+    source_asset_id: assetId,
+    source_version_id: versionId,
+    source_version_number: version.version_number,
   };
 }

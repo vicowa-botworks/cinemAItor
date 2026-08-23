@@ -826,6 +826,18 @@ class ApiClient {
     );
   }
 
+  generateSubtitles(assetId, versionId, options = {}) {
+    return this.request(
+      `/audio/assets/${encodeURIComponent(assetId)}/versions/${
+        encodeURIComponent(versionId)
+      }/subtitles`,
+      {
+        method: "POST",
+        body: JSON.stringify(options),
+      },
+    );
+  }
+
   // --- diagnostics / ops ---
 
   getDiagnosticsHardware() {
