@@ -1,12 +1,17 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
+## Current Status: Milestone 7 complete — Professional Workflow Expansion (every scope item
 
-migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
-project templates, advanced storage management, audio cleanup (denoise/normalize), subtitle
-generation (voiceover/dialogue → SRT), the model benchmark and A/B + version comparison shipped,
-production hardening (auth rate limiting, chunked upload streaming) and asset dependency tracking
-(AST-015, "Used in" + real delete warnings) shipped, legacy demo surface removed)
+shipped)
+
+Milestone 7's full scope is in: audio generation + waveforms (music/voiceover/SFX), batch shot
+generation, transitions + color grading, subtitles + text overlays, proxy workflow polish, basic
+mixer + ducking, audio cleanup (denoise/normalize), subtitle generation (voiceover/dialogue → SRT),
+the model benchmark and A/B + version comparison, skill system v1, project templates, advanced
+storage management, production hardening (auth rate limiting, chunked upload streaming), asset
+dependency tracking (AST-015, "Used in" + real delete warnings), and broken reference repair (Prompt
+Studio repair flow). Remaining deferred items: render farm and real model adapters (both explicitly
+out of MVP scope). Next: Milestone 8 (Advanced Studio Features).
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -446,6 +451,15 @@ The product track follows `MASTER-PLAN.md`.
       surfaces a real impact warning listing the depending pointers before confirming. +8 backend
       test steps (units + route authz/errors), +1 frontend API client test step; all 365 backend +
       219 frontend test steps green
+- [x] Broken reference repair (closing the last Milestone 7 scope item): missing `@`-reference
+      tokens in Prompt Studio now carry a **Repair** button in the References panel; choosing a
+      replacement asset rewrites that exact token span in the draft text (`@dead:v3` → `@newslug`,
+      targeting the replacement's active version) and re-parses immediately so the resolved status
+      is visible before saving; saving a version persists it with re-resolved rows. Each occurrence
+      gets its own repair, and the row-level `POST /api/v1/references/:id/replace` remains the
+      audited path for re-pointing rows on saved versions. Pure span-rewrite helper
+      `replaceReferenceToken` in `frontend/src/reference-repair.js` (unit-tested, +9 frontend
+      steps); all 365 backend + 228 frontend test steps green
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -495,6 +509,8 @@ The product track follows `MASTER-PLAN.md`.
 - Model benchmark (deterministic per-task benchmarks, `model_benchmarks` rows + Model Manager UI):
   Sun Aug 23 2026
 - Docker packaging (single-image deployment, `docker/entrypoint.ts`, `CORS_ORIGINS` env): Sun Aug 23
+  2026
+- Broken reference repair (Prompt Studio repair flow + `replaceReferenceToken` helper): Sun Aug 23
   2026
 - Asset dependency tracking (AST-015, `/assets/:id/dependencies` + "Used in" view + delete
   warnings): Sun Aug 23 2026

@@ -84,7 +84,11 @@ app-root (main router)
   │   │              "Used in" dependency view + delete warnings (AST-015),
   │   │              tags, aliases, delete)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
-│   │              parsing with status badges, asset picker, history view/restore)
+│   │              parsing with status badges, asset picker, broken-reference repair
+│   │              (retarget a missing token to a live asset in the draft text),
+│   │              history view/restore)
+├── reference-repair (shared pure token-span rewrite for broken @reference repair —
+│   │                 unit-tested)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, per-model benchmark run + results
 │   │              table (WS 14), admin-gated install/enable/remove)
