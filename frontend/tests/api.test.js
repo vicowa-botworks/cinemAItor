@@ -158,6 +158,11 @@ describe("ApiClient", () => {
       assertEquals(captured[0].options.method, "DELETE");
     });
 
+    it("getAssetDependencies gets /api/v1/assets/:id/dependencies", async () => {
+      await api.getAssetDependencies("a-1");
+      assertEquals(captured[0].url, "/api/v1/assets/a-1/dependencies");
+    });
+
     it("uploadAsset posts the raw file body with metadata headers", async () => {
       const file = new File(["bytes"], "a.png", { type: "image/png" });
       await api.uploadAsset("a-1", file, "first take");

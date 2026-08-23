@@ -294,6 +294,33 @@ export class AssetDetail extends LitElement {
       color: #7bc47f;
     }
 
+    .dep-group {
+      margin-bottom: 14px;
+    }
+
+    .dep-group ul {
+      margin: 6px 0 0;
+      padding-left: 18px;
+    }
+
+    .dep-group li {
+      font-size: 13px;
+      margin: 4px 0;
+    }
+
+    .dep-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--color-text-muted);
+    }
+
+    .dep-dim {
+      color: var(--color-text-muted);
+      font-size: 12px;
+    }
+
     .danger-zone {
       border-color: var(--color-error);
     }
@@ -509,6 +536,7 @@ export class AssetDetail extends LitElement {
     this.compareIds = [];
     this.comparePreviews = new Map();
     this._compareSync = new CompareSync();
+    this.dependencies = null;
   }
 
   willUpdate(changed) {
@@ -541,6 +569,7 @@ export class AssetDetail extends LitElement {
     this.compareIds = [];
     this.comparePreviews = new Map();
     this._compareSync?.clear();
+    this.dependencies = null;
   }
 
   _revokePreview() {
@@ -724,10 +753,19 @@ export class AssetDetail extends LitElement {
       this.versions = versions;
       await this._loadPreview();
       await this._refreshAudio();
+      this._loadDependencies();
     } catch (err) {
       this.error = err.message || "Failed to load asset";
     } finally {
       this.loading = false;
+    }
+  }
+
+  async _loadDependencies() {
+    try {
+      this.dependencies = await api.getAssetDependencies(this.assetId);
+    } catch {
+      this.dependencies = null;
     }
   }
 
@@ -1091,7 +1129,29 @@ export class AssetDetail extends LitElement {
   }
 
   async _deleteAsset() {
-    if (!window.confirm("Delete this asset? References to it will dangle.")) {
+    const deps = (await api.getAssetDependencies(this.assetId).catch(() => null)) ??
+      this.dependencies;
+    const usedIn = [];
+    if (deps) {
+      if (deps.totals.timeline_items) {
+        usedIn.push(`${deps.totals.timeline_items} timeline item(s)`);
+      }
+      if (deps.totals.panels) {
+        usedIn.push(`${deps.totals.panels} storyboard panel pointer(s)`);
+      }
+      if (deps.totals.shots) {
+        usedIn.push(`${deps.totals.shots} shot clip(s)`);
+      }
+      if (deps.totals.prompt_references) {
+        usedIn.push(`${deps.totals.prompt_references} prompt reference(s)`);
+      }
+    }
+    const message = usedIn.length
+      ? `This asset is used in:\n  - ${
+        usedIn.join("\n  - ")
+      }\n\nDeleting it will leave those references dangling. Delete anyway?`
+      : "Delete this asset? No timeline items, panel/shot pointers, or prompt references were found.";
+    if (!window.confirm(message)) {
       return;
     }
     try {
@@ -1127,6 +1187,122 @@ export class AssetDetail extends LitElement {
     return html`<div class="preview-box"><span>No inline preview for ${
       type || "this type"
     }</span></div>`;
+  }
+
+  _renderDependencies() {
+    const deps = this.dependencies;
+    if (!deps) {
+      return html`
+        <div class="section">
+          <h3>Used in</h3>
+          <div class="message">Dependency info unavailable.</div>
+        </div>
+      `;
+    }
+    if (deps.totals.total === 0) {
+      return html`
+        <div class="section">
+          <h3>Used in</h3>
+          <div class="message">
+            No timeline items, panel/shot pointers, or prompt references use this
+            asset.
+          </div>
+        </div>
+      `;
+    }
+    const sourceLabels = {
+      prompt: "Prompt Studio",
+      scene: "Scene",
+      shot: "Shot",
+      panel: "Storyboard panel",
+    };
+    return html`
+      <div class="section">
+        <h3>Used in &middot; ${deps.totals.total} reference(s)</h3>
+        ${deps.timeline_items.length
+          ? html`
+            <div class="dep-group">
+              <span class="dep-title">Timeline items</span>
+              <ul>
+                ${deps.timeline_items.map(
+                  (i) =>
+                    html`
+                      <li>
+                        <a href="#/timeline/${i.timeline_id}">${i.timeline_name}</a>
+                        <span class="dep-dim">
+                                                ${i.track_name} (${i.track_type})
+                                              </span>
+                      </li>
+                    `,
+                )}
+              </ul>
+            </div>
+          `
+          : ""}
+        ${deps.panels.length
+          ? html`
+            <div class="dep-group">
+              <span class="dep-title">Storyboard panels</span>
+              <ul>
+                ${deps.panels.map(
+                  (p) =>
+                    html`
+                      <li>
+                        <a href="#/storyboard/${p.storyboard_id}">
+                                                ${p.storyboard_name}
+                                              </a>
+                        <span class="dep-dim">
+                                                panel ${p.shot_number ?? "?"} &middot;
+                                                ${p.pointer}
+                                              </span>
+                      </li>
+                    `,
+                )}
+              </ul>
+            </div>
+          `
+          : ""}
+        ${deps.shots.length
+          ? html`
+            <div class="dep-group">
+              <span class="dep-title">Shot clips</span>
+              <ul>
+                ${deps.shots.map(
+                  (s) =>
+                    html`
+                      <li>
+                        <a href="#/scene/${s.scene_id}">${s.scene_name}</a>
+                        <span class="dep-dim">shot #${s.shot_order}</span>
+                      </li>
+                    `,
+                )}
+              </ul>
+            </div>
+          `
+          : ""}
+        ${deps.prompt_references.length
+          ? html`
+            <div class="dep-group">
+              <span class="dep-title">Prompt references</span>
+              <ul>
+                ${deps.prompt_references.map(
+                  (r) =>
+                    html`
+                      <li>
+                        <code>${r.raw_text}</code>
+                        <span class="dep-dim">
+                                                ${sourceLabels[r.source_type] ?? r.source_type}
+                                                ${r.broken ? "· broken" : `· ${r.status}`}
+                                              </span>
+                      </li>
+                    `,
+                )}
+              </ul>
+            </div>
+          `
+          : ""}
+      </div>
+    `;
   }
 
   render() {
@@ -1496,6 +1672,8 @@ export class AssetDetail extends LitElement {
             </div>
           </div>
         </div>
+
+        ${this._renderDependencies()}
       </div>
     `;
   }

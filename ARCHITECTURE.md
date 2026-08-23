@@ -81,6 +81,7 @@ app-root (main router)
   │   │              audio adjustments (waveform + trim/gain for audio assets),
   │   │              audio cleanup (denoise/normalize → new version, AUD-012),
   │   │              subtitle generation (transcribe → SRT candidates on a new subtitle asset, AUD-014),
+  │   │              "Used in" dependency view + delete warnings (AST-015),
   │   │              tags, aliases, delete)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, history view/restore)
@@ -167,6 +168,8 @@ server.ts (entry point)
  │   ├── CRUD + upload + versions + restore + aliases + tags + preview
  │   │   + per-version preview (GET /:id/versions/:versionId/preview, A/B compare)
  │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
+ │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
+ │   │     pointers, prompt references, AST-015; feeds the UI "Used in" view)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)

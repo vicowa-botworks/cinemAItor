@@ -24,6 +24,7 @@ import {
   restoreAssetVersion,
   updateAsset,
 } from "@cinemaItor/db/assets.ts";
+import { getAssetDependencies } from "@cinemaItor/db/asset_dependencies.ts";
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
 import { mediaTypeFor } from "@cinemaItor/storage/media_types.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
@@ -254,6 +255,12 @@ export const assetRouter = new Router()
         ]
         : [],
     };
+  })
+  .get("/api/v1/assets/:id/dependencies", authMiddleware, (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const asset = getAssetAccessible(ctx.params.id, userId);
+    if (!asset) throw notFound("Asset not found");
+    ctx.response.body = getAssetDependencies(asset.id);
   })
   .post("/api/v1/assets/:id/upload", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);

@@ -186,6 +186,10 @@ class ApiClient {
     });
   }
 
+  getAssetDependencies(id) {
+    return this.request(`/assets/${encodeURIComponent(id)}/dependencies`);
+  }
+
   async uploadAsset(id, file, notes) {
     // Raw-bytes streaming upload: the file IS the request body (nothing is
     // buffered server-side). Metadata travels percent-encoded in headers.
