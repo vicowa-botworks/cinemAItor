@@ -34,6 +34,7 @@ import {
   AUDIO_GENERATION_KINDS,
   type AudioGenerationKind,
   generateAudio,
+  generateSubtitles,
 } from "@cinemaItor/services/creative_generation.ts";
 import { requestAudioCleanup } from "@cinemaItor/services/audio_cleanup.ts";
 import {
@@ -333,6 +334,28 @@ export const audioRouter = new Router()
         param(ctx as ParamsContext, "id"),
         param(ctx as ParamsContext, "versionId"),
         raw,
+      );
+      ctx.response.status = 202;
+      ctx.response.body = result;
+    },
+  )
+  .post(
+    "/api/v1/audio/assets/:id/versions/:versionId/subtitles",
+    authMiddleware,
+    async (ctx, _next) => {
+      const userId = requireUserId(ctx);
+      const raw = await readOptionalBody(ctx);
+      const modelId = typeof raw.model_id === "string" ? raw.model_id : undefined;
+      const seed = typeof raw.seed === "string" ? raw.seed : undefined;
+      const settings =
+        raw.settings && typeof raw.settings === "object" && !Array.isArray(raw.settings)
+          ? (raw.settings as Record<string, unknown>)
+          : undefined;
+      const result = generateSubtitles(
+        userId,
+        param(ctx as ParamsContext, "id"),
+        param(ctx as ParamsContext, "versionId"),
+        { model_id: modelId, seed, settings },
       );
       ctx.response.status = 202;
       ctx.response.body = result;

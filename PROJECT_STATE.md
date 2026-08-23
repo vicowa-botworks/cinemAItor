@@ -3,8 +3,9 @@
 ## Current Status: Milestone 7 in progress (subtitles + text overlays, proxy workflow, frontend
 
 migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
-project templates, advanced storage management and audio cleanup (denoise/normalize) shipped, legacy
-demo surface removed; remaining: subtitle generation, A/B + version comparison, model benchmark)
+project templates, advanced storage management, audio cleanup (denoise/normalize) and subtitle
+generation (voiceover/dialogue → SRT) shipped, legacy demo surface removed; remaining: A/B + version
+comparison, model benchmark)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -363,13 +364,24 @@ The product track follows `MASTER-PLAN.md`.
       section (denoise/normalize checkboxes → job, polled to terminal, versions refreshed on
       success); 18 new backend test steps (service units + fake-ffmpeg runner e2e + API
       authz/errors), 1 new frontend API client test step
+- [x] Subtitle generation (AUD-014, Workstream 14): transcribe an audio (dialogue/voiceover) version
+      into SRT candidates. `POST /api/v1/audio/assets/:id/versions/:versionId/subtitles`
+      (write-authorized; audio assets only; optional `model_id` defaults to any enabled `transcribe`
+      model, 404 when none) enqueues a `transcribe` model job that stores each candidate as an SRT
+      (`.srt`, `application/x-subrip`) version of a fresh global `subtitle` asset — candidates flow
+      through the normal review board (approve/reject/shortlist). The mock adapter synthesizes a
+      deterministic seeded SRT (2–5 cues of 1.5–3.5 s spanning the source duration, cue text
+      references the seed so candidates differ). Job settings carry the source asset/version
+      pointer + duration. Asset Detail gains a "Subtitle generation" section (button → job, polled
+      to terminal, link to the new subtitle asset); 8 new backend test steps (SRT unit + API
+      authz/errors/e2e), 1 new frontend API client test step
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: subtitle generation
-      from dialogue/voiceover, A/B + version comparison improvements, model benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: A/B + version
+      comparison improvements, model benchmark
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues
@@ -409,3 +421,6 @@ The product track follows `MASTER-PLAN.md`.
 - Skill System v1 (named, versioned JSON workflows chaining generation jobs): Sun Aug 23 2026
 - Advanced storage management (per-project + top-asset usage, `?verify=1` checksum integrity, cache
   cleanup): Sun Aug 23 2026
+- Audio cleanup (AUD-012, denoise/normalize → new non-active version): Sun Aug 23 2026
+- Subtitle generation (AUD-014, transcribe voiceover/dialogue → SRT candidates on a subtitle asset):
+  Sun Aug 23 2026

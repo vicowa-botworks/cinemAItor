@@ -78,6 +78,7 @@ app-root (main router)
  ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
  │   │              audio adjustments (waveform + trim/gain for audio assets),
  │   │              audio cleanup (denoise/normalize → new version, AUD-012),
+ │   │              subtitle generation (transcribe → SRT candidates on a new subtitle asset, AUD-014),
  │   │              tags, aliases, delete)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, history view/restore)
@@ -204,6 +205,9 @@ server.ts (entry point)
   │   ├── Cleanup (AUD-012): POST /:id/versions/:versionId/cleanup — model-less
   │   │   `audio_cleanup` job (ffmpeg denoise + EBU R128 normalize, mock fallback) producing
   │   │   a new non-active version with cleanup provenance
+  │   ├── Subtitles (AUD-014): POST /:id/versions/:versionId/subtitles — `transcribe` model job
+  │   │   storing SRT candidates on a fresh global `subtitle` asset (review-board workflow);
+  │   │   mock adapter synthesizes a deterministic seeded SRT
   │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
   │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db, duck_db) + placed items (move/trim/

@@ -364,6 +364,8 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
           ? "image"
           : job.job_type.includes("video")
           ? "video"
+          : job.job_type === "transcribe"
+          ? "subtitle"
           : "audio";
         const asset = createAsset(
           {

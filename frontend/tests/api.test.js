@@ -761,6 +761,17 @@ describe("ApiClient", () => {
       assertEquals(body.denoise, true);
       assertEquals(body.normalize, true);
     });
+
+    it("generateSubtitles posts to the subtitles subpath", async () => {
+      await api.generateSubtitles("a-1", "v-1", { candidates: 2 });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/audio/assets/a-1/versions/v-1/subtitles",
+      );
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.candidates, 2);
+    });
   });
 
   describe("v1 skill endpoints", () => {

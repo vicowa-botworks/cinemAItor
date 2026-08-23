@@ -365,6 +365,8 @@ export class AssetDetail extends LitElement {
     audioSaving: { state: true },
     cleanupForm: { state: true },
     cleanupBusy: { state: true },
+    subtitleBusy: { state: true },
+    subtitleResult: { state: true },
   };
 
   constructor() {
@@ -384,6 +386,8 @@ export class AssetDetail extends LitElement {
     this.audioSaving = false;
     this.cleanupForm = { denoise: true, normalize: true };
     this.cleanupBusy = false;
+    this.subtitleBusy = false;
+    this.subtitleResult = null;
   }
 
   willUpdate(changed) {
@@ -410,6 +414,8 @@ export class AssetDetail extends LitElement {
     this.audioSaving = false;
     this.cleanupForm = { denoise: true, normalize: true };
     this.cleanupBusy = false;
+    this.subtitleBusy = false;
+    this.subtitleResult = null;
   }
 
   _revokePreview() {
@@ -557,7 +563,7 @@ export class AssetDetail extends LitElement {
     this._runCleanup();
   }
 
-  _pollJob(jobId, timeoutMs) {
+  _pollJob(jobId, timeoutMs, label = "Cleanup") {
     const deadline = Date.now() + timeoutMs;
     return (async () => {
       for (;;) {
@@ -565,7 +571,7 @@ export class AssetDetail extends LitElement {
         if (["succeeded", "failed", "cancelled"].includes(job.status)) {
           return job;
         }
-        if (Date.now() > deadline) throw new Error("Cleanup job timed out");
+        if (Date.now() > deadline) throw new Error(`${label} job timed out`);
         await new Promise((r) => setTimeout(r, 500));
       }
     })();
@@ -608,6 +614,33 @@ export class AssetDetail extends LitElement {
       this.error = err.message || "Failed to run cleanup";
     } finally {
       this.cleanupBusy = false;
+    }
+  }
+
+  // --- subtitle generation (transcribe active version → SRT candidates) ---
+
+  async _runSubtitles() {
+    const version = this.asset?.active_version;
+    if (!version || this.subtitleBusy) return;
+    this.subtitleBusy = true;
+    this.error = "";
+    this.subtitleResult = null;
+    try {
+      const result = await api.generateSubtitles(this.assetId, version.id);
+      const job = await this._pollJob(result.job_id, 180_000, "Transcription");
+      if (job.status !== "succeeded") {
+        this.error = job.error_text || `Transcription ended ${job.status}.`;
+        return;
+      }
+      this.subtitleResult = {
+        job_id: result.job_id,
+        asset_id: result.asset_id,
+      };
+      this.notice = "Subtitles ready — review the candidates on the subtitle asset.";
+    } catch (err) {
+      this.error = err.message || "Failed to generate subtitles";
+    } finally {
+      this.subtitleBusy = false;
     }
   }
 
@@ -1061,6 +1094,36 @@ export class AssetDetail extends LitElement {
                   </button>
                 </div>
               </form>
+            </div>
+          `
+          : ""}
+
+        ${this._isAudioAsset() && asset?.active_version
+          ? html`
+            <div class="section">
+              <h3>Subtitle generation</h3>
+              <p class="waveform-note">
+                Transcribes the active version into SRT candidates stored on a
+                fresh subtitle asset — approve or reject them from the review
+                board.
+              </p>
+              <div class="preview-actions">
+                <button type="button" class="btn"
+                  ?disabled=${this.subtitleBusy || this.audioSaving}
+                  @click=${this._runSubtitles}>
+                  ${this.subtitleBusy ? "Transcribing..." : "Generate subtitles (new asset)"}
+                </button>
+              </div>
+              ${this.subtitleResult
+                ? html`
+                  <div class="message">
+                    Job <code>${this.subtitleResult.job_id}</code> finished —
+                    subtitle asset: <a
+                      href="#/asset/${encodeURIComponent(this.subtitleResult.asset_id)}"
+                    >open candidates</a>
+                  </div>
+                `
+                : ""}
             </div>
           `
           : ""}

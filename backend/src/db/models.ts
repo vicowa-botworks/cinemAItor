@@ -12,6 +12,7 @@ export const MODEL_TASK_TYPES = [
   "audio",
   "music",
   "voice",
+  "transcribe",
 ] as const;
 export type ModelTaskType = (typeof MODEL_TASK_TYPES)[number];
 

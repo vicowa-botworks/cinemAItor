@@ -54,6 +54,7 @@ export function randomSeed(): string {
 
 const VIDEO_TASKS = ["image_to_video", "text_to_video"];
 const AUDIO_TASKS = ["audio", "music", "voice"];
+const SUBTITLE_TASKS = ["transcribe"];
 
 function candidateCount(settings: Record<string, unknown>): number {
   const value = settings.candidates;
@@ -66,7 +67,56 @@ function outputForTask(jobType: string): { extension: string; mime_type: string 
   if (AUDIO_TASKS.includes(jobType)) {
     return { extension: "wav", mime_type: "audio/wav" };
   }
+  if (SUBTITLE_TASKS.includes(jobType)) {
+    return { extension: "srt", mime_type: "application/x-subrip" };
+  }
   return { extension: "png", mime_type: "image/png" };
+}
+
+/** Source audio duration in seconds from job settings (route-probed), clamped. */
+function subtitleSourceDuration(settings: Record<string, unknown>): number {
+  const value = settings.source_duration;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 12;
+  return Math.min(value, 3600);
+}
+
+/** Format seconds as an SRT timestamp (HH:MM:SS,mmm). */
+export function srtTimestamp(seconds: number): string {
+  const totalMs = Math.round(Math.max(0, seconds) * 1000);
+  const h = Math.floor(totalMs / 3600000);
+  const m = Math.floor((totalMs % 3600000) / 60000);
+  const s = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
+  const pad = (n: number, w = 2): string => String(n).padStart(w, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms, 3)}`;
+}
+
+/**
+ * Deterministic mock transcription: split `duration` seconds into 2..5 cues of
+ * 1.5–3.5 s (seeded), each line referencing the seed so candidates differ.
+ */
+export function synthesizeSrt(seed: string, duration: number, candidateIndex: number): string {
+  const gen = seededBytes(`${seed}#srt#${candidateIndex}`);
+  const pool = new Uint8Array(64);
+  for (let i = 0; i < 4; i++) {
+    const chunk = gen.next().value;
+    pool.set(chunk, i * 16);
+  }
+  const rng = new Uint32Array(pool.buffer, 0, 16);
+  const cueCount = 2 + (rng[0] % 4);
+  const lines: string[] = [];
+  let t = 0;
+  for (let i = 0; i < cueCount; i++) {
+    const cueLen = 1.5 + (rng[(i + 1) % 16] % 200) / 100 * 2.0;
+    const end = Math.min(duration, t + cueLen);
+    lines.push(String(i + 1));
+    lines.push(`${srtTimestamp(t)} --> ${srtTimestamp(end)}`);
+    lines.push(`Mock transcription line ${i + 1} of ${cueCount} (seed ${seed})`);
+    lines.push("");
+    t = t + cueLen >= duration ? duration : t + cueLen;
+    if (t >= duration) break;
+  }
+  return lines.join("\n");
 }
 
 /** Expand a seed string into a deterministic byte stream (xorshift32). */
@@ -123,7 +173,8 @@ export class MockAdapter implements ModelAdapter {
     hooks: AdapterHooks,
   ): Promise<GenerationAdapterResult> {
     const needsInput = input.jobType === "image_to_video" ||
-      input.jobType === "image_to_image";
+      input.jobType === "image_to_image" ||
+      input.jobType === "transcribe";
     if (needsInput && input.inputs.length === 0) {
       throw new Error(
         `Job type ${input.jobType} requires at least one input asset version`,
@@ -134,6 +185,8 @@ export class MockAdapter implements ModelAdapter {
     const count = candidateCount(input.settings);
     const out = outputForTask(input.jobType);
     const size = AUDIO_TASKS.includes(input.jobType) ? 2048 : 4096;
+    const isSubtitle = SUBTITLE_TASKS.includes(input.jobType);
+    const sourceDuration = subtitleSourceDuration(input.settings);
 
     // Simulate a 4-stage generation so progress events are observable.
     const ticks = 4;
@@ -146,11 +199,10 @@ export class MockAdapter implements ModelAdapter {
     }
     for (let i = 0; i < count; i++) {
       if (hooks.isCancelled()) throw new CancelledError();
-      candidates.push({
-        content: synthesize(seedUsed, i, size),
-        extension: out.extension,
-        mime_type: out.mime_type,
-      });
+      const content = isSubtitle
+        ? new TextEncoder().encode(synthesizeSrt(seedUsed, sourceDuration, i))
+        : synthesize(seedUsed, i, size);
+      candidates.push({ content, extension: out.extension, mime_type: out.mime_type });
     }
     hooks.onProgress(100, "Done");
     return { candidates, seedUsed };

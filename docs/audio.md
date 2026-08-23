@@ -21,15 +21,16 @@ Import, generation, versioning, non-destructive trim/gain and waveform access fo
 
 ## Endpoints
 
-| Method | Endpoint                                                   | Description                                                                                                                                                                      |
-| ------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, settings?}` → `202 {job_id, job_type, asset_id, model_id}`                |
-| POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1                                                |
-| GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                                         |
-| POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                                                               |
-| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration); edited from the Asset Detail "Audio adjustments" section (waveform, trim window, gain, reset)            |
-| GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                                                                     |
-| POST   | `/api/v1/audio/assets/:id/versions/:versionId/cleanup`     | Audio cleanup (AUD-012): `{denoise?: true, normalize?: true}` — at least one required → `202 {job_id, job_type, asset_id, source_version_id, source_version_number, operations}` |
+| Method | Endpoint                                                   | Description                                                                                                                                                                                       |
+| ------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, settings?}` → `202 {job_id, job_type, asset_id, model_id}`                                 |
+| POST   | `/api/v1/audio/upload`                                     | Multipart upload (fields: `asset_type?`, `display_name?`, `project_id?`, `notes?` + `file`) → creates the audio asset + version 1                                                                 |
+| GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                                                          |
+| POST   | `/api/v1/audio/assets/:id/versions`                        | New version: multipart `file`, or JSON `{content_hash, notes?}` for stored content                                                                                                                |
+| PATCH  | `/api/v1/audio/assets/:id/versions/:versionId/adjustments` | Set `trim` and/or `gain_db` (merged, validated against known duration); edited from the Asset Detail "Audio adjustments" section (waveform, trim window, gain, reset)                             |
+| GET    | `/api/v1/audio/assets/:id/versions/:versionId/waveform`    | `{version_id, waveform, duration}` or 503 while unanalyzable                                                                                                                                      |
+| POST   | `/api/v1/audio/assets/:id/versions/:versionId/cleanup`     | Audio cleanup (AUD-012): `{denoise?: true, normalize?: true}` — at least one required → `202 {job_id, job_type, asset_id, source_version_id, source_version_number, operations}`                  |
+| POST   | `/api/v1/audio/assets/:id/versions/:versionId/subtitles`   | Subtitle generation (AUD-014): transcribe the version into SRT candidates → `202 {job_id, job_type: "transcribe", asset_id, model_id, source_asset_id, source_version_id, source_version_number}` |
 
 All endpoints require authentication; mutations follow asset write permissions (project scope
 included).
@@ -64,3 +65,24 @@ normalize checkboxes).
   recorded in the version's technical metadata under the `cleanup` key (`operations`, `engine`,
   `source_version_id/number`, `job_id`). Proxy generation is queued for it automatically; promotion
   happens through the normal version restore flow.
+
+## Subtitle generation (AUD-014)
+
+Transcribe an audio (dialogue/voiceover) version into SRT candidates — edited from the Asset Detail
+"Subtitle generation" section.
+
+- Requires an enabled model with task type `transcribe` (or pass `model_id`); 400 when no such model
+  is enabled, when the model lacks the `transcribe` task, for non-audio assets, or for a version
+  without a stored file. Foreign assets 404 for non-writers, like the other routes here.
+- The request enqueues a `transcribe` model job. Each candidate is stored as an SRT version (`.srt`,
+  `application/x-subrip`) of a **fresh global `subtitle` asset** (`subtitle_<hex>` slug, display
+  name `Subtitles: <source asset>`), so candidates flow through the normal review board (approve /
+  reject / shortlist) and the approved one becomes the active version of that asset — ready to play
+  through `subtitle` timeline tracks (see `docs/timelines.md`).
+- Job settings carry the source pointer
+  (`source: {asset_id, version_id, version_number,
+  display_name}`) plus `source_duration` when the
+  version has ffprobe-derived audio metadata.
+- The mock adapter synthesizes a deterministic seeded SRT: 2–5 cues of 1.5–3.5 s spanning the source
+  duration, each cue line referencing the seed so candidates within one job differ. Real adapters
+  replace the synthesis with an actual transcription call.
