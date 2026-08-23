@@ -77,30 +77,46 @@ The Asset Detail **Versions** section supports picking two versions for an A/B c
 
 ## Endpoints
 
-| Method | Endpoint                                           | Description                                                     |
-| ------ | -------------------------------------------------- | --------------------------------------------------------------- |
-| GET    | `/api/v1/assets`                                   | List assets (filter + search)                                   |
-| POST   | `/api/v1/assets`                                   | Create an asset                                                 |
-| GET    | `/api/v1/assets/:id`                               | Asset detail (aliases, tags, active v.)                         |
-| PATCH  | `/api/v1/assets/:id`                               | Update metadata or status                                       |
-| DELETE | `/api/v1/assets/:id`                               | Soft-delete (with reference warnings)                           |
-| POST   | `/api/v1/assets/:id/upload`                        | Raw-bytes streaming upload, creates a version                   |
-| GET    | `/api/v1/assets/:id/versions`                      | List versions (newest first)                                    |
-| POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                           |
-| GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                 |
-| POST   | `/api/v1/assets/:id/versions/:versionId/restore`   | Restore an older version                                        |
-| GET    | `/api/v1/assets/:id/versions/:versionId/proxy`     | Stream the version's proxy file                                 |
-| GET    | `/api/v1/assets/:id/versions/:versionId/thumbnail` | Cached JPEG thumbnail (`?at=`, `?w=`) for video frames / images |
-| POST   | `/api/v1/assets/:id/versions/:versionId/proxy`     | Regenerate the version's proxy (fresh job)                      |
-| POST   | `/api/v1/assets/:id/aliases`                       | Add an alias `@name`                                            |
-| DELETE | `/api/v1/assets/:id/aliases/:aliasSlug`            | Remove an alias                                                 |
-| POST   | `/api/v1/assets/:id/tags`                          | Add a tag                                                       |
-| DELETE | `/api/v1/assets/:id/tags/:tag`                     | Remove a tag                                                    |
-| GET    | `/api/v1/assets/:id/preview`                       | Stream the active version's file                                |
-| GET    | `/api/v1/assets/:id/versions/:versionId/preview`   | Stream one specific version's stored file (version A/B compare) |
+| Method | Endpoint                                           | Description                                                             |
+| ------ | -------------------------------------------------- | ----------------------------------------------------------------------- |
+| GET    | `/api/v1/assets`                                   | List assets (filter + search)                                           |
+| POST   | `/api/v1/assets`                                   | Create an asset                                                         |
+| GET    | `/api/v1/assets/:id`                               | Asset detail (aliases, tags, active v.)                                 |
+| PATCH  | `/api/v1/assets/:id`                               | Update metadata or status                                               |
+| DELETE | `/api/v1/assets/:id`                               | Soft-delete (with reference warnings)                                   |
+| POST   | `/api/v1/assets/:id/upload`                        | Raw-bytes streaming upload, creates a version                           |
+| GET    | `/api/v1/assets/:id/versions`                      | List versions (newest first)                                            |
+| POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                                   |
+| GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                         |
+| POST   | `/api/v1/assets/:id/versions/:versionId/restore`   | Restore an older version                                                |
+| GET    | `/api/v1/assets/:id/versions/:versionId/proxy`     | Stream the version's proxy file                                         |
+| GET    | `/api/v1/assets/:id/versions/:versionId/thumbnail` | Cached JPEG thumbnail (`?at=`, `?w=`) for video frames / images         |
+| POST   | `/api/v1/assets/:id/versions/:versionId/proxy`     | Regenerate the version's proxy (fresh job)                              |
+| POST   | `/api/v1/assets/:id/aliases`                       | Add an alias `@name`                                                    |
+| DELETE | `/api/v1/assets/:id/aliases/:aliasSlug`            | Remove an alias                                                         |
+| POST   | `/api/v1/assets/:id/tags`                          | Add a tag                                                               |
+| DELETE | `/api/v1/assets/:id/tags/:tag`                     | Remove a tag                                                            |
+| GET    | `/api/v1/assets/:id/preview`                       | Stream the active version's file                                        |
+| GET    | `/api/v1/assets/:id/versions/:versionId/preview`   | Stream one specific version's stored file (version A/B compare)         |
+| GET    | `/api/v1/assets/:id/dependencies`                  | Dependency map (timeline items, panel/shot pointers, prompt references) |
 
 List filters (query params): `project_id`, `library_scope`, `asset_type`, `status`, `tag`, and `q`
 (case-insensitive match on slug, display name, and description).
+
+### Dependency tracking
+
+`GET /api/v1/assets/:id/dependencies` returns every creative pointer at the asset (any of its
+versions), read-permission gated:
+
+- `timeline_items`: placed items (`timeline_name`, `track_name`, `track_type`, `version_id`)
+- `panels`: storyboard panel `preview` / `clip` pointers (one entry per pointer)
+- `shots`: shot generated-clip pointers (`scene_name`, `shot_order`, `version_id`)
+- `prompt_references`: `asset_references` rows for the asset (incl. a `broken` flag), sourced from
+  prompt versions (prompt / scene / shot / panel)
+
+Plus per-kind and total counts. Jobs/renders/review rows are operational provenance and
+intentionally excluded. The asset-detail UI renders the result as the "Used in" section and feeds
+the delete confirmation warning.
 
 ## Behavior
 

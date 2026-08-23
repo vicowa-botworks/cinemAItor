@@ -5,8 +5,8 @@
 migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
 project templates, advanced storage management, audio cleanup (denoise/normalize), subtitle
 generation (voiceover/dialogue → SRT), the model benchmark and A/B + version comparison shipped,
-production hardening (auth rate limiting, chunked upload streaming) shipped, legacy demo surface
-removed)
+production hardening (auth rate limiting, chunked upload streaming) and asset dependency tracking
+(AST-015, "Used in" + real delete warnings) shipped, legacy demo surface removed)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -434,6 +434,18 @@ The product track follows `MASTER-PLAN.md`.
       — the stored-hash JSON path is unchanged). +10 frontend test steps (218), backend suite covers
       the limiter (unit + route, 6 steps) and streaming (2 steps); all 357 backend + 218 frontend
       test steps green
+- [x] Asset dependency tracking (AST-015, closing the Milestone 7 scope gap): new
+      `GET /api/v1/assets/:id/dependencies` (read-permission gated) returns every creative pointer
+      at an asset across all its versions — `timeline_items` (timeline/track names + type, version),
+      storyboard `panels` (`preview` / `clip` pointers per pointer), shot generated-clip pointers,
+      and `asset_references` rows (with the audit `broken` flag; dangling refs to other assets don't
+      count) — plus per-kind and total counts. Jobs/renders/review rows are operational provenance
+      and stay out of the view. Helper lives in `db/asset_dependencies.ts` (standalone module —
+      avoids an assets↔references circular import). Asset Detail renders a "Used in" section
+      (grouped lists with deep links to timelines/storyboards/scenes) and the Delete button now
+      surfaces a real impact warning listing the depending pointers before confirming. +8 backend
+      test steps (units + route authz/errors), +1 frontend API client test step; all 365 backend +
+      219 frontend test steps green
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -484,3 +496,5 @@ The product track follows `MASTER-PLAN.md`.
   Sun Aug 23 2026
 - Docker packaging (single-image deployment, `docker/entrypoint.ts`, `CORS_ORIGINS` env): Sun Aug 23
   2026
+- Asset dependency tracking (AST-015, `/assets/:id/dependencies` + "Used in" view + delete
+  warnings): Sun Aug 23 2026
