@@ -824,8 +824,15 @@ class ApiClient {
     return this.request("/diagnostics/models");
   }
 
-  getDiagnosticsStorage() {
-    return this.request("/diagnostics/storage");
+  getDiagnosticsStorage({ verify = false } = {}) {
+    return this.request(`/diagnostics/storage${this._query({ verify: verify ? 1 : undefined })}`);
+  }
+
+  cleanupStorageCache({ includeOrphanedMedia = false } = {}) {
+    return this.request("/diagnostics/storage/cleanup", {
+      method: "POST",
+      body: JSON.stringify({ include_orphaned_media: includeOrphanedMedia }),
+    });
   }
 
   getDiagnosticsLogs(filter = {}) {

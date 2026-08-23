@@ -281,4 +281,117 @@ describe("diagnostics endpoints", () => {
       assert(!raw.toLowerCase().includes("diagnostics-passw0rd"));
     });
   });
+
+  it("verify=1 re-hashes the content store and flags drifted files", async () => {
+    await withServer(async (base) => {
+      const defaultRes = await req(base, "/api/v1/diagnostics/storage", {
+        token: ownerToken,
+      });
+      assertEquals(defaultRes.status, 200);
+      assertEquals((defaultRes.body as { integrity: unknown }).integrity, null);
+
+      const res = await req(base, "/api/v1/diagnostics/storage?verify=1", {
+        token: ownerToken,
+      });
+      assertEquals(res.status, 200);
+      const sr = res.body as {
+        integrity: { verified: number; corrupted: { file_path: string }[] };
+      };
+      // Both media files are hashed; the referenced clip is intact, but the
+      // seeded orphan blob carries a name that does not match its content.
+      assertEquals(sr.integrity.verified, 2);
+      assertEquals(sr.integrity.corrupted.length, 1);
+      assert(sr.integrity.corrupted[0].file_path.endsWith(".mp4"));
+    });
+  });
+
+  it("cleanup is admin-only and removes regenerable caches, never referenced media", async () => {
+    await withServer(async (base) => {
+      // Seed regenerable cache files in all three layout dirs.
+      for (
+        const [dir, name] of [
+          ["previews", "a.png"],
+          ["proxies", "b.mp4"],
+          ["thumbnails", "c.jpg"],
+        ] as const
+      ) {
+        const d = join(appData, dir);
+        await Deno.mkdir(d, { recursive: true });
+        await Deno.writeTextFile(join(d, name), "cache");
+      }
+      // The referenced media file lives under media/ (8 KiB from setup);
+      // content files are nested two levels deep, so walk recursively.
+      async function walkFiles(dir: string): Promise<string[]> {
+        const out: string[] = [];
+        try {
+          for await (const entry of Deno.readDir(dir)) {
+            const p = join(dir, entry.name);
+            if (entry.isDirectory) out.push(...(await walkFiles(p)));
+            else if (entry.isFile) out.push(p);
+          }
+        } catch {
+          // Missing dir contributes nothing.
+        }
+        return out;
+      }
+      const mediaFilesBefore = await walkFiles(join(appData, "media"));
+      assertEquals(mediaFilesBefore.length, 2);
+
+      const denied = await req(base, "/api/v1/diagnostics/storage/cleanup", {
+        method: "POST",
+        token: memberToken,
+      });
+      assertEquals(denied.status, 403);
+
+      const res = await req(base, "/api/v1/diagnostics/storage/cleanup", {
+        method: "POST",
+        token: ownerToken,
+      });
+      assertEquals(res.status, 200);
+      const report = res.body as {
+        directories: { path: string; files: number; bytes: number }[];
+        orphaned_media: { files: number; bytes: number };
+        total_files: number;
+        bytes_freed: number;
+      };
+      assertEquals(
+        report.directories,
+        [
+          { path: "previews", files: 1, bytes: 5 },
+          { path: "proxies", files: 1, bytes: 5 },
+          { path: "thumbnails", files: 1, bytes: 5 },
+        ],
+      );
+      assertEquals(report.total_files, 3);
+      assertEquals(report.orphaned_media, { files: 0, bytes: 0 });
+
+      // Referenced media (and, by default, the orphan) survived.
+      for (const file of mediaFilesBefore) {
+        await Deno.stat(file);
+      }
+
+      // Explicitly requesting orphaned media removes the unreference blob.
+      const orphans = await req(base, "/api/v1/diagnostics/storage/cleanup", {
+        method: "POST",
+        token: ownerToken,
+        body: { include_orphaned_media: true },
+      });
+      assertEquals(orphans.status, 200);
+      assertEquals(
+        (orphans.body as {
+          orphaned_media: { files: number; bytes: number };
+        }).orphaned_media,
+        { files: 1, bytes: 1024 },
+      );
+
+      const after = await req(base, "/api/v1/diagnostics/storage", {
+        token: ownerToken,
+      });
+      const sr = after.body as {
+        content_store: { files: number; orphaned: string[] };
+      };
+      assertEquals(sr.content_store.files, 1);
+      assertEquals(sr.content_store.orphaned, []);
+    });
+  });
 });
