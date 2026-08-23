@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { replaceReferenceToken } from "../reference-repair.js";
 
 const SCOPE_TYPES = ["generic", "prompt", "scene", "shot", "storyboard_panel"];
 
@@ -280,6 +281,11 @@ export class PromptEditor extends LitElement {
       gap: 6px;
     }
 
+    .ref-repair {
+      font-size: 11px;
+      padding: 1px 8px;
+    }
+
     .picker {
       margin-top: 12px;
       display: flex;
@@ -287,6 +293,11 @@ export class PromptEditor extends LitElement {
       gap: 8px;
       border-top: 1px solid var(--color-border);
       padding-top: 12px;
+    }
+
+    .picker-label {
+      font-size: 12px;
+      color: var(--color-text-muted);
     }
 
     .picker-results {
@@ -341,6 +352,10 @@ export class PromptEditor extends LitElement {
     pickerQuery: { state: true },
     pickerAssets: { state: true },
     pickerLoading: { state: true },
+    repairingToken: { state: true },
+    repairQuery: { state: true },
+    repairAssets: { state: true },
+    repairLoading: { state: true },
   };
 
   constructor() {
@@ -362,14 +377,20 @@ export class PromptEditor extends LitElement {
     this.pickerQuery = "";
     this.pickerAssets = [];
     this.pickerLoading = false;
+    this.repairingToken = null;
+    this.repairQuery = "";
+    this.repairAssets = [];
+    this.repairLoading = false;
     this._parseTimer = null;
     this._pickerTimer = null;
+    this._repairTimer = null;
   }
 
   disconnectedCallback() {
     super.disconnectedCallback?.();
     if (this._parseTimer) clearTimeout(this._parseTimer);
     if (this._pickerTimer) clearTimeout(this._pickerTimer);
+    if (this._repairTimer) clearTimeout(this._repairTimer);
   }
 
   render() {
@@ -505,6 +526,15 @@ export class PromptEditor extends LitElement {
                         <div class="ref-row">
                           <span class="ref-token">${t.raw}</span>
                           <span class="badge ${t.status}">${t.status}</span>
+                          ${t.status === "missing"
+                            ? html`
+                              <button
+                                class="btn-small ref-repair"
+                                @click=${() => this._openRepair(t)}>
+                                Repair
+                              </button>
+                            `
+                            : null}
                           ${t.asset
                             ? html`
                               <span class="ref-asset"
@@ -516,6 +546,41 @@ export class PromptEditor extends LitElement {
                       `
                     )}
                   </div>
+                  ${this.repairingToken
+                    ? html`
+                      <div class="picker">
+                        <span class="picker-label">
+                          Replace <code>@${this.repairingToken.slug}</code> with (targets the
+                          replacement's active version):
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="Search assets by name, slug, or tag..."
+                          .value=${this.repairQuery}
+                          @input=${this._onRepairInput} />
+                        <div class="picker-results">
+                          ${this.repairLoading
+                            ? html`<div class="empty">Searching...</div>`
+                            : this.repairAssets.length === 0
+                            ? html`<div class="empty">No matching assets.</div>`
+                            : this.repairAssets.map(
+                              (a) =>
+                                html`
+                                  <div
+                                    class="picker-item"
+                                    @click=${() => this._applyRepair(a)}>
+                                    <span>${a.display_name}</span>
+                                    <span class="slug">@${a.unique_slug}</span>
+                                  </div>
+                                `,
+                            )}
+                        </div>
+                        <button class="btn-small" @click=${this._closeRepair}>
+                          Cancel
+                        </button>
+                      </div>
+                    `
+                    : null}
                 `}
               ${this.parseWarnings.length > 0
                 ? html`
@@ -583,6 +648,7 @@ export class PromptEditor extends LitElement {
     this.loading = true;
     this.viewingVersion = null;
     this.saveMsg = null;
+    this._closeRepair();
     try {
       const versions = await api.listPromptVersions(
         this.scopeType,
@@ -606,6 +672,7 @@ export class PromptEditor extends LitElement {
     this.content = e.target.value;
     this.viewingVersion = null;
     this.saveMsg = null;
+    this._closeRepair();
     this._scheduleParse();
   }
 
@@ -678,6 +745,7 @@ export class PromptEditor extends LitElement {
     this.content = version.content;
     this.viewingVersion = version;
     this.saveMsg = null;
+    this._closeRepair();
     this._scheduleParse();
   }
 
@@ -695,6 +763,7 @@ export class PromptEditor extends LitElement {
       };
       this.content = result.version.content;
       this.viewingVersion = null;
+      this._closeRepair();
       if (this.loadedScope) {
         this.history = await api.listPromptVersions(
           this.loadedScope.type,
@@ -733,6 +802,55 @@ export class PromptEditor extends LitElement {
       this.pickerAssets = [];
     } finally {
       this.pickerLoading = false;
+    }
+  }
+
+  _openRepair(token) {
+    this.repairingToken = { start: token.start, end: token.end, slug: token.slug };
+    this.repairQuery = "";
+    this._searchRepair();
+  }
+
+  _closeRepair() {
+    this.repairingToken = null;
+    this.repairQuery = "";
+    this.repairAssets = [];
+    if (this._repairTimer) clearTimeout(this._repairTimer);
+  }
+
+  _onRepairInput(e) {
+    this.repairQuery = e.target.value;
+    if (this._repairTimer) clearTimeout(this._repairTimer);
+    this._repairTimer = setTimeout(() => this._searchRepair(), 300);
+  }
+
+  async _searchRepair() {
+    if (!this.repairingToken) return;
+    this.repairLoading = true;
+    try {
+      this.repairAssets = await api.listAssets({ q: this.repairQuery, limit: 25 });
+    } catch {
+      this.repairAssets = [];
+    } finally {
+      this.repairLoading = false;
+    }
+  }
+
+  _applyRepair(asset) {
+    const token = this.repairingToken;
+    this._closeRepair();
+    if (!token) return;
+    try {
+      const result = replaceReferenceToken(this.content, token, asset.unique_slug);
+      this.content = result.text;
+      this.viewingVersion = null;
+      this.saveMsg = {
+        kind: "ok",
+        text: `Repaired @${token.slug} → @${asset.unique_slug}. Save a version to persist.`,
+      };
+      this._parse();
+    } catch (err) {
+      this.error = err.message || "Couldn't repair the reference.";
     }
   }
 

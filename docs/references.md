@@ -69,3 +69,20 @@ human-readable line per unresolved token.
   version, and sets status `resolved`.
 - Assets the caller cannot read are treated as `missing` (their existence is not leaked).
 - All save/replace actions are written to `audit_logs`.
+
+## Broken reference repair
+
+Two complementary paths repair a `missing` reference:
+
+**Prompt Studio (UI).** Broken tokens (status `missing`) show a **Repair** button in the References
+panel. Picking a replacement asset rewrites the working prompt text at that token's exact span —
+`@dead:v3` becomes `@newslug`, targeting the replacement's active version (version numbers belong to
+the old asset's history) — and re-resolves immediately. Other occurrences of the same slug keep
+their own Repair buttons. The repair is a draft edit: saving a version persists it, and that save
+re-parses the content so the new version's reference rows are `resolved`.
+
+**API (row-level).** `POST /api/v1/references/:id/replace` with `{ slug, version? }` re-points a
+persisted reference row (e.g. one recorded on a saved prompt version) at a live asset without
+creating a new prompt version. The target must exist, not be deleted, and be readable by the caller
+(403 otherwise); an explicit `version` must exist on that asset (400 otherwise). The row is set to
+`resolved` and the action is audit-logged.
