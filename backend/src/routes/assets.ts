@@ -467,6 +467,37 @@ export const assetRouter = new Router()
     ctx.response.body = file.readable;
   })
   .get(
+    "/api/v1/assets/:id/versions/:versionId/preview",
+    authMiddleware,
+    async (ctx, _next) => {
+      const userId = requireUserId(ctx);
+      const asset = getAssetAccessible(ctx.params.id, userId);
+      if (!asset) throw notFound("Asset not found");
+
+      const version = getAssetVersion(ctx.params.versionId);
+      if (!version || version.asset_id !== asset.id) {
+        throw notFound("Version not found");
+      }
+      if (!version.file_path) throw notFound("Version has no stored file");
+
+      const file = await Deno.open(version.file_path).catch(() => {
+        throw new AppError(
+          ERROR_CODES.MISSING_FILE,
+          "Media file is missing from storage",
+          { status: 404 },
+        );
+      });
+      const stat = await file.stat();
+      ctx.response.status = 200;
+      ctx.response.headers.set(
+        "content-type",
+        version.mime_type ?? "application/octet-stream",
+      );
+      ctx.response.headers.set("content-length", String(stat.size));
+      ctx.response.body = file.readable;
+    },
+  )
+  .get(
     "/api/v1/assets/:id/versions/:versionId/thumbnail",
     authMiddleware,
     async (ctx, _next) => {

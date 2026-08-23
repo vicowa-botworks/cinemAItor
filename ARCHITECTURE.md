@@ -75,11 +75,13 @@ app-root (main router)
 │   ├── asset-card (tile with lazy blob-preview thumbnail)
 │   ├── asset-form (create metadata-only asset)
 │   └── asset-upload (create + multipart file upload → first version)
- ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
- │   │              audio adjustments (waveform + trim/gain for audio assets),
- │   │              audio cleanup (denoise/normalize → new version, AUD-012),
- │   │              subtitle generation (transcribe → SRT candidates on a new subtitle asset, AUD-014),
- │   │              tags, aliases, delete)
+  ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
+  │   │              version A/B compare (two versions side by side: synced play + metadata diff,
+  │   │              see compare.js),
+  │   │              audio adjustments (waveform + trim/gain for audio assets),
+  │   │              audio cleanup (denoise/normalize → new version, AUD-012),
+  │   │              subtitle generation (transcribe → SRT candidates on a new subtitle asset, AUD-014),
+  │   │              tags, aliases, delete)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, history view/restore)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
@@ -96,7 +98,8 @@ app-root (main router)
 ├── scene-list (scene list + create; project/storyboard filters)
 ├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
 │   │            clip playback, embedded audio generation)
-├── review-board (job candidate comparison; approve / reject / shortlist + notes)
+├── review-board (job candidate comparison with two-candidate A/B mode — synced play/seek +
+│   │             quick approve; approve / reject / shortlist + notes)
 ├── skills-list (v1 skill system: list, create/edit JSON definitions, version history,
 │    enable/disable, delete; run form (project + inputs) with live WebSocket job events +
 │    poll-to-terminal run history showing per-step job ids)
@@ -122,6 +125,8 @@ app-root (main router)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
 ├── audio-adjustments (shared trim/gain parse/prefill/validation for the asset-detail
 │   │                  adjustments UI)
+├── compare (shared A/B pair selection, row differ, and synced-media transport (CompareSync)
+│   │        for review-board candidate compare and asset-detail version compare — unit-tested)
 ├── timeline-playback (shared pure playback math: active visual/audio/text at time, source time,
 │   │                  fade factors, grade→CSS filter mapping, in/out range — unit-tested)
 └── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
@@ -159,8 +164,9 @@ server.ts (entry point)
 │   ├── GET / (system-seeded starting structures; read-only)
 │   └── (see docs/projects.md "Project templates")
 ├── Asset routes (/api/v1/assets/*, auth middleware)
-│   ├── CRUD + upload + versions + restore + aliases + tags + preview
-│   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
+ │   ├── CRUD + upload + versions + restore + aliases + tags + preview
+ │   │   + per-version preview (GET /:id/versions/:versionId/preview, A/B compare)
+ │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)

@@ -964,6 +964,22 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("getAssetVersionPreviewUrl", () => {
+    it("requests the per-version preview endpoint", async () => {
+      const blob = new Blob(["img"], { type: "image/png" });
+      const url = { value: "" };
+      globalThis.fetch = async (input) => {
+        url.value = String(input);
+        return { ok: true, status: 200, blob: async () => blob };
+      };
+      const media = await api.getAssetVersionPreviewUrl("a-1", "v-9");
+      assert(media.url.startsWith("blob:"));
+      assertEquals(media.type, "image/png");
+      assert(url.value.includes("/assets/a-1/versions/v-9/preview"));
+      URL.revokeObjectURL(media.url);
+    });
+  });
+
   describe("getAssetThumbnailUrl", () => {
     function mockFetch(url, type = "image/jpeg", label = "jpg") {
       globalThis.fetch = async (input) => {

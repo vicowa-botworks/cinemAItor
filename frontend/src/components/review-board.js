@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { CompareSync, isTimeMedia, resolveComparePair, toggleComparePair } from "../compare.js";
 
 export class ReviewBoard extends LitElement {
   static styles = css`
@@ -90,6 +91,67 @@ export class ReviewBoard extends LitElement {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 16px;
+    }
+
+    .ab-pane {
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .ab-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+
+    .ab-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .ab-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .ab-col-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .ab-label {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--color-primary);
+    }
+
+    .ab-col .media-slot {
+      min-height: 180px;
+    }
+
+    .ab-col .media-slot img {
+      max-height: 360px;
+    }
+
+    .ab-col .media-slot video {
+      max-height: 360px;
+    }
+
+    .ab-toggle[aria-pressed="true"] {
+      background-color: var(--color-primary);
+      color: white;
+      border-color: var(--color-primary);
     }
 
     .candidate-card {
@@ -253,6 +315,7 @@ export class ReviewBoard extends LitElement {
     notice: { state: true },
     busyVersionId: { state: true },
     noteDrafts: { state: true },
+    compareIds: { state: true },
   };
 
   constructor() {
@@ -265,7 +328,10 @@ export class ReviewBoard extends LitElement {
     this.notice = null;
     this.busyVersionId = null;
     this.noteDrafts = new Map();
+    this.compareIds = [];
     this._jobId = null;
+    this._loadedJobId = null;
+    this._compareSync = new CompareSync();
   }
 
   async connectedCallback() {
@@ -283,6 +349,7 @@ export class ReviewBoard extends LitElement {
       if (entry.url) URL.revokeObjectURL(entry.url);
     }
     this.media = new Map();
+    this._compareSync.clear();
   }
 
   render() {
@@ -330,6 +397,8 @@ export class ReviewBoard extends LitElement {
 
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
+
+        ${this._renderAbPane()}
 
         <div class="candidate-grid">
           ${this.candidates.map((c) => this._renderCandidate(c))}
@@ -388,6 +457,7 @@ export class ReviewBoard extends LitElement {
             href="#/asset/${encodeURIComponent(candidate.asset.id)}">
             ${candidate.asset.display_name || candidate.asset.unique_slug}
           </a>
+          ${this._abToggle(versionId)}
         </div>
         ${player}
         ${decision?.notes ? html`<div class="decision-notes">${decision.notes}</div>` : null}
@@ -423,14 +493,126 @@ export class ReviewBoard extends LitElement {
     `;
   }
 
+  _abToggle(versionId) {
+    const selected = this.compareIds.includes(versionId);
+    return html`
+      <button class="btn-small ab-toggle" aria-pressed=${selected ? "true" : "false"}
+        ?disabled=${this.busyVersionId !== null}
+        @click=${() => this._toggleCompare(versionId)}>
+        ${selected ? "In A/B" : "A/B"}
+      </button>
+    `;
+  }
+
+  _toggleCompare(versionId) {
+    this.compareIds = toggleComparePair(this.compareIds, versionId);
+  }
+
+  _renderAbPane() {
+    if (!this.job) return null;
+    const pair = resolveComparePair(
+      this.candidates,
+      (c) => c.asset_version.id,
+      this.compareIds,
+    );
+    if (!pair) return null;
+    const timeMedia = isTimeMedia(pair.a.asset?.asset_type);
+    return html`
+      <div class="ab-pane">
+        <div class="ab-header">
+          <span>
+            <strong>A/B comparison</strong>
+            — pick two candidates to place them side by side
+          </span>
+          ${timeMedia
+            ? html`
+              <button class="btn-small" @click=${() => this._compareSync.play()}>Play both</button>
+              <button class="btn-small" @click=${() =>
+                this._compareSync.pause()}>Pause both</button>
+              <button class="btn-small" @click=${() => this._compareSync.stop()}>Stop both</button>
+            `
+            : null}
+          <button class="btn-small" style="margin-left:auto"
+            @click=${() => (this.compareIds = [])}>
+            Close
+          </button>
+        </div>
+        <div class="ab-grid">
+          ${this._renderAbCol("a", pair.a, true)}
+          ${this._renderAbCol("b", pair.b, false)}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderAbCol(key, candidate, isA) {
+    const media = this.media.get(candidate.asset_version.id);
+    const type = candidate.asset?.asset_type;
+    let player = html`<div class="media-slot">no preview</div>`;
+    if (media && type === "audio") {
+      player = html`
+        <div class="media-slot">
+          <audio controls preload="auto" src=${media.url}
+            ref=${(el) => this._compareSync.setPlayer(key, el)}
+            @seeked=${(e) => this._compareSync.handleSeeked(e)}></audio>
+        </div>
+      `;
+    } else if (media && type === "video") {
+      player = html`
+        <div class="media-slot">
+          <video controls preload="metadata" src=${media.url}
+            ref=${(el) => this._compareSync.setPlayer(key, el)}
+            @seeked=${(e) => this._compareSync.handleSeeked(e)}></video>
+        </div>
+      `;
+    } else if (media) {
+      player = html`
+        <div class="media-slot">
+          <img src=${media.url} alt=${candidate.asset.display_name} />
+        </div>
+      `;
+    } else if (media === null) {
+      player = html`<div class="media-slot">preview unavailable</div>`;
+    }
+    const decision = candidate.decision;
+    return html`
+      <div class="ab-col">
+        <div class="ab-col-top">
+          <span class="ab-label">${isA ? "A" : "B"}</span>
+          <span class="candidate-index">
+            Candidate ${candidate.candidate_index}/${candidate.candidate_count}
+          </span>
+          ${decision
+            ? html`
+              <span class="chip ${decision.decision}">${decision.decision}</span>
+              <button class="btn-small"
+                ?disabled=${this.busyVersionId !== null}
+                @click=${() =>
+                  this._decide(candidate, decision.decision === "approved" ? "reject" : "approve")}>
+                ${decision.decision === "approved" ? "Unapprove" : "Approve"}
+              </button>
+            `
+            : null}
+        </div>
+        ${player}
+        ${decision?.notes ? html`<div class="decision-notes">${decision.notes}</div>` : null}
+      </div>
+    `;
+  }
+
   async _load() {
     if (!this._jobId) return;
+    if (this._jobId !== this._loadedJobId) {
+      this.compareIds = [];
+      this._compareSync.clear();
+    }
     this.loading = true;
     this.error = "";
     try {
       const { job, candidates } = await api.listJobCandidates(this._jobId);
       this.job = job;
       this.candidates = candidates;
+      this._loadedJobId = this._jobId;
       this._loadMedia();
     } catch (err) {
       this.error = err.message || "Failed to load candidates.";

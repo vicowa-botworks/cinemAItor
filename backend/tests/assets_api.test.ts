@@ -286,6 +286,43 @@ describe("assets api", () => {
     });
   });
 
+  it("serves a specific version's stored file for comparison", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            { unique_slug: uniqueSlug("hero"), display_name: "Hero", asset_type: "character" },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        const v1Bytes = randomImageBytes(128);
+        const up1 = (await (
+          await upload(created.id, ownerToken, v1Bytes, "hero_v1.png")
+        ).json()) as { version: { id: string } };
+        const v2Bytes = randomImageBytes(256);
+        await upload(created.id, ownerToken, v2Bytes, "hero_v2.png");
+
+        // Older (non-active) version is reachable by version id.
+        const versionPreview = await get(
+          `/api/v1/assets/${created.id}/versions/${up1.version.id}/preview`,
+          ownerToken,
+        );
+        assertEquals(versionPreview.status, 200);
+        assertEquals(versionPreview.headers.get("content-type"), "image/png");
+        assertEquals(await versionPreview.arrayBuffer(), v1Bytes.buffer);
+
+        const unknownVersion = await get(
+          `/api/v1/assets/${created.id}/versions/version_0000deadbeef0000dead/preview`,
+          ownerToken,
+        );
+        assertEquals(unknownVersion.status, 404);
+      })();
+    });
+  });
+
   it("restores an older version and registers versions from stored content", async () => {
     await withServer((base) => {
       baseUrl = base;

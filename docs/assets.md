@@ -29,6 +29,22 @@ and audit logs.
   mutated.
 - Versions are immutable.
 
+### Version comparison (UI)
+
+The Asset Detail **Versions** section supports picking two versions for an A/B comparison:
+
+- Each version row has an **A/B** toggle selecting up to two versions (a third pick replaces the
+  oldest selection — `toggleComparePair` in `frontend/src/compare.js`).
+- With two selected, an **A/B versions** pane appears below the list: a side-by-side preview of both
+  versions (per-version preview endpoint; images/video/audio, lazy blob URLs revoked on
+  change/disconnect), a metadata diff table (format, size, proxy, created, notes — differing rows
+  highlighted), and, for video/audio assets, synced transport: **Play both / Pause both / Stop
+  both** plus seek mirroring (`CompareSync`, drift threshold 0.25 s) so the two timelines stay
+  locked together while scrubbing.
+- The shared compare utilities (pair selection, pair resolution, row differ, `CompareSync`, time
+  media check) live in `frontend/src/compare.js` and are unit-tested in
+  `frontend/tests/compare.test.js`; the review board's candidate A/B mode reuses the same module.
+
 ## Proxies
 
 - Every version of a video, image, or audio asset can carry a **proxy**: a small, fast-transcoded
@@ -81,6 +97,7 @@ and audit logs.
 | POST   | `/api/v1/assets/:id/tags`                          | Add a tag                                                       |
 | DELETE | `/api/v1/assets/:id/tags/:tag`                     | Remove a tag                                                    |
 | GET    | `/api/v1/assets/:id/preview`                       | Stream the active version's file                                |
+| GET    | `/api/v1/assets/:id/versions/:versionId/preview`   | Stream one specific version's stored file (version A/B compare) |
 
 List filters (query params): `project_id`, `library_scope`, `asset_type`, `status`, `tag`, and `q`
 (case-insensitive match on slug, display name, and description).

@@ -6,6 +6,13 @@ import {
   parseAudioMetadata,
   validateAudioAdjustments,
 } from "../audio-adjustments.js";
+import {
+  CompareSync,
+  isTimeMedia,
+  resolveComparePair,
+  toggleComparePair,
+  versionCompareRows,
+} from "../compare.js";
 
 const STATUS_OPTIONS = ["draft", "approved", "rejected", "archived"];
 
@@ -347,6 +354,115 @@ export class AssetDetail extends LitElement {
         grid-template-columns: 1fr;
       }
     }
+
+    .cmp-toggle {
+      margin-left: auto;
+      margin-right: 8px;
+      font-size: 12px;
+      padding: 2px 10px;
+    }
+
+    .compare-pane {
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid var(--border-color, #e2e8f0);
+      border-radius: 10px;
+      background: var(--surface, #f8fafc);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .compare-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 14px;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .ab-col {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--border-color, #e2e8f0);
+      border-radius: 8px;
+      background: var(--card, #fff);
+    }
+
+    .ab-col-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .ab-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent, #4f46e5);
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .media-slot {
+      min-height: 96px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f172a;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .media-slot img,
+    .media-slot video {
+      width: 100%;
+      max-height: 240px;
+      object-fit: contain;
+    }
+
+    .media-slot audio {
+      width: 100%;
+    }
+
+    .cmp-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .cmp-table th,
+    .cmp-table td {
+      text-align: left;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-color, #e2e8f0);
+      vertical-align: top;
+    }
+
+    .cmp-table thead th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--muted, #64748b);
+    }
+
+    .cmp-table tr.differs td,
+    .cmp-table tr.differs th {
+      background: rgba(250, 204, 21, 0.12);
+    }
   `;
 
   static properties = {
@@ -367,6 +483,8 @@ export class AssetDetail extends LitElement {
     cleanupBusy: { state: true },
     subtitleBusy: { state: true },
     subtitleResult: { state: true },
+    compareIds: { state: true },
+    comparePreviews: { state: true },
   };
 
   constructor() {
@@ -388,6 +506,9 @@ export class AssetDetail extends LitElement {
     this.cleanupBusy = false;
     this.subtitleBusy = false;
     this.subtitleResult = null;
+    this.compareIds = [];
+    this.comparePreviews = new Map();
+    this._compareSync = new CompareSync();
   }
 
   willUpdate(changed) {
@@ -400,6 +521,7 @@ export class AssetDetail extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback?.();
     this._revokePreview();
+    this._revokeComparePreviews();
   }
 
   _reset() {
@@ -416,6 +538,9 @@ export class AssetDetail extends LitElement {
     this.cleanupBusy = false;
     this.subtitleBusy = false;
     this.subtitleResult = null;
+    this.compareIds = [];
+    this.comparePreviews = new Map();
+    this._compareSync?.clear();
   }
 
   _revokePreview() {
@@ -423,6 +548,168 @@ export class AssetDetail extends LitElement {
       URL.revokeObjectURL(this.preview.url);
       this.preview = null;
     }
+  }
+
+  _revokeComparePreviews() {
+    for (const entry of this.comparePreviews?.values() ?? []) {
+      if (entry?.url) URL.revokeObjectURL(entry.url);
+    }
+    this.comparePreviews = new Map();
+    this._compareSync?.clear();
+  }
+
+  _comparePair() {
+    return resolveComparePair(this.versions ?? [], (v) => v.id, this.compareIds);
+  }
+
+  _toggleCompare(versionId) {
+    this.compareIds = toggleComparePair(this.compareIds, versionId);
+    for (const [id, entry] of [...this.comparePreviews]) {
+      if (!this.compareIds.includes(id)) {
+        if (entry?.url) URL.revokeObjectURL(entry.url);
+        this.comparePreviews.delete(id);
+      }
+    }
+    this._loadComparePreviews();
+  }
+
+  _clearCompare() {
+    this.compareIds = [];
+    this._revokeComparePreviews();
+  }
+
+  async _loadComparePreviews() {
+    const pair = this._comparePair();
+    if (!pair) return;
+    for (const v of [pair.a, pair.b]) {
+      if (this.comparePreviews.has(v.id)) continue;
+      this.comparePreviews = new Map(this.comparePreviews.set(v.id, undefined));
+      try {
+        const preview = await api.getAssetVersionPreviewUrl(this.assetId, v.id);
+        if (this.compareIds.includes(v.id)) {
+          this.comparePreviews = new Map(this.comparePreviews.set(v.id, preview));
+        } else {
+          URL.revokeObjectURL(preview.url);
+        }
+      } catch {
+        if (this.compareIds.includes(v.id)) {
+          this.comparePreviews = new Map(this.comparePreviews.set(v.id, null));
+        }
+      }
+    }
+  }
+
+  _comparePreviewEl(v, key) {
+    const entry = this.comparePreviews.get(v.id);
+    const type = this.asset?.asset_type;
+    if (entry === undefined) return html`<div class="media-slot">loading preview…</div>`;
+    if (entry === null) return html`<div class="media-slot">preview unavailable</div>`;
+    if (type === "audio") {
+      return html`
+        <div class="media-slot">
+          <audio
+            controls
+            preload="auto"
+            src=${entry.url}
+            ref=${(el) => this._compareSync.setPlayer(key, el)}
+            @seeked=${(e) => this._compareSync.handleSeeked(e)}
+          ></audio>
+        </div>
+      `;
+    }
+    if (type === "video") {
+      return html`
+        <div class="media-slot">
+          <video
+            controls
+            preload="metadata"
+            src=${entry.url}
+            ref=${(el) => this._compareSync.setPlayer(key, el)}
+            @seeked=${(e) => this._compareSync.handleSeeked(e)}
+          ></video>
+        </div>
+      `;
+    }
+    if (type === "image") {
+      return html`<div class="media-slot"><img src=${entry.url} alt="version preview" /></div>`;
+    }
+    return html`<div class="media-slot">preview for ${type ?? "this type"} is not shown</div>`;
+  }
+
+  _renderCompareCol(key, v, label) {
+    return html`
+      <div class="ab-col">
+        <div class="ab-col-top">
+          <span class="ab-label">${label}</span>
+          <span class="version-id">v${v.version_number}</span>
+          ${this.asset?.active_version?.id === v.id ? html`<span class="chip">active</span>` : null}
+          <button class="btn btn-secondary" @click=${() => this._toggleCompare(v.id)}>
+            Swap out
+          </button>
+        </div>
+        ${this._comparePreviewEl(v, key)}
+        ${v.notes ? html`<div class="version-notes">${v.notes}</div>` : ""}
+      </div>
+    `;
+  }
+
+  _renderVersionCompare() {
+    const pair = this._comparePair();
+    if (!pair) return null;
+    const rows = versionCompareRows(pair.a, pair.b);
+    const type = this.asset?.asset_type;
+    return html`
+      <div class="compare-pane">
+        <div class="compare-header">
+          <span><strong>A/B versions</strong> — two versions side by side</span>
+          ${isTimeMedia(type)
+            ? html`
+              <button class="btn btn-secondary" @click=${() => this._compareSync.play()}>
+                Play both
+              </button>
+              <button class="btn btn-secondary" @click=${() => this._compareSync.pause()}>
+                Pause both
+              </button>
+              <button class="btn btn-secondary" @click=${() => this._compareSync.stop()}>
+                Stop both
+              </button>
+            `
+            : null}
+          <button
+            class="btn btn-secondary"
+            style="margin-left:auto"
+            @click=${() => this._clearCompare()}
+          >
+            Close
+          </button>
+        </div>
+        <div class="compare-grid">
+          ${this._renderCompareCol("a", pair.a, "A")}
+          ${this._renderCompareCol("b", pair.b, "B")}
+        </div>
+        <table class="cmp-table" aria-label="Version metadata comparison">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>A — v${pair.a.version_number}</th>
+              <th>B — v${pair.b.version_number}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(
+              (r) =>
+                html`
+                  <tr class=${r.differs ? "differs" : ""}>
+                    <th>${r.label}</th>
+                    <td>${r.a}</td>
+                    <td>${r.b}</td>
+                  </tr>
+                `,
+            )}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   async _loadAll() {
@@ -1145,6 +1432,13 @@ export class AssetDetail extends LitElement {
                           ${v.proxy_path ? "proxy ready" : "no proxy"} &middot;
                           ${v.created_at ? new Date(v.created_at).toLocaleDateString() : ""}
                         </span>
+                        <button
+                          class="btn btn-secondary cmp-toggle"
+                          aria-pressed=${this.compareIds.includes(v.id) ? "true" : "false"}
+                          @click=${() => this._toggleCompare(v.id)}
+                        >
+                          ${this.compareIds.includes(v.id) ? "In A/B" : "A/B"}
+                        </button>
                         ${version?.id === v.id ? html`<span class="chip">active</span>` : html`
                           <button class="btn btn-secondary"
                             @click=${() => this._restoreVersion(v)}>Restore</button>
@@ -1155,6 +1449,7 @@ export class AssetDetail extends LitElement {
                 )}
               </div>
             `}
+            ${this._renderVersionCompare()}
           </div>
 
           <div>
