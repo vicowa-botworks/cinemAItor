@@ -84,7 +84,7 @@ The Asset Detail **Versions** section supports picking two versions for an A/B c
 | GET    | `/api/v1/assets/:id`                               | Asset detail (aliases, tags, active v.)                         |
 | PATCH  | `/api/v1/assets/:id`                               | Update metadata or status                                       |
 | DELETE | `/api/v1/assets/:id`                               | Soft-delete (with reference warnings)                           |
-| POST   | `/api/v1/assets/:id/upload`                        | Multipart upload, creates a version                             |
+| POST   | `/api/v1/assets/:id/upload`                        | Raw-bytes streaming upload, creates a version                   |
 | GET    | `/api/v1/assets/:id/versions`                      | List versions (newest first)                                    |
 | POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                           |
 | GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                 |
@@ -106,7 +106,24 @@ List filters (query params): `project_id`, `library_scope`, `asset_type`, `statu
 
 - Uploaded files are streamed through the content store: hashed, deduplicated, and atomically placed
   under `app_data/media` (see `docs/storage.md`).
-- Uploads are bounded by `UPLOAD_MAX_SIZE` (default 2 GiB).
+- Uploads are bounded by `UPLOAD_MAX_SIZE` (default 2 GiB); the declared `Content-Length` is
+  rejected up front, and the streamed size is re-checked chunk-by-chunk while hashing.
+
+### Upload protocol (raw bytes)
+
+Upload endpoints send the file **as the request body** — no multipart envelope, so the server never
+buffers the whole file in memory (chunked streaming, constant memory while hashing to disk):
+
+- `Content-Type: application/octet-stream`
+- `X-File-Name`: percent-encoded filename (the body's extension drives MIME/format detection)
+- `X-Upload-Notes` (optional): percent-encoded version notes
+
+The same protocol is used by `POST /api/v1/audio/upload` and the raw path of
+`POST /api/v1/audio/assets/:id/versions` (which additionally accepts `X-Asset-Type`,
+`X-Display-Name`, and `X-Project-Id`, all percent-encoded, plus a JSON `content_hash` body to
+register an already-stored file instead of re-uploading). JSON/other body types are rejected with
+400.
+
 - `DELETE` marks the asset `deleted` (soft delete) and reports how many references now dangle; rows
   are kept for audit history.
 - Create, update, delete, version, alias, and tag actions are written to `audit_logs`.

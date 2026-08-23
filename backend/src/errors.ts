@@ -7,6 +7,7 @@ export const ERROR_CODES = {
   PERMISSION_DENIED: "PERMISSION_DENIED",
   NOT_FOUND: "NOT_FOUND",
   CONFLICT: "CONFLICT",
+  RATE_LIMITED: "RATE_LIMITED",
   MISSING_FILE: "MISSING_FILE",
   CORRUPT_FILE: "CORRUPT_FILE",
   MODEL_MISSING: "MODEL_MISSING",
@@ -73,6 +74,10 @@ export function notFound(message: string): AppError {
 
 export function conflict(message: string, details?: string): AppError {
   return new AppError(ERROR_CODES.CONFLICT, message, { status: 409, details });
+}
+
+export function tooManyRequests(message: string): AppError {
+  return new AppError(ERROR_CODES.RATE_LIMITED, message, { status: 429 });
 }
 
 export function serviceUnavailable(message: string, details?: string): AppError {

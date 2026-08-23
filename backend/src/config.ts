@@ -11,6 +11,8 @@ export interface AppConfig {
   uploadMaxBytes: number;
   jobConcurrencyGpu: number;
   jobConcurrencyCpu: number;
+  authRateLimitMax: number;
+  authRateLimitWindowSeconds: number;
 }
 
 export const APP_NAME = "cinemaItor";
@@ -36,6 +38,13 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
   );
   const jobConcurrencyGpu = intEnv(env, "JOB_CONCURRENCY_GPU", 1, 1);
   const jobConcurrencyCpu = intEnv(env, "JOB_CONCURRENCY_CPU", 2, 1);
+  const authRateLimitMax = intEnv(env, "AUTH_RATE_LIMIT_MAX", 20, 1);
+  const authRateLimitWindowSeconds = intEnv(
+    env,
+    "AUTH_RATE_LIMIT_WINDOW_SECONDS",
+    60,
+    1,
+  );
   const jwtSecret = env.get("JWT_SECRET") ?? "";
   if (!jwtSecret) {
     throw new Error(
@@ -54,6 +63,8 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
     uploadMaxBytes,
     jobConcurrencyGpu,
     jobConcurrencyCpu,
+    authRateLimitMax,
+    authRateLimitWindowSeconds,
   };
 }
 

@@ -1,6 +1,5 @@
 import { Router } from "@oak/oak/router";
 import type { Context, Next } from "@oak/oak";
-import { join } from "@std/path";
 import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
 import {
   type Asset,
@@ -23,6 +22,7 @@ import {
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
 import { mediaTypeFor } from "@cinemaItor/storage/media_types.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
+import { percentDecode, readRawUpload } from "@cinemaItor/routes/upload.ts";
 import {
   analyzeAudioFile,
   AudioAdjustmentError,
@@ -61,36 +61,18 @@ function param(ctx: ParamsContext, key: "id" | "versionId"): string {
   return value;
 }
 
-async function saveUpload(
-  ctx: Context,
-  file: File,
-): Promise<{ stored: { hash: string; path: string; size: number }; tempPath: string }> {
-  const body = ctx.request.body;
-  if (body.type() !== "form-data") {
-    throw badRequest("Request body must be multipart form data");
-  }
-  const lengthHeader = ctx.request.headers.get("content-length");
-  const declaredSize = lengthHeader ? Number(lengthHeader) : 0;
-  if (declaredSize > loadConfig().uploadMaxBytes) {
-    throw badRequest(
-      `Upload exceeds the maximum size of ${loadConfig().uploadMaxBytes} bytes`,
-    );
-  }
-  const store = getContentStore();
-  const tempPath = join(store.layout.cache, `upload-${crypto.randomUUID()}`);
-  const buffer = await file.arrayBuffer();
-  await Deno.writeFile(tempPath, new Uint8Array(buffer));
-  const stored = await store.put(tempPath, file.name || "audio.bin");
-  return { stored, tempPath };
-}
-
-function audioTypeFromFormData(formData: FormData): AudioAssetType {
-  const raw = formData.get("asset_type");
-  const value = typeof raw === "string" && raw ? raw : "audio";
-  if (!isAudioAssetType(value)) {
+function audioTypeFromHeader(value: string | null): AudioAssetType {
+  const raw = value ? percentDecode(value).trim() : "";
+  const type = raw !== "" ? raw : "audio";
+  if (!isAudioAssetType(type)) {
     throw badRequest(`asset_type must be one of: ${AUDIO_ASSET_TYPES.join(", ")}`);
   }
-  return value;
+  return type;
+}
+
+function audioHeader(value: string | null): string | null {
+  const raw = value ? percentDecode(value).trim() : "";
+  return raw !== "" ? raw : null;
 }
 
 function readOptionalBody(ctx: Context): Promise<Record<string, unknown>> {
@@ -150,51 +132,72 @@ export const audioRouter = new Router()
   })
   .post("/api/v1/audio/upload", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
-    const body = ctx.request.body;
-    if (body.type() !== "form-data") {
-      throw badRequest("Request body must be multipart form data");
-    }
-    const formData = await body.formData();
-    const file = formData.get("file");
-    if (!(file instanceof File)) {
-      throw badRequest("file field is required");
-    }
-    const media = mediaTypeFor(file.name || "audio.bin");
+    const maxBytes = loadConfig().uploadMaxBytes;
+    const { stream, filename, notes } = readRawUpload(ctx, maxBytes);
+    const media = mediaTypeFor(filename);
     if (!media.mime?.startsWith("audio/")) {
       throw badRequest("file must be an audio format (wav, mp3, flac, ogg, m4a, aac)");
     }
-    const assetType = audioTypeFromFormData(formData);
-    const nameField = formData.get("display_name");
-    const displayName = typeof nameField === "string" && nameField.trim()
-      ? nameField.trim()
-      : (file.name ? file.name.replace(/\.[^.]+$/, "") : "audio");
-    const projectField = formData.get("project_id");
-    const projectId = typeof projectField === "string" && projectField ? projectField : undefined;
-    const notesField = formData.get("notes");
-    const notes = typeof notesField === "string" && notesField ? notesField : null;
+    const assetType = audioTypeFromHeader(ctx.request.headers.get("x-asset-type"));
+    const displayName = audioHeader(ctx.request.headers.get("x-display-name")) ??
+      (filename.replace(/\.[^.]+$/, "") || "audio");
+    const projectId = audioHeader(ctx.request.headers.get("x-project-id")) ?? undefined;
 
-    const { stored, tempPath } = await saveUpload(ctx, file);
-    try {
-      const analysis = await analyzeAudioFile(stored.path);
-      let uniqueSlug = "audio";
-      const db = getDb();
-      const exists = (slug: string) =>
-        db.prepare("SELECT id FROM assets WHERE unique_slug = ?").get(slug);
-      let suffix = 0;
-      while (exists(uniqueSlug)) {
-        suffix += 1;
-        uniqueSlug = `audio_${suffix}`;
+    const stored = await getContentStore().putStream(stream, filename, maxBytes);
+    const analysis = await analyzeAudioFile(stored.path);
+    let uniqueSlug = "audio";
+    const db = getDb();
+    const exists = (slug: string) =>
+      db.prepare("SELECT id FROM assets WHERE unique_slug = ?").get(slug);
+    let suffix = 0;
+    while (exists(uniqueSlug)) {
+      suffix += 1;
+      uniqueSlug = `audio_${suffix}`;
+    }
+    const asset = createAsset(
+      {
+        unique_slug: uniqueSlug,
+        display_name: displayName,
+        asset_type: assetType,
+        library_scope: projectId ? "project" : "global",
+        project_id: projectId ?? null,
+      },
+      userId,
+    );
+    const version = createAssetVersion(asset.id, userId, {
+      content_hash: stored.hash,
+      file_path: stored.path,
+      format: media.format,
+      mime_type: media.mime,
+      file_size: stored.size,
+      technical_metadata_json: JSON.stringify(buildAudioMetadata(analysis)),
+      notes,
+      make_active: true,
+    });
+    ctx.response.status = 201;
+    ctx.response.body = {
+      asset: getAssetById(asset.id) ?? asset,
+      version,
+      audio: getAudioVersion(version.id)?.audio ?? null,
+    };
+  })
+  .post("/api/v1/audio/assets/:id/versions", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const asset = getAssetById(param(ctx, "id"));
+    if (!asset || asset.status === "deleted") throw notFound("Asset not found");
+    if (!isAudioAssetType(asset.asset_type)) {
+      throw badRequest(`Asset '@${asset.unique_slug}' is not an audio asset`);
+    }
+    const body = ctx.request.body;
+    if (body.type() !== "json") {
+      const maxBytes = loadConfig().uploadMaxBytes;
+      const { stream, filename, notes } = readRawUpload(ctx, maxBytes);
+      const media = mediaTypeFor(filename);
+      if (!media.mime?.startsWith("audio/")) {
+        throw badRequest("file must be an audio format");
       }
-      const asset = createAsset(
-        {
-          unique_slug: uniqueSlug,
-          display_name: displayName,
-          asset_type: assetType,
-          library_scope: projectId ? "project" : "global",
-          project_id: projectId ?? null,
-        },
-        userId,
-      );
+      const stored = await getContentStore().putStream(stream, filename, maxBytes);
+      const analysis = await analyzeAudioFile(stored.path);
       const version = createAssetVersion(asset.id, userId, {
         content_hash: stored.hash,
         file_path: stored.path,
@@ -205,62 +208,20 @@ export const audioRouter = new Router()
         notes,
         make_active: true,
       });
+      queueProxyGeneration(asset.id, version, userId, asset.project_id);
       ctx.response.status = 201;
-      ctx.response.body = {
-        asset: getAssetById(asset.id) ?? asset,
-        version,
-        audio: getAudioVersion(version.id)?.audio ?? null,
-      };
-    } finally {
-      await Deno.remove(tempPath).catch(() => {});
-    }
-  })
-  .post("/api/v1/audio/assets/:id/versions", authMiddleware, async (ctx, _next) => {
-    const userId = requireUserId(ctx);
-    const asset = getAssetById(param(ctx, "id"));
-    if (!asset || asset.status === "deleted") throw notFound("Asset not found");
-    if (!isAudioAssetType(asset.asset_type)) {
-      throw badRequest(`Asset '@${asset.unique_slug}' is not an audio asset`);
-    }
-    const body = ctx.request.body;
-    const type = body.type();
-
-    if (type === "form-data") {
-      const formData = await body.formData();
-      const file = formData.get("file");
-      if (!(file instanceof File)) throw badRequest("file field is required");
-      const media = mediaTypeFor(file.name || "audio.bin");
-      if (!media.mime?.startsWith("audio/")) {
-        throw badRequest("file must be an audio format");
-      }
-      const { stored, tempPath } = await saveUpload(ctx, file);
-      try {
-        const analysis = await analyzeAudioFile(stored.path);
-        const notesField = formData.get("notes");
-        const version = createAssetVersion(asset.id, userId, {
-          content_hash: stored.hash,
-          file_path: stored.path,
-          format: media.format,
-          mime_type: media.mime,
-          file_size: stored.size,
-          technical_metadata_json: JSON.stringify(buildAudioMetadata(analysis)),
-          notes: typeof notesField === "string" && notesField ? notesField : null,
-          make_active: true,
-        });
-        queueProxyGeneration(asset.id, version, userId, asset.project_id);
-        ctx.response.status = 201;
-        ctx.response.body = { version, audio: getAudioVersion(version.id)?.audio ?? null };
-      } finally {
-        await Deno.remove(tempPath).catch(() => {});
-      }
+      ctx.response.body = { version, audio: getAudioVersion(version.id)?.audio ?? null };
       return;
     }
 
     // JSON: register a stored hash (no re-upload).
+    if (body.type() !== "json") {
+      throw badRequest("Request body must be the raw file bytes or JSON");
+    }
     const jsonBody = await body.json().catch(() => ({})) as Record<string, unknown>;
     const hash = typeof jsonBody.content_hash === "string" ? jsonBody.content_hash : "";
     if (!/^[0-9a-f]{64}$/.test(hash)) {
-      throw badRequest("Provide a multipart file or a valid content_hash");
+      throw badRequest("Provide a raw file upload or a valid content_hash");
     }
     const store = getContentStore();
     const storedPath = store.resolve(hash);

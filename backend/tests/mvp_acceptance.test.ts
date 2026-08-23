@@ -110,7 +110,8 @@ async function raw(
   opts: {
     token?: string;
     jsonBody?: unknown;
-    form?: FormData;
+    rawBody?: BodyInit;
+    rawHeaders?: Record<string, string>;
   } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = {};
@@ -119,8 +120,10 @@ async function raw(
   if (opts.jsonBody !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(opts.jsonBody);
-  } else if (opts.form) {
-    init.body = opts.form;
+  } else if (opts.rawBody !== undefined) {
+    headers["Content-Type"] = "application/octet-stream";
+    Object.assign(headers, opts.rawHeaders);
+    init.body = opts.rawBody;
   }
   return await fetchWithRetry(`${base}${path}`, init);
 }
@@ -131,7 +134,8 @@ async function api(
   opts: {
     token?: string;
     jsonBody?: unknown;
-    form?: FormData;
+    rawBody?: BodyInit;
+    rawHeaders?: Record<string, string>;
   } = {},
 ): Promise<Resp> {
   const res = await raw(method, path, opts);
@@ -272,7 +276,11 @@ const PNG_1X1 = new Uint8Array([
 ]);
 
 /** Minimal valid PCM wav (mono 16-bit sine wave). */
-function makeWav(seconds: number, sampleRate = 8000, freq = 220): Uint8Array {
+function makeWav(
+  seconds: number,
+  sampleRate = 8000,
+  freq = 220,
+): Uint8Array<ArrayBuffer> {
   const n = Math.round(seconds * sampleRate);
   const data = new Uint8Array(44 + n * 2);
   const dv = new DataView(data.buffer);
@@ -303,7 +311,7 @@ function makeWav(seconds: number, sampleRate = 8000, freq = 220): Uint8Array {
 }
 
 /** A small invalid-bytes mp4 stand-in (probe fails gracefully). */
-function makeFakeMp4(): Uint8Array {
+function makeFakeMp4(): Uint8Array<ArrayBuffer> {
   const data = new Uint8Array(96);
   new DataView(data.buffer).setUint32(0, 0x66747970, false); // "ftyp"
   data.set(new TextEncoder().encode("mp42"), 4);
@@ -452,9 +460,8 @@ async function uploadMediaAsset(
   slug: string,
   displayName: string,
   assetType: string,
-  bytes: Uint8Array,
+  bytes: Uint8Array<ArrayBuffer>,
   filename: string,
-  mime: string,
 ): Promise<{ assetId: string; versionId: string }> {
   const asset = await api("POST", "/api/v1/assets", {
     token: s.adminToken,
@@ -469,11 +476,10 @@ async function uploadMediaAsset(
   assertEquals(asset.status, 201);
   const assetId = requireField(asset.body, "id");
 
-  const form = new FormData();
-  form.append("file", new File([bytes as unknown as BlobPart], filename, { type: mime }));
-  const upload = await api(`POST`, `/api/v1/assets/${assetId}/upload`, {
+  const upload = await api("POST", `/api/v1/assets/${assetId}/upload`, {
     token: s.adminToken,
-    form,
+    rawBody: bytes,
+    rawHeaders: { "X-File-Name": encodeURIComponent(filename) },
   });
   assertEquals(upload.status, 201);
   const version = upload.body!.version as Body;
@@ -489,7 +495,6 @@ async function p05Assets() {
     "image",
     PNG_1X1,
     "hero.png",
-    "image/png",
   );
   s.heroAssetId = hero.assetId;
   s.heroVersionId = hero.versionId;
@@ -521,16 +526,14 @@ async function p05Assets() {
 
   // Audio (via the dedicated audio upload: ffprobe analysis when available)
   const wav = makeWav(2);
-  const audioForm = new FormData();
-  audioForm.append(
-    "file",
-    new File([wav as unknown as BlobPart], "music.wav", { type: "audio/wav" }),
-  );
-  audioForm.append("display_name", "Score");
-  audioForm.append("project_id", s.projectId);
   const audio = await api("POST", "/api/v1/audio/upload", {
     token: s.adminToken,
-    form: audioForm,
+    rawBody: wav,
+    rawHeaders: {
+      "X-File-Name": encodeURIComponent("music.wav"),
+      "X-Display-Name": encodeURIComponent("Score"),
+      "X-Project-Id": encodeURIComponent(s.projectId),
+    },
   });
   assertEquals(audio.status, 201);
   s.musicAssetId = requireField(audio.body!.asset as Body, "id");
@@ -565,7 +568,6 @@ async function p05Assets() {
     "video",
     makeFakeMp4(),
     "plate.mp4",
-    "video/mp4",
   );
   s.videoAssetId = video.assetId;
   s.videoVersionId = video.versionId;

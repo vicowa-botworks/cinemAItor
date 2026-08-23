@@ -1,7 +1,7 @@
 import { join } from "@std/path";
 import { badRequest } from "@cinemaItor/errors.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
-import { sha256File } from "./checksums.ts";
+import { Sha256, sha256File } from "./checksums.ts";
 import { contentAddressedPath, ensureLayout, type StorageLayout } from "./paths.ts";
 
 let sharedStore: ContentStore | undefined;
@@ -77,37 +77,92 @@ export class ContentStore {
     try {
       await copyFileSafe(sourcePath, tempPath);
       const hash = await sha256File(tempPath);
-      const existingPath = findStoredPath(this.layout, hash) ??
-        (fileExists(contentAddressedPath(this.layout, hash, ext))
-          ? contentAddressedPath(this.layout, hash, ext)
-          : undefined);
-      if (existingPath) {
-        return {
-          hash,
-          path: existingPath,
-          size: stat.size,
-          filename,
-          reused: true,
-        };
-      }
-
-      const finalPath = contentAddressedPath(this.layout, hash, ext);
-      await Deno.mkdir(join(layoutMediaDir(this.layout, hash)), {
-        recursive: true,
-      });
-      // An atomic move on the same filesystem, so no partial files can be
-      // observed.
-      await Deno.rename(tempPath, finalPath);
-      return {
-        hash,
-        path: finalPath,
-        size: stat.size,
-        filename,
-        reused: false,
-      };
+      return this.#finalize(tempPath, hash, stat.size, filename, ext);
     } finally {
       await Deno.remove(tempPath).catch(() => {});
     }
+  }
+
+  /**
+   * Store a file streamed from a request body (chunked, constant memory).
+   * Bytes are written to a temp file in the media root while the SHA-256 is
+   * updated incrementally; nothing larger than a single chunk is ever held
+   * in memory. Enforces maxBytes on the streamed size (independent of any
+   * declared Content-Length) and rejects empty uploads.
+   */
+  async putStream(
+    source: ReadableStream<Uint8Array>,
+    filename: string,
+    maxBytes: number,
+  ): Promise<StoredFile> {
+    const ext = extensionOf(filename);
+    const tempPath = join(
+      this.#layout.media,
+      `.tmp-upload-${crypto.randomUUID()}`,
+    );
+    const stream = new Sha256();
+    let total = 0;
+    try {
+      const file = await Deno.open(tempPath, { write: true, create: true });
+      const reader = source.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value || value.length === 0) continue;
+          total += value.length;
+          if (total > maxBytes) {
+            throw badRequest(
+              `Upload exceeds the maximum size of ${maxBytes} bytes`,
+            );
+          }
+          stream.update(value);
+          await file.write(value);
+        }
+      } finally {
+        reader.releaseLock();
+        file.close();
+      }
+      if (total === 0) throw badRequest("file is required");
+      return this.#finalize(tempPath, stream.digestHex(), total, filename, ext);
+    } finally {
+      await Deno.remove(tempPath).catch(() => {});
+    }
+  }
+
+  #finalize(
+    tempPath: string,
+    hash: string,
+    size: number,
+    filename: string,
+    ext: string,
+  ): StoredFile {
+    const existingPath = findStoredPath(this.layout, hash) ??
+      (fileExists(contentAddressedPath(this.layout, hash, ext))
+        ? contentAddressedPath(this.layout, hash, ext)
+        : undefined);
+    if (existingPath) {
+      return {
+        hash,
+        path: existingPath,
+        size,
+        filename,
+        reused: true,
+      };
+    }
+
+    const finalPath = contentAddressedPath(this.layout, hash, ext);
+    Deno.mkdirSync(join(layoutMediaDir(this.layout, hash)), { recursive: true });
+    // An atomic move on the same filesystem, so no partial files can be
+    // observed.
+    Deno.renameSync(tempPath, finalPath);
+    return {
+      hash,
+      path: finalPath,
+      size,
+      filename,
+      reused: false,
+    };
   }
 }
 

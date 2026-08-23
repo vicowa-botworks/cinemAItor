@@ -74,7 +74,7 @@ app-root (main router)
 ├── asset-list (global library + per-project via #/project/:id/assets)
 │   ├── asset-card (tile with lazy blob-preview thumbnail)
 │   ├── asset-form (create metadata-only asset)
-│   └── asset-upload (create + multipart file upload → first version)
+│   └── asset-upload (create + raw-bytes streaming file upload → first version)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
   │   │              version A/B compare (two versions side by side: synced play + metadata diff,
   │   │              see compare.js),
@@ -342,6 +342,10 @@ gone; the tables remain for backward compatibility of existing databases. v1 pro
 
 - **Password hashing**: PBKDF2 with SHA-256, 100,000 iterations, 16-byte random salt
 - **JWT**: HMAC-SHA256, 7-day expiry, stored in localStorage
+- **Auth rate limiting**: fixed-window limiter (`services/rate_limit.ts`, in-memory buckets keyed by
+  client IP + endpoint; `AUTH_RATE_LIMIT_MAX` default 20/`AUTH_RATE_LIMIT_WINDOW_SECONDS` default
+  60s) guards bootstrap/login/register (v1 + legacy) and rejects excess attempts with `429` +
+  `Retry-After`
 - **SQL**: All queries use parameterized statements (no string concatenation)
 - **CORS**: Restricted to `http://localhost:8124` in development
 - **Data isolation**: All v1 queries are permission-gated (see Authorization above), enforced in the

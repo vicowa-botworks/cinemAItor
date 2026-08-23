@@ -1,6 +1,7 @@
 import { closeDb, getDb } from "../../src/db/database.ts";
 import { createApp } from "../../src/server.ts";
 import { loadConfig } from "../../src/config.ts";
+import { resetRateLimiter } from "../../src/services/rate_limit.ts";
 
 // Ensure JWT_SECRET is set for tests (config.ts requires it at load time)
 if (!Deno.env.get("JWT_SECRET")) {
@@ -10,6 +11,7 @@ if (!Deno.env.get("JWT_SECRET")) {
 export function freshMemoryDb(): void {
   closeDb();
   getDb(":memory:");
+  resetRateLimiter();
 }
 
 export async function fetchWithRetry(
