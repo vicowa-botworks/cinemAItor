@@ -401,6 +401,17 @@ class ApiClient {
     });
   }
 
+  requestModelBenchmark(id) {
+    return this.request(`/models/${encodeURIComponent(id)}/benchmark`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  getModelBenchmarks(id) {
+    return this.request(`/models/${encodeURIComponent(id)}/benchmarks`);
+  }
+
   getModelsHardware() {
     return this.request("/models/hardware");
   }

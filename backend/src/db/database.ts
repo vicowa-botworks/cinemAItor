@@ -39,6 +39,7 @@ const ALL_TABLES = [
   "models",
   "generation_jobs",
   "job_events",
+  "model_benchmarks",
   "storyboards",
   "storyboard_panels",
   "scenes",

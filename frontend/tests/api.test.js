@@ -368,6 +368,14 @@ describe("ApiClient", () => {
       await api.getModelsHardware();
       assertEquals(captured[0].url, "/api/v1/models/hardware");
     });
+
+    it("benchmark endpoints hit the model benchmark subpaths", async () => {
+      await api.requestModelBenchmark("m 1");
+      await api.getModelBenchmarks("m 1");
+      assertEquals(captured[0].url, "/api/v1/models/m%201/benchmark");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(captured[1].url, "/api/v1/models/m%201/benchmarks");
+    });
   });
 
   describe("v1 job endpoints", () => {
