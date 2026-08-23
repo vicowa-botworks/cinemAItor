@@ -26,7 +26,13 @@ import { ensureLayout } from "@cinemaItor/storage/paths.ts";
 import { type JobRunner, startJobRunner } from "@cinemaItor/services/job_runner.ts";
 import { type RenderRunner, startRenderRunner } from "@cinemaItor/services/render_runner.ts";
 
-const CORS_ORIGINS = ["http://localhost:8124"];
+function corsOriginsFromEnv(): string[] {
+  const raw = Deno.env.get("CORS_ORIGINS") ?? "";
+  const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return origins.length > 0 ? origins : ["http://localhost:8124"];
+}
+
+const CORS_ORIGINS = corsOriginsFromEnv();
 const CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 const CORS_HEADERS = ["Content-Type", "Authorization"];
 

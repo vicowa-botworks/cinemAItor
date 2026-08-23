@@ -1,0 +1,13 @@
+.git
+.github
+backend/app_data
+backend/cinemaItor.db
+backend/tests
+frontend/tests
+frontend/*.md
+*.md
+Dockerfile
+docker-compose.yml
+docs
+dev.ts
+tmp
