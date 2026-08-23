@@ -94,6 +94,9 @@ app-root (main router)
 ├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
 │   │            clip playback, embedded audio generation)
 ├── review-board (job candidate comparison; approve / reject / shortlist + notes)
+├── skills-list (v1 skill system: list, create/edit JSON definitions, version history,
+│    enable/disable, delete; run form (project + inputs) with live WebSocket job events +
+│    poll-to-terminal run history showing per-step job ids)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
 ├── timeline-detail (tracks with lock/mute + mixer gain + ducking + swap reorder,
 │   │               clip/text placement via
@@ -180,10 +183,16 @@ server.ts (entry point)
  │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; runner
  │   │   links preview/clip outputs back to panels and shots
  │   └── (see docs/storyboards.md)
- ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
- │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes
- │   └── (see docs/review.md)
-  ├── Audio routes (/api/v1/audio/*, auth middleware, asset write permission)
+  ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
+  │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes
+  │   └── (see docs/review.md)
+  ├── Skill routes (/api/v1/skills/*, auth middleware, project write gate on runs)
+  │   ├── CRUD + enable/disable toggle + immutable version history (WS 14 v1, JSON definitions)
+  │   ├── POST /:id/run — resolves typed inputs, expands the placeholders, enqueues one
+  │   │   generation job per step (all-or-nothing pre-flight); runs settle lazily on read.
+  │   │   (running → succeeded/failed from step job states)
+  │   └── (see docs/skills.md)
+   ├── Audio routes (/api/v1/audio/*, auth middleware, asset write permission)
   │   ├── Generation (AUD-009/010/011): POST /generate — music/voiceover/sfx from prompt
   │   │   (kind → task type music/voice/audio), fresh audio asset per call, job queue + review
   │   ├── Upload + versioning for audio assets (wav/mp3/flac/ogg/m4a/aac)
@@ -244,6 +253,9 @@ server.ts (entry point)
 - `assets.ts`: Asset/alias/tag/version repository + asset permission checks
 - `templates.ts`: Global project templates — structure parsing/validation, list/get, and
   `applyTemplateStructure` (creates the starting timeline + tracks with compensation)
+- `skills.ts`: Skill system v1 repository — definition parse/validation, CRUD, version snapshots,
+  runs, and idempotent `seedSystemSkills`; `skill_engine.ts` (services) resolves typed inputs,
+  expands placeholders and enqueues one generation job per step (see `docs/skills.md`)
 
 ### Storage layer:
 

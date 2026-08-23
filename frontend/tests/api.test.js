@@ -748,6 +748,80 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("v1 skill endpoints", () => {
+    it("listSkills hits the skills index", async () => {
+      await api.listSkills();
+      assertEquals(captured[0].url, "/api/v1/skills");
+    });
+
+    it("createSkill posts id and definition", async () => {
+      await api.createSkill("my-score", { name: "My Score", steps: [] });
+      assertEquals(captured[0].url, "/api/v1/skills");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.id, "my-score");
+      assertEquals(body.definition.name, "My Score");
+    });
+
+    it("updateSkill puts the definition on the skill path", async () => {
+      await api.updateSkill("my-score", { name: "v2", inputs: {} });
+      assertEquals(captured[0].url, "/api/v1/skills/my-score");
+      assertEquals(captured[0].options.method, "PUT");
+      assertEquals(JSON.parse(captured[0].options.body).definition.name, "v2");
+    });
+
+    it("toggleSkill posts the enabled flag", async () => {
+      await api.toggleSkill("my-score", false);
+      assertEquals(captured[0].url, "/api/v1/skills/my-score/toggle");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).enabled, false);
+    });
+
+    it("deleteSkill deletes the skill path", async () => {
+      await api.deleteSkill("my-score");
+      assertEquals(captured[0].url, "/api/v1/skills/my-score");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("listSkillVersions hits the versions subpath", async () => {
+      await api.listSkillVersions("my-score");
+      assertEquals(captured[0].url, "/api/v1/skills/my-score/versions");
+    });
+
+    it("runSkill posts project and inputs", async () => {
+      await api.runSkill("my-score", {
+        projectId: "p-1",
+        inputs: { mood: "tense" },
+      });
+      assertEquals(captured[0].url, "/api/v1/skills/my-score/run");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.project_id, "p-1");
+      assertEquals(body.inputs.mood, "tense");
+    });
+
+    it("runSkill omits inputs when not provided", async () => {
+      await api.runSkill("my-score", { projectId: "p-1" });
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.inputs, {});
+    });
+
+    it("listSkillRuns builds query params from filters", async () => {
+      await api.listSkillRuns("my-score", { projectId: "p-1" });
+      assertEquals(captured[0].url, "/api/v1/skills/my-score/runs?project_id=p-1");
+    });
+
+    it("listSkillRuns with no filter omits the query string", async () => {
+      await api.listSkillRuns("my-score");
+      assertEquals(captured[0].url, "/api/v1/skills/my-score/runs");
+    });
+
+    it("getSkillRun hits the run subpath", async () => {
+      await api.getSkillRun("my-score", "run-1");
+      assertEquals(captured[0].url, "/api/v1/skills/my-score/runs/run-1");
+    });
+  });
+
   describe("v1 diagnostics endpoints", () => {
     it("report getters hit the report subpaths", async () => {
       await api.getDiagnosticsHardware();

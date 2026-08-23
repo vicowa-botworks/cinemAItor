@@ -311,14 +311,37 @@ The product track follows `MASTER-PLAN.md`.
       removes the half-built timeline (and the project) if materialization fails. The create form
       offers a template picker (create-mode only) and the project detail page shows the project's
       template name; 9 new backend test steps
+- [x] Skill System v1 (Workstream 14, SKL-001/002/003/005/006/007/008): named, versioned JSON
+      workflows that chain media-generation jobs — definition is JSON, never code. Migration
+      `0019_skill_system.sql` adds `skills` (stable slug id, JSON definition, enabled, soft delete,
+      `sys-` id prefix reserved), `skill_versions` (immutable snapshot per defining edit with a new
+      `version` string) and `skill_runs` (resolved inputs + one job link per step). Definitions
+      parse strictly (400 with a precise message): typed inputs (`string | number | boolean`) with
+      `required`/`default`, ≤16 steps of type `music | voiceover | sfx`, `{{ input }}` prompt
+      placeholders that must reference declared inputs, optional per-step `model_id` / `seed` pins.
+      `POST /api/v1/skills/:id/run` is all-or-nothing — it resolves + validates every input and
+      resolves each step's model (pin or first enabled model of the step's task type) before queuing
+      — then enqueues one generation job per step through the shared audio-generation path (fresh
+      per-step audio asset, so outputs are reviewable in the job monitor and review board). Runs
+      start `running` and settle lazily on read (`succeeded` only when every step job succeeded,
+      else `failed` with the first error text), so no background watcher is needed; live per-step
+      status rides the existing `/ws/v1/jobs` feed. System skills (`sys-tense-score`,
+      `sys-foley-pass`) are seeded idempotently by `seedSystemSkills()` at bootstrap (definitions in
+      `src/db/skills.ts`, not in the migration) and are visible to everyone, updatable/toggleable by
+      admins only, and undeletable (admins included). Frontend `#/skills` (skills-list): list,
+      create (id + JSON definition textarea, server errors verbatim), edit (JSON definition
+      textarea), enable/disable toggle, delete (user skills only) and a run form (project picker +
+      one field per declared input seeded from defaults) whose run history updates on live WebSocket
+      job events plus a 2.5 s poll to terminal state, showing per-step job ids; 23 new backend test
+      steps, 12 new frontend API client test steps
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: skills (JSON/YAML v1),
-      advanced storage management, audio cleanup, subtitle generation from dialogue/voiceover, A/B +
-      version comparison improvements, model benchmark
+- [ ] Workstream 14 (Professional Workflow Expansion, Milestone 7) remaining: advanced storage
+      management, audio cleanup, subtitle generation from dialogue/voiceover, A/B + version
+      comparison improvements, model benchmark
 - [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
 
 ### Known Issues

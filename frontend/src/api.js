@@ -843,6 +843,69 @@ class ApiClient {
     });
   }
 
+  // --- Skills ---------------------------------------------------------------
+
+  listSkills() {
+    return this.request("/skills");
+  }
+
+  getSkill(id) {
+    return this.request(`/skills/${encodeURIComponent(id)}`);
+  }
+
+  createSkill(id, definition) {
+    return this.request("/skills", {
+      method: "POST",
+      body: JSON.stringify({ id, definition }),
+    });
+  }
+
+  updateSkill(id, definition) {
+    return this.request(`/skills/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ definition }),
+    });
+  }
+
+  toggleSkill(id, enabled) {
+    return this.request(`/skills/${encodeURIComponent(id)}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  deleteSkill(id) {
+    return this.request(`/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  listSkillVersions(id) {
+    return this.request(`/skills/${encodeURIComponent(id)}/versions`);
+  }
+
+  runSkill(id, { projectId, inputs } = {}) {
+    return this.request(`/skills/${encodeURIComponent(id)}/run`, {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: projectId,
+        inputs: inputs ?? {},
+      }),
+    });
+  }
+
+  listSkillRuns(id, { projectId } = {}) {
+    return this.request(
+      `/skills/${encodeURIComponent(id)}/runs${
+        this._query(projectId ? { project_id: projectId } : {})
+      }`,
+    );
+  }
+
+  getSkillRun(id, runId) {
+    return this.request(
+      `/skills/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`,
+    );
+  }
+
   listBackups() {
     return this.request("/diagnostics/backups");
   }

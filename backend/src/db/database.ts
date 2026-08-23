@@ -60,6 +60,9 @@ const ALL_TABLES = [
   "audit_logs",
   "projects",
   "users",
+  "skills",
+  "skill_versions",
+  "skill_runs",
 ];
 
 export function resetDb(): void {

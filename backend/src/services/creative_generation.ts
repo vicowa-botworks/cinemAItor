@@ -329,7 +329,7 @@ export function batchGenerateScene(
 export const AUDIO_GENERATION_KINDS = ["music", "voiceover", "sfx"] as const;
 export type AudioGenerationKind = (typeof AUDIO_GENERATION_KINDS)[number];
 
-const AUDIO_KIND_TASK_TYPES: Record<AudioGenerationKind, string> = {
+export const AUDIO_KIND_TASK_TYPES: Record<AudioGenerationKind, string> = {
   music: "music",
   voiceover: "voice",
   sfx: "audio",
