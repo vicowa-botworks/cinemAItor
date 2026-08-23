@@ -746,6 +746,21 @@ describe("ApiClient", () => {
         "/api/v1/audio/assets/a-1/versions/v-1/waveform",
       );
     });
+
+    it("cleanupAudioVersion posts operations to the cleanup subpath", async () => {
+      await api.cleanupAudioVersion("a-1", "v-1", {
+        denoise: true,
+        normalize: true,
+      });
+      assertEquals(
+        captured[0].url,
+        "/api/v1/audio/assets/a-1/versions/v-1/cleanup",
+      );
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.denoise, true);
+      assertEquals(body.normalize, true);
+    });
   });
 
   describe("v1 skill endpoints", () => {

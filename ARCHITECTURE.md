@@ -75,9 +75,10 @@ app-root (main router)
 │   ├── asset-card (tile with lazy blob-preview thumbnail)
 │   ├── asset-form (create metadata-only asset)
 │   └── asset-upload (create + multipart file upload → first version)
-├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
-│   │              audio adjustments (waveform + trim/gain for audio assets),
-│   │              tags, aliases, delete)
+ ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
+ │   │              audio adjustments (waveform + trim/gain for audio assets),
+ │   │              audio cleanup (denoise/normalize → new version, AUD-012),
+ │   │              tags, aliases, delete)
 ├── prompt-editor (Prompt Studio: versioned prompts per scope, live @slug reference
 │   │              parsing with status badges, asset picker, history view/restore)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
@@ -199,8 +200,11 @@ server.ts (entry point)
   │   ├── Upload + versioning for audio assets (wav/mp3/flac/ogg/m4a/aac)
  │   ├── Optional ffprobe/ffmpeg analysis: duration, sample rate, channels,
  │   │   200-bucket waveform (no-ffmpeg fallback keeps uploads working)
- │   ├── Non-destructive trim/gain adjustments (applied at render time); waveform endpoint
- │   └── (see docs/audio.md)
+  │   ├── Non-destructive trim/gain adjustments (applied at render time); waveform endpoint
+  │   ├── Cleanup (AUD-012): POST /:id/versions/:versionId/cleanup — model-less
+  │   │   `audio_cleanup` job (ffmpeg denoise + EBU R128 normalize, mock fallback) producing
+  │   │   a new non-active version with cleanup provenance
+  │   └── (see docs/audio.md)
  ├── Timeline routes (/api/v1/timelines/*, auth middleware, project-permission gated)
   │   ├── Timelines + typed tracks (swap reorder, lock/mute, mixer gain_db, duck_db) + placed items (move/trim/
   │   │   speed/transform/fades/transitions/color grade), text overlays (text/subtitle

@@ -71,6 +71,9 @@ export interface JobEvent {
 /** Job type for queued proxy/media processing (no model involved). */
 export const PROXY_JOB_TYPE = "proxy";
 
+/** Job type for audio cleanup passes (denoise/normalize; no model involved). */
+export const AUDIO_CLEANUP_JOB_TYPE = "audio_cleanup";
+
 export interface CreateJobInput {
   project_id?: string;
   asset_id?: string;
@@ -218,8 +221,8 @@ export function listJobEvents(jobId: string): JobEvent[] {
 }
 
 export function createJob(userId: number, input: CreateJobInput): GenerationJob {
-  if (input.job_type === PROXY_JOB_TYPE) {
-    // Proxy jobs run the ffmpeg media engine directly; no model involved.
+  if (input.job_type === PROXY_JOB_TYPE || input.job_type === AUDIO_CLEANUP_JOB_TYPE) {
+    // Media-engine jobs run ffmpeg directly; no model involved.
   } else {
     if (
       !MODEL_TASK_TYPES.includes(
@@ -227,7 +230,9 @@ export function createJob(userId: number, input: CreateJobInput): GenerationJob 
       )
     ) {
       throw badRequest(
-        `job_type must be one of: ${MODEL_TASK_TYPES.join(", ")} or ${PROXY_JOB_TYPE}`,
+        `job_type must be one of: ${
+          MODEL_TASK_TYPES.join(", ")
+        } or ${PROXY_JOB_TYPE} or ${AUDIO_CLEANUP_JOB_TYPE}`,
       );
     }
     if (!input.model_id) throw badRequest("model_id is required");

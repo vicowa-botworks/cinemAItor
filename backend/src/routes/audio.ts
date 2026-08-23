@@ -12,7 +12,14 @@ import {
   listAssets,
 } from "@cinemaItor/db/assets.ts";
 import { getDb } from "@cinemaItor/db/database.ts";
-import { getAudioVersion, setAudioAdjustments, setAudioAnalysis } from "@cinemaItor/db/audio.ts";
+import {
+  AUDIO_ASSET_TYPES,
+  type AudioAssetType,
+  getAudioVersion,
+  isAudioAssetType,
+  setAudioAdjustments,
+  setAudioAnalysis,
+} from "@cinemaItor/db/audio.ts";
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
 import { mediaTypeFor } from "@cinemaItor/storage/media_types.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
@@ -28,6 +35,7 @@ import {
   type AudioGenerationKind,
   generateAudio,
 } from "@cinemaItor/services/creative_generation.ts";
+import { requestAudioCleanup } from "@cinemaItor/services/audio_cleanup.ts";
 import {
   badRequest,
   forbidden,
@@ -35,13 +43,6 @@ import {
   serviceUnavailable,
   unauthorized,
 } from "@cinemaItor/errors.ts";
-
-const AUDIO_TYPES = ["audio", "music", "sfx", "voiceover", "ambience"] as const;
-type AudioType = (typeof AUDIO_TYPES)[number];
-
-function isAudioType(value: string): value is AudioType {
-  return (AUDIO_TYPES as readonly string[]).includes(value);
-}
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -82,11 +83,11 @@ async function saveUpload(
   return { stored, tempPath };
 }
 
-function audioTypeFromFormData(formData: FormData): AudioType {
+function audioTypeFromFormData(formData: FormData): AudioAssetType {
   const raw = formData.get("asset_type");
   const value = typeof raw === "string" && raw ? raw : "audio";
-  if (!isAudioType(value)) {
-    throw badRequest(`asset_type must be one of: ${AUDIO_TYPES.join(", ")}`);
+  if (!isAudioAssetType(value)) {
+    throw badRequest(`asset_type must be one of: ${AUDIO_ASSET_TYPES.join(", ")}`);
   }
   return value;
 }
@@ -103,10 +104,10 @@ export const audioRouter = new Router()
     const search = ctx.request.url as unknown as URL;
     const params = search.searchParams;
     const assetType = params.get("asset_type") ?? undefined;
-    let assetTypes: string[] = AUDIO_TYPES as unknown as string[];
+    let assetTypes: string[] = AUDIO_ASSET_TYPES as unknown as string[];
     if (assetType) {
-      if (!isAudioType(assetType)) {
-        throw badRequest(`asset_type must be one of: ${AUDIO_TYPES.join(", ")}`);
+      if (!isAudioAssetType(assetType)) {
+        throw badRequest(`asset_type must be one of: ${AUDIO_ASSET_TYPES.join(", ")}`);
       }
       assetTypes = [assetType];
     }
@@ -217,7 +218,7 @@ export const audioRouter = new Router()
     const userId = requireUserId(ctx);
     const asset = getAssetById(param(ctx, "id"));
     if (!asset || asset.status === "deleted") throw notFound("Asset not found");
-    if (!isAudioType(asset.asset_type)) {
+    if (!isAudioAssetType(asset.asset_type)) {
       throw badRequest(`Asset '@${asset.unique_slug}' is not an audio asset`);
     }
     const body = ctx.request.body;
@@ -321,6 +322,22 @@ export const audioRouter = new Router()
       };
     },
   )
+  .post(
+    "/api/v1/audio/assets/:id/versions/:versionId/cleanup",
+    authMiddleware,
+    async (ctx, _next) => {
+      const userId = requireUserId(ctx);
+      const raw = await readOptionalBody(ctx);
+      const result = requestAudioCleanup(
+        userId,
+        param(ctx as ParamsContext, "id"),
+        param(ctx as ParamsContext, "versionId"),
+        raw,
+      );
+      ctx.response.status = 202;
+      ctx.response.body = result;
+    },
+  )
   .get(
     "/api/v1/audio/assets/:id/versions/:versionId/waveform",
     authMiddleware,
@@ -336,7 +353,7 @@ function waveformHandler(ctx: Context): Promise<void> {
     const userId = requireUserId(ctx);
     const asset = getAssetById(param(ctx as ParamsContext, "id"));
     if (!asset || asset.status === "deleted") throw notFound("Asset not found");
-    if (!isAudioType(asset.asset_type)) {
+    if (!isAudioAssetType(asset.asset_type)) {
       throw badRequest(`Asset '@${asset.unique_slug}' is not an audio asset`);
     }
     const view = getAudioVersion(param(ctx as ParamsContext, "versionId"));
