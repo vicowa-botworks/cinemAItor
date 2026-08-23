@@ -158,16 +158,27 @@ describe("ApiClient", () => {
       assertEquals(captured[0].options.method, "DELETE");
     });
 
-    it("uploadAsset posts a multipart body without JSON content type", async () => {
+    it("uploadAsset posts the raw file body with metadata headers", async () => {
       const file = new File(["bytes"], "a.png", { type: "image/png" });
       await api.uploadAsset("a-1", file, "first take");
       const { url, options } = captured[0];
       assertEquals(url, "/api/v1/assets/a-1/upload");
       assertEquals(options.method, "POST");
-      assert(options.body instanceof FormData);
-      assertEquals(options.body.get("file"), file);
-      assertEquals(options.body.get("notes"), "first take");
-      assertEquals(options.headers["Content-Type"], undefined);
+      assert(options.body instanceof Blob);
+      assertEquals(options.headers["Content-Type"], "application/octet-stream");
+      assertEquals(options.headers["X-File-Name"], encodeURIComponent("a.png"));
+      assertEquals(
+        options.headers["X-Upload-Notes"],
+        encodeURIComponent("first take"),
+      );
+    });
+
+    it("uploadAsset omits the notes header when no notes are given", async () => {
+      const file = new File(["bytes"], "b.png", { type: "image/png" });
+      await api.uploadAsset("a-1", file);
+      const { options } = captured[0];
+      assertEquals(options.headers["X-Upload-Notes"], undefined);
+      assertEquals(options.headers["X-File-Name"], encodeURIComponent("b.png"));
     });
 
     it("listAssetVersions requests /api/v1/assets/:id/versions", async () => {

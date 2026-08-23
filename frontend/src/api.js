@@ -25,7 +25,11 @@ class ApiClient {
 
   async request(path, options = {}, base = V1_BASE) {
     const headers = { ...options.headers };
-    if (options.body !== undefined && !(options.body instanceof FormData)) {
+    if (
+      options.body !== undefined &&
+      !(options.body instanceof FormData) &&
+      !(options.body instanceof Blob)
+    ) {
       headers["Content-Type"] = "application/json";
     }
 
@@ -183,14 +187,19 @@ class ApiClient {
   }
 
   async uploadAsset(id, file, notes) {
-    const form = new FormData();
-    form.append("file", file);
+    // Raw-bytes streaming upload: the file IS the request body (nothing is
+    // buffered server-side). Metadata travels percent-encoded in headers.
+    const headers = {
+      "Content-Type": "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name ?? "upload.bin"),
+    };
     if (notes) {
-      form.append("notes", notes);
+      headers["X-Upload-Notes"] = encodeURIComponent(notes);
     }
     return this.request(`/assets/${encodeURIComponent(id)}/upload`, {
       method: "POST",
-      body: form,
+      body: file,
+      headers,
     });
   }
 

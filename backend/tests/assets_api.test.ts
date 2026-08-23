@@ -87,13 +87,16 @@ function upload(
   filename: string,
   notes?: string,
 ): Promise<Response> {
-  const fd = new FormData();
-  fd.append("file", new Blob([bytes], { type: "image/png" }), filename);
-  if (notes) fd.append("notes", notes);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/octet-stream",
+    "X-File-Name": encodeURIComponent(filename),
+  };
+  if (notes) headers["X-Upload-Notes"] = encodeURIComponent(notes);
   return fetch(`${baseUrl}/api/v1/assets/${assetId}/upload`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: fd,
+    headers,
+    body: bytes,
   });
 }
 
@@ -282,6 +285,73 @@ describe("assets api", () => {
         const versions = await get(`/api/v1/assets/${created.id}/versions`, ownerToken);
         const versionList = (await versions.json()) as { version_number: number }[];
         assertEquals(versionList.map((v) => v.version_number), [2, 1]);
+      })();
+    });
+  });
+
+  it("streams large uploads in chunks without buffering the body", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const slug = uniqueSlug("big");
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            { unique_slug: slug, display_name: "Big", asset_type: "prop" },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        const size = 3 * 1024 * 1024;
+        const big = new Uint8Array(size);
+        for (let i = 0; i < size; i++) big[i] = (i * 7) & 0xff;
+
+        const up = await upload(created.id, ownerToken, big, "big.bin");
+        assertEquals(up.status, 201);
+        const upBody = (await up.json()) as {
+          version: { id: string; file_size: number };
+        };
+        assertEquals(upBody.version.file_size, size);
+
+        const preview = await get(
+          `/api/v1/assets/${created.id}/preview`,
+          ownerToken,
+        );
+        assertEquals(preview.status, 200);
+        const stored = new Uint8Array(await preview.arrayBuffer());
+        assertEquals(stored.length, size);
+        assertEquals(stored[0], big[0]);
+        assertEquals(stored[size >> 1], big[size >> 1]);
+        assertEquals(stored[size - 1], big[size - 1]);
+      })();
+    });
+  });
+
+  it("rejects uploads that exceed UPLOAD_MAX_SIZE", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const slug = uniqueSlug("over");
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            { unique_slug: slug, display_name: "Over", asset_type: "prop" },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        Deno.env.set("UPLOAD_MAX_SIZE", "1024");
+        try {
+          const tooBig = new Uint8Array(2048).fill(1);
+          const up = await upload(created.id, ownerToken, tooBig, "over.bin");
+          assertEquals(up.status, 400);
+        } finally {
+          Deno.env.delete("UPLOAD_MAX_SIZE");
+        }
+
+        const ok = new Uint8Array(512).fill(2);
+        const up = await upload(created.id, ownerToken, ok, "small.bin");
+        assertEquals(up.status, 201);
       })();
     });
   });

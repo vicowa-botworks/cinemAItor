@@ -5,7 +5,8 @@
 migration through phase 7 — audio generation + waveforms, the diagnostics panel, skill system v1,
 project templates, advanced storage management, audio cleanup (denoise/normalize), subtitle
 generation (voiceover/dialogue → SRT), the model benchmark and A/B + version comparison shipped,
-legacy demo surface removed)
+production hardening (auth rate limiting, chunked upload streaming) shipped, legacy demo surface
+removed)
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -114,12 +115,12 @@ The product track follows `MASTER-PLAN.md`.
       becomes the default route; legacy movie demo views remain until the phase 7 cleanup
 - [x] Frontend phase 2 (asset library UI, MASTER-PLAN §15.3): `#/assets` global library plus
       per-project `#/project/:id/assets` (linked from project detail); asset cards with lazy
-      blob-preview thumbnails; create (metadata-only asset) and upload (multipart `POST /upload`
-      producing the first version) flows with auto-slugification, type/scope/project selection and
-      version notes; list filters (search, scope, type, status, tag) mapped to the v1 query params;
-      asset detail with image/video/audio blob preview, master/proxy switch + proxy regeneration,
-      metadata editing, new-version upload, version history with restore, tag and alias management,
-      soft delete
+      blob-preview thumbnails; create (metadata-only asset) and upload (raw-bytes streaming
+      `POST /upload` producing the first version) flows with auto-slugification, type/scope/project
+      selection and version notes; list filters (search, scope, type, status, tag) mapped to the v1
+      query params; asset detail with image/video/audio blob preview, master/proxy switch + proxy
+      regeneration, metadata editing, new-version upload, version history with restore, tag and
+      alias management, soft delete
 - [x] Frontend phase 3 (MASTER-PLAN §15.3): prompt studio (`#/prompts`) with versioned editing per
       scope (history view + restore, duplicate detection notice), live `@slug` / `@slug:vN`
       reference parsing with per-token status badges, asset picker that inserts references at the
@@ -418,17 +419,30 @@ The product track follows `MASTER-PLAN.md`.
       gained a `docker build` job. Verified by a container smoke: health, bootstrap, login, and a
       token surviving both `docker restart` and container recreation on the same volume; `docker`
       healthcheck reports healthy.
+- [x] Production hardening (closing both tracked Known Issues): auth rate limiting — a fixed-window
+      in-memory limiter (`services/rate_limit.ts` + `middleware/rate_limit.ts`) guards
+      bootstrap/login/register (v1 + legacy paths), keyed by client IP (`x-forwarded-for` first hop,
+      `remoteAddr` fallback) + endpoint, `AUTH_RATE_LIMIT_MAX` (default 20) per
+      `AUTH_RATE_LIMIT_WINDOW_SECONDS` (default 60s), excess attempts get `429` + `Retry-After`; and
+      chunked upload streaming — upload bodies are no longer buffered by the runtime parser: the
+      file bytes are the request body (`Content-Type: application/octet-stream` + percent-encoded
+      `X-File-Name` / `X-Upload-Notes` metadata headers; JSON and other body types are 400),
+      streamed chunk-by-chunk to a temp file in the media root while an incremental SHA-256 runs
+      (constant memory), with the `UPLOAD_MAX_SIZE` cap enforced on the declared `Content-Length`
+      **and** on the streamed size; `ContentStore.putStream` replaces the full-file buffer on all
+      three upload routes (`assets/:id/upload`, `audio/upload`, `audio/assets/:id/versions` raw path
+      — the stored-hash JSON path is unchanged). +10 frontend test steps (218), backend suite covers
+      the limiter (unit + route, 6 steps) and streaming (2 steps); all 357 backend + 218 frontend
+      test steps green
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Production hardening follow-ups (rate limiting, chunked upload streaming — see Known Issues)
 
 ### Known Issues
 
-- [ ] Upload bodies are buffered by the runtime parser (no chunked streaming yet)
-- [ ] No rate limiting on auth endpoints
+(none tracked)
 
 ### Version
 
@@ -443,6 +457,7 @@ The product track follows `MASTER-PLAN.md`.
 - Audio generation (music / voiceover / SFX): Thu Aug 20 2026
 - Batch shot generation: Thu Aug 20 2026
 - Transitions + color grading: Thu Aug 20 2026
+- Production hardening (auth rate limiting + chunked upload streaming): Sun Aug 23 2026
 - Subtitles + text overlays: Thu Aug 20 2026
 - Proxy workflow polish: Thu Aug 20 2026
 - Render draft/final source selection: Thu Aug 20 2026

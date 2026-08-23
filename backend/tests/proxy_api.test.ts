@@ -103,18 +103,14 @@ function makeWav(seconds: number, sampleRate = 8000) {
 }
 
 async function uploadWav(assetId: string, seconds: number): Promise<VersionBody> {
-  const form = new FormData();
-  form.set(
-    "file",
-    new File([makeWav(seconds)], `tone-${seconds}.wav`, {
-      type: "audio/wav",
-    }),
-  );
   const res = await fetch(`${baseUrl}/api/v1/assets/${assetId}/upload`, {
     method: "POST",
-    // No Content-Type header: fetch sets the multipart boundary itself.
-    headers: { Authorization: `Bearer ${ownerToken}` },
-    body: form,
+    headers: {
+      Authorization: `Bearer ${ownerToken}`,
+      "Content-Type": "application/octet-stream",
+      "X-File-Name": encodeURIComponent(`tone-${seconds}.wav`),
+    },
+    body: makeWav(seconds),
   });
   assertEquals(res.status, 201);
   const body = (await res.json()) as { version: VersionBody };

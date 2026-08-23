@@ -63,18 +63,40 @@ function makeWav(seconds: number, sampleRate = 8000) {
   return new Uint8Array(buf);
 }
 
+// Maps test-side field names to the raw-upload header names.
+const HEADER_FIELDS: Record<string, string> = {
+  asset_type: "x-asset-type",
+  display_name: "x-display-name",
+  notes: "x-upload-notes",
+  project_id: "x-project-id",
+};
+
+function rawUploadHeaders(
+  token: string,
+  filename: string,
+  fields: Record<string, string>,
+): Record<string, string> {
+  const h: Record<string, string> = {
+    ...headers(token),
+    "Content-Type": "application/octet-stream",
+    "X-File-Name": encodeURIComponent(filename),
+  };
+  for (const [k, v] of Object.entries(fields)) {
+    const hdr = HEADER_FIELDS[k];
+    if (hdr) h[hdr] = encodeURIComponent(v);
+  }
+  return h;
+}
+
 function uploadAudio(
   token: string,
   wav: Uint8Array<ArrayBuffer>,
   fields: Record<string, string> = {},
 ): Promise<Response> {
-  const fd = new FormData();
-  fd.append("file", new Blob([wav], { type: "audio/wav" }), "track.wav");
-  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
   return fetch(`${baseUrl}/api/v1/audio/upload`, {
     method: "POST",
-    headers: headers(token),
-    body: fd,
+    headers: rawUploadHeaders(token, "track.wav", fields),
+    body: wav,
   });
 }
 
@@ -83,12 +105,10 @@ function uploadFileToAsset(
   asset: string,
   wav: Uint8Array<ArrayBuffer>,
 ): Promise<Response> {
-  const fd = new FormData();
-  fd.append("file", new Blob([wav], { type: "audio/wav" }), "take2.wav");
   return fetch(`${baseUrl}/api/v1/audio/assets/${asset}/versions`, {
     method: "POST",
-    headers: headers(token),
-    body: fd,
+    headers: rawUploadHeaders(token, "take2.wav", {}),
+    body: wav,
   });
 }
 
@@ -218,12 +238,10 @@ describe("audio api", () => {
     await withServer((base) => {
       baseUrl = base;
       return (async () => {
-        const fd = new FormData();
-        fd.append("file", new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }), "pic.png");
         const res = await fetch(`${baseUrl}/api/v1/audio/upload`, {
           method: "POST",
-          headers: headers(ownerToken),
-          body: fd,
+          headers: rawUploadHeaders(ownerToken, "pic.png", {}),
+          body: new Uint8Array([1, 2, 3]),
         });
         assertEquals(res.status, 400);
 
@@ -247,7 +265,7 @@ describe("audio api", () => {
         assertEquals(res.status, 201);
         const uploadedAssetId = body.asset.id;
 
-        // Multipart new version.
+        // Raw-bytes new version.
         const v2 = await uploadFileToAsset(ownerToken, uploadedAssetId, makeWav(0.4));
         assertEquals(v2.status, 201);
         const v2body = (await v2.json()) as { version: VersionBody };

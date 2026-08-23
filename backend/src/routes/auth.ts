@@ -1,6 +1,7 @@
 import { Router } from "@oak/oak/router";
 import type { Context } from "@oak/oak";
 import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
+import { authRateLimitMiddleware } from "@cinemaItor/middleware/rate_limit.ts";
 import { countUsers, createUser, getUserByEmail, getUserById } from "@cinemaItor/db/schema.ts";
 import { hashPassword, verifyPassword } from "@cinemaItor/services/password.ts";
 import { issueSession, revokeSession } from "@cinemaItor/services/sessions.ts";
@@ -152,10 +153,10 @@ function handleMe(ctx: Context): void {
 }
 
 export const router = new Router()
-  .post("/api/v1/auth/bootstrap", handleBootstrap)
-  .post("/api/v1/auth/login", handleLogin)
+  .post("/api/v1/auth/bootstrap", authRateLimitMiddleware, handleBootstrap)
+  .post("/api/v1/auth/login", authRateLimitMiddleware, handleLogin)
   .post("/api/v1/auth/logout", authMiddleware, handleLogout)
   .get("/api/v1/auth/me", authMiddleware, handleMe)
-  .post("/api/auth/register", handleRegister)
-  .post("/api/auth/login", handleLogin)
+  .post("/api/auth/register", authRateLimitMiddleware, handleRegister)
+  .post("/api/auth/login", authRateLimitMiddleware, handleLogin)
   .get("/api/auth/me", authMiddleware, handleMe);

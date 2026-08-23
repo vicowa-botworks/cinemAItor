@@ -552,16 +552,14 @@ describe("audio cleanup: api", () => {
   });
 
   async function uploadWav(): Promise<{ assetId: string; versionId: string }> {
-    const fd = new FormData();
-    fd.append(
-      "file",
-      new Blob([makeWav(0.5)], { type: "audio/wav" }),
-      "take.wav",
-    );
     const res = await fetch(`${baseUrl}/api/v1/audio/upload`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${ownerToken}` },
-      body: fd,
+      headers: {
+        Authorization: `Bearer ${ownerToken}`,
+        "Content-Type": "application/octet-stream",
+        "X-File-Name": encodeURIComponent("take.wav"),
+      },
+      body: makeWav(0.5),
     });
     assertEquals(res.status, 201);
     const json = (await res.json()) as {

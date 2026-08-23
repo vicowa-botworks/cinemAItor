@@ -1,6 +1,5 @@
 import { Router } from "@oak/oak/router";
 import type { Context } from "@oak/oak";
-import { join } from "@std/path";
 import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
 import {
   addAlias,
@@ -28,6 +27,7 @@ import {
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
 import { mediaTypeFor } from "@cinemaItor/storage/media_types.ts";
 import { loadConfig } from "@cinemaItor/config.ts";
+import { readRawUpload } from "@cinemaItor/routes/upload.ts";
 import { queueProxyGeneration } from "@cinemaItor/services/job_runner.ts";
 import {
   clampThumbnailWidth,
@@ -260,50 +260,24 @@ export const assetRouter = new Router()
     const asset = requireAsset(ctx);
     if (!hasAssetPermission(userId, asset.id, "write")) throw forbidden();
 
-    const body = ctx.request.body;
-    if (body.type() !== "form-data") {
-      throw badRequest("Request body must be multipart form data");
-    }
-    const lengthHeader = ctx.request.headers.get("content-length");
-    const declaredSize = lengthHeader ? Number(lengthHeader) : 0;
-    if (declaredSize > loadConfig().uploadMaxBytes) {
-      throw badRequest(
-        `Upload exceeds the maximum size of ${loadConfig().uploadMaxBytes} bytes`,
-      );
-    }
-
-    const formData = await body.formData();
-    const file = formData.get("file");
-    if (!(file instanceof File)) {
-      throw badRequest("file field is required");
-    }
-    const notesField = formData.get("notes");
-    const notes = typeof notesField === "string" && notesField ? notesField : null;
-
-    const store = getContentStore();
-    const tempPath = join(store.layout.cache, `upload-${crypto.randomUUID()}`);
-    try {
-      const buffer = await file.arrayBuffer();
-      await Deno.writeFile(tempPath, new Uint8Array(buffer));
-      const stored = await store.put(tempPath, file.name || "upload.bin");
-      const type = mediaTypeFor(file.name || stored.path);
-      const version = createAssetVersion(asset.id, userId, {
-        content_hash: stored.hash,
-        file_path: stored.path,
-        format: type.format,
-        mime_type: type.mime,
-        file_size: stored.size,
-        notes,
-      });
-      queueProxyGeneration(asset.id, version, userId, asset.project_id);
-      ctx.response.status = 201;
-      ctx.response.body = {
-        asset: assetDetail(getAssetById(asset.id) as Asset),
-        version,
-      };
-    } finally {
-      await Deno.remove(tempPath).catch(() => {});
-    }
+    const maxBytes = loadConfig().uploadMaxBytes;
+    const { stream, filename, notes } = readRawUpload(ctx, maxBytes);
+    const stored = await getContentStore().putStream(stream, filename, maxBytes);
+    const type = mediaTypeFor(filename || stored.path);
+    const version = createAssetVersion(asset.id, userId, {
+      content_hash: stored.hash,
+      file_path: stored.path,
+      format: type.format,
+      mime_type: type.mime,
+      file_size: stored.size,
+      notes,
+    });
+    queueProxyGeneration(asset.id, version, userId, asset.project_id);
+    ctx.response.status = 201;
+    ctx.response.body = {
+      asset: assetDetail(getAssetById(asset.id) as Asset),
+      version,
+    };
   })
   .post("/api/v1/assets/:id/versions", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
