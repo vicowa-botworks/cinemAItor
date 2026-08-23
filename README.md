@@ -60,6 +60,34 @@ The frontend starts on `http://localhost:8124`.
 
 Open `http://localhost:8124` in your browser.
 
+### Running with Docker
+
+The whole stack (backend + frontend + ffmpeg) ships as a single image:
+
+```bash
+docker compose up -d --build
+```
+
+Then open `http://localhost:8124`:
+
+- Port **8124** — UI (frontend static files + `/api` proxy).
+- Port **8123** — backend direct; the browser connects to it for the live job feed (`/ws/v1/jobs`
+  WebSocket).
+- All state (SQLite database, media, generated proxies, the auto-generated JWT secret) lives in the
+  `cinemaitor-data` volume mounted at `/data`.
+
+`JWT_SECRET` is optional: when unset the first start generates one and stores it in the data volume,
+so it stays stable across restarts. Set it explicitly (for example via a root `.env`, see
+`.env.example`) for production deployments. If you serve the UI from another host/port, set
+`CORS_ORIGINS` to a comma-separated list of allowed origins (default: `http://localhost:8124`).
+
+To run without compose:
+
+```bash
+docker build -t cinemaitor .
+docker run -d -p 8124:8124 -p 8123:8123 -v cinemaItor-data:/data --name cinemaitor cinemaitor
+```
+
 ### Development Tasks
 
 ```bash
@@ -96,6 +124,9 @@ cinemAItor/
 │   │   ├── db/           # Database layer
 │   │   └── middleware/   # Auth middleware
 │   └── tests/            # Backend tests
+├── docker/               # Container entrypoint supervisor (production)
+├── Dockerfile            # Single-image deployment (backend + frontend + ffmpeg)
+├── docker-compose.yml    # One-command start with a persistent data volume
 ├── frontend/             # Browser app: vanilla JS + Lit (no build step)
 │   ├── src/
 │   │   ├── app.js        # Main app component

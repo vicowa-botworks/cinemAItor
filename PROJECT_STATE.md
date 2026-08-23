@@ -405,12 +405,25 @@ The product track follows `MASTER-PLAN.md`.
       (field differ), `CompareSync` (multi-player transport with seek mirroring), `isTimeMedia`;
       unit-tested in `frontend/tests/compare.test.js` (25 steps). +1 backend test step (per-version
       preview route), +1 frontend API client test step
+- [x] Docker packaging (FND-013, completing the Milestone 0 exit criterion "Docker or a local
+      install script must work"): single `cinemaitor` image (denoland/deno 2.9.5 + ffmpeg, non-root,
+      cached JSR dependencies + pre-warmed sqlite native lib, so no runtime network needed) running
+      backend + frontend under `docker/entrypoint.ts` — the supervisor auto-generates a `JWT_SECRET`
+      on first start (persisted under `/data`, reusable across container recreation), forwards
+      SIGTERM/SIGINT, and exits non-zero if a child dies on its own. State lives in the `/data`
+      volume (DB, media, proxies, secret); ports 8124 (UI + /api proxy) and 8123 (direct backend,
+      WebSocket `/ws/v1/jobs`) are the public surface; `CORS_ORIGINS` is now a comma-separated env
+      list (default `http://localhost:8124`). `docker compose up -d --build` with a named
+      `cinemaitor-data` volume; root `.env.example` documents `JWT_SECRET` / `CORS_ORIGINS`. CI
+      gained a `docker build` job. Verified by a container smoke: health, bootstrap, login, and a
+      token surviving both `docker restart` and container recreation on the same volume; `docker`
+      healthcheck reports healthy.
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
 - [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
-- [ ] Docker packaging, production hardening (MVP acceptance E2E is done)
+- [ ] Production hardening follow-ups (rate limiting, chunked upload streaming — see Known Issues)
 
 ### Known Issues
 
@@ -454,3 +467,5 @@ The product track follows `MASTER-PLAN.md`.
   Sun Aug 23 2026
 - Model benchmark (deterministic per-task benchmarks, `model_benchmarks` rows + Model Manager UI):
   Sun Aug 23 2026
+- Docker packaging (single-image deployment, `docker/entrypoint.ts`, `CORS_ORIGINS` env): Sun Aug 23
+  2026

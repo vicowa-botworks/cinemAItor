@@ -396,6 +396,18 @@ The `prompts` table is structured to support:
 
 ### Deployment
 
+**Docker (primary packaging, FND-013):** the `Dockerfile` at the repo root builds a single
+`cinemaitor` image (Deno 2.9.5 + ffmpeg, non-root user, JSR dependencies cached at build time,
+sqlite native lib pre-warmed — no runtime network needed). `docker/entrypoint.ts` is the supervisor:
+it bootstraps a `JWT_SECRET` into the data dir when none is provided (stable across container
+recreation), spawns `backend/src/server.ts` + `frontend/src/server.js`, forwards SIGTERM/SIGINT, and
+exits non-zero if a child dies. State lives in `/data` (mounted as a named volume by
+`docker-compose.yml`): SQLite DB, media, proxies, and the generated secret. Public surface: **8124**
+(UI + `/api` proxy) and **8123** (direct backend — the browser's job-feed WebSocket connects here).
+`CORS_ORIGINS` (comma-separated env) replaces the hardcoded dev origin (see `server.ts`); default
+remains `http://localhost:8124`. `docker compose up -d --build` is the one-command start; CI
+verifies the image builds (`docker-build` job).
+
 - Backend: Deploy to Deno Deploy, Fly.io, or self-hosted Deno runtime
 - Frontend: Same host as backend (proxied) or separate static hosting
 - Database: SQLite file on persistent storage; migrate to managed PostgreSQL for production scale

@@ -1,0 +1,23 @@
+services:
+  cinemaitor:
+    build: .
+    image: cinemaitor:local
+    ports:
+      # 8124 — UI (frontend static + /api proxy)
+      # 8123 — backend direct; the browser opens its live job feed
+      #        (ws/v1/jobs) straight to this port
+      - "8124:8124"
+      - "8123:8123"
+    environment:
+      # Leave empty to auto-generate a secret, persisted in the data volume.
+      JWT_SECRET: ${JWT_SECRET:-}
+      # Comma-separated allowed browser origins. Defaults to the dev
+      # frontend origin (http://localhost:8124); set it when serving the
+      # UI from a different host or port.
+      # CORS_ORIGINS: http://localhost:8124,http://studio.example.com
+    volumes:
+      - cinemaitor-data:/data
+    restart: unless-stopped
+
+volumes:
+  cinemaitor-data:
