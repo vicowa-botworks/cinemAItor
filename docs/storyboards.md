@@ -45,8 +45,10 @@ shot prompts use the same prompt-versioning engine (scopes `scene` / `shot`).
 | POST         | `/api/v1/scenes/:id/generate`                              | Scene generation job                                    |
 | POST         | `/api/v1/scenes/:id/batch-generate`                        | One generation job per shot of the scene                |
 | POST         | `/api/v1/projects/:id/scenes/from-script`                  | Bulk-create draft scenes from a parsed script (SCN-015) |
+| GET          | `/api/v1/projects/:id/continuity`                          | Deterministic continuity report for the project (MS-8)  |
 
-All endpoints require authentication; write access follows project permissions.
+All endpoints require authentication; the continuity report needs project **read** access and is
+read-only (it never mutates creative objects).
 
 ## Generation
 
@@ -88,6 +90,32 @@ preview the parsed scenes, and create them all in one project as draft scenes.
   refine in Prompt Studio.
 - **UI** — `scene-list.js`: project picker + file loader + textarea, live preview list (heading +
   action excerpt + dialogue block count), parser warnings, then one bulk create.
+
+## Continuity check (MS-8)
+
+`GET /api/v1/projects/:id/continuity` runs a **deterministic, read-only** analysis over the
+project's panels, scenes, and shots (`loadContinuityInput` + `analyzeContinuity` in
+`backend/src/services/continuity.ts`) and returns
+`{ project_id, generated_at, issue_count, issues: [...] }`. Each issue carries `rule`, `severity`
+(`error` / `warning` / `info`), the offending `object_type` / `object_id` / `object_label`, and a
+human-readable `message`.
+
+Rules:
+
+| Rule                  | Severity | What it flags                                                                                                                                       |
+| --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `panel-link-mismatch` | error    | A panel's `linked_scene_id` / `linked_shot_id` points at a shot/scene that does not exist in this project, or the shot belongs to a different scene |
+| `time-of-day-jump`    | warning  | The panels linked to one scene declare more than one time of day                                                                                    |
+| `lighting-conflict`   | warning  | The panels linked to one scene declare more than one lighting value                                                                                 |
+| `stale-clip`          | warning  | A panel/shot's generated clip predates the latest prompt version (ISO-timestamp compare)                                                            |
+| `duration-mismatch`   | warning  | A scene's `target_duration` deviates from the sum of its shot durations by more than the tolerance (max(0.5s, 10% of target))                       |
+| `unlinked-panel`      | info     | A panel is linked to a scene but not to one of that scene's shots                                                                                   |
+
+Missing/empty fields are skipped rather than flagged (nulls never count as mismatches).
+
+**UI** — `scene-list.js`: a **Continuity** button opens a panel with a project picker and a **Run
+check** action; issues render as severity-chipped rows (`object_label · rule — message`), or a "No
+continuity issues found." confirmation for a clean project.
 
 ## Notes
 

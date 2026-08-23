@@ -18,8 +18,56 @@ import {
   updateScene,
   updateShot,
 } from "@cinemaItor/db/scenes.ts";
+import { getAssetVersion } from "@cinemaItor/db/assets.ts";
+import { getProjectAccessible } from "@cinemaItor/db/projects.ts";
+import { getLatestPromptVersionFor } from "@cinemaItor/db/prompt_versions.ts";
+import { listPanels, listStoryboards } from "@cinemaItor/db/storyboards.ts";
 import { batchGenerateScene, generateScene } from "@cinemaItor/services/creative_generation.ts";
+import { analyzeContinuity, type ContinuityInput } from "@cinemaItor/services/continuity.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+
+function loadContinuityInput(projectId: string, userId: number): ContinuityInput {
+  const boards = listStoryboards(userId, { project_id: projectId });
+  const panels = boards.flatMap((board) =>
+    listPanels(board.id, userId).map((p) => ({
+      id: p.id,
+      storyboard_name: board.name,
+      panel_order: p.panel_order,
+      time_of_day: p.time_of_day,
+      lighting: p.lighting,
+      linked_scene_id: p.linked_scene_id,
+      linked_shot_id: p.linked_shot_id,
+      prompt_created_at: getLatestPromptVersionFor("storyboard_panel", p.id, userId)?.created_at ??
+        null,
+      clip_created_at: p.generated_clip_asset_version_id
+        ? getAssetVersion(p.generated_clip_asset_version_id)?.created_at ?? null
+        : null,
+    }))
+  );
+  const scenes = listScenes(userId, { project_id: projectId });
+  const shots = scenes.flatMap((scene) =>
+    listShots(scene.id, userId).map((s) => ({
+      id: s.id,
+      scene_id: scene.id,
+      shot_order: s.shot_order,
+      name: s.name,
+      duration: s.duration,
+      prompt_created_at: getLatestPromptVersionFor("shot", s.id, userId)?.created_at ?? null,
+      clip_created_at: s.generated_asset_version_id
+        ? getAssetVersion(s.generated_asset_version_id)?.created_at ?? null
+        : null,
+    }))
+  );
+  return {
+    panels,
+    scenes: scenes.map((s) => ({
+      id: s.id,
+      name: s.name,
+      target_duration: s.target_duration,
+    })),
+    shots,
+  };
+}
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -138,6 +186,20 @@ export const sceneRouter = new Router()
     const created = await bulkCreateScenes(userId, projectId, body.scenes as ScriptSceneInput[]);
     ctx.response.status = 201;
     ctx.response.body = { created: created.map((scene) => sceneWithPrompt(userId, scene.id)) };
+  })
+  .get("/api/v1/projects/:id/continuity", authMiddleware, (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const projectId = idParam(ctx, "id");
+    if (!getProjectAccessible(projectId, userId, "read")) {
+      throw notFound("Project not found");
+    }
+    const issues = analyzeContinuity(loadContinuityInput(projectId, userId));
+    ctx.response.body = {
+      project_id: projectId,
+      generated_at: new Date().toISOString(),
+      issue_count: issues.length,
+      issues,
+    };
   })
   .get("/api/v1/scenes/:id", authMiddleware, (ctx, _next) => {
     const userId = requireUserId(ctx);

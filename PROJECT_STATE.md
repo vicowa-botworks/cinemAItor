@@ -14,8 +14,9 @@ Studio repair flow). Remaining deferred items: render farm and real model adapte
 out of MVP scope). Milestone 8 (Advanced Studio Features) is underway: 3D support — the first MS-8
 item — is in (model import, in-browser three.js preview, and derived view export as `@`-references;
 see `docs/3d.md`), followed by the script importer (SCN-015: paste a screenplay, preview the parsed
-Fountain-lite scenes, bulk-create them as draft scenes with prompts). Remaining MS-8 items are
-tracked in `MASTER-PLAN.md`.
+Fountain-lite scenes, bulk-create them as draft scenes with prompts) and the continuity analyzer
+(MS-8: `GET /projects/:id/continuity`, a deterministic read-only report over panels/scenes/shots
+with a scene-list UI panel). Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -482,6 +483,16 @@ The product track follows `MASTER-PLAN.md`.
       `scene-list.js` import panel (paste or load `.fountain`/`.txt`, preview with warnings,
       one-click bulk create). Parser unit-tested (+19 frontend steps); backend 378 + frontend 266
       test steps green — see `docs/storyboards.md`
+- [x] Continuity analyzer (MS-8, third Milestone 8 item): `GET /api/v1/projects/:id/continuity`
+      (read permission) runs `analyzeContinuity` (`backend/src/services/continuity.ts`,
+      deterministic + unit-tested, +13 backend steps) over the project's panels/scenes/shots and
+      flags: `panel-link-mismatch` (error — links to missing/foreign shot/scene), `time-of-day-jump`
+      / `lighting-conflict` (warning — panels linked to one scene declare different values),
+      `stale-clip` (warning — clip predates the latest prompt version), `duration-mismatch` (warning
+      — target vs shot-sum beyond max(0.5s, 10%) tolerance), `unlinked-panel` (info).
+      `scene-list.js` gains a Continuity panel (project picker + Run check + severity-chipped issue
+      rows or a clean confirmation) and `api.checkContinuity`; backend 391 + frontend 267 test steps
+      green — see `docs/storyboards.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -540,3 +551,5 @@ The product track follows `MASTER-PLAN.md`.
   23 2026
 - Script import (SCN-015, MS-8: fountain-lite parser + scene-list import UI + bulk scene-create
   route): Sun Aug 23 2026
+- Continuity analyzer (MS-8: deterministic continuity report endpoint + scene-list check panel): Sun
+  Aug 23 2026
