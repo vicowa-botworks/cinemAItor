@@ -552,6 +552,16 @@ class ApiClient {
     });
   }
 
+  importScriptScenes(projectId, scenes) {
+    return this.request(
+      `/projects/${encodeURIComponent(projectId)}/scenes/from-script`,
+      {
+        method: "POST",
+        body: JSON.stringify({ scenes }),
+      },
+    );
+  }
+
   getScene(id) {
     return this.request(`/scenes/${encodeURIComponent(id)}`);
   }

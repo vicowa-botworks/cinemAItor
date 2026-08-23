@@ -232,6 +232,62 @@ export async function attachScenePrompt(
   };
 }
 
+export const MAX_SCENES_PER_SCRIPT_IMPORT = 200;
+
+export interface ScriptSceneInput {
+  name: string;
+  description?: string;
+  prompt?: string;
+  notes?: string;
+}
+
+export async function bulkCreateScenes(
+  userId: number,
+  projectId: string,
+  scenes: ScriptSceneInput[],
+): Promise<Scene[]> {
+  if (!Array.isArray(scenes) || scenes.length === 0) {
+    throw badRequest("scenes must be a non-empty array");
+  }
+  if (scenes.length > MAX_SCENES_PER_SCRIPT_IMPORT) {
+    throw badRequest(`at most ${MAX_SCENES_PER_SCRIPT_IMPORT} scenes per import`);
+  }
+  scenes.forEach((scene, index) => {
+    if (typeof scene !== "object" || scene === null) {
+      throw badRequest(`scenes[${index}] must be an object`);
+    }
+    if (typeof scene.name !== "string" || !scene.name.trim()) {
+      throw badRequest(`scenes[${index}].name is required`);
+    }
+    if (scene.description !== undefined && typeof scene.description !== "string") {
+      throw badRequest(`scenes[${index}].description must be a string`);
+    }
+    if (scene.prompt !== undefined && typeof scene.prompt !== "string") {
+      throw badRequest(`scenes[${index}].prompt must be a string`);
+    }
+    if (scene.notes !== undefined && typeof scene.notes !== "string") {
+      throw badRequest(`scenes[${index}].notes must be a string`);
+    }
+  });
+  const project = getProjectAccessible(projectId, userId, "write");
+  if (!project) throw notFound("Project not found");
+
+  const created: Scene[] = [];
+  for (const scene of scenes) {
+    created.push(
+      await createScene(userId, {
+        project_id: projectId,
+        name: scene.name,
+        description: scene.description,
+        prompt: scene.prompt,
+        notes: scene.notes,
+        status: "draft",
+      }),
+    );
+  }
+  return created;
+}
+
 export async function updateScene(
   userId: number,
   id: string,

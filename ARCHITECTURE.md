@@ -106,7 +106,11 @@ app-root (main router)
 ├── storyboard-list (board list + create; project filter via #/storyboards?project=)
 ├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
 │   │                 live preview polling)
-├── scene-list (scene list + create; project/storyboard filters)
+├── scene-list (scene list + create; project/storyboard filters; Import script — paste/load a
+│   │             screenplay, preview the parsed Fountain-lite scenes, bulk-create them as
+│   │             draft scenes with prompts (SCN-015, parser in script-parse.js))
+├── script-parse (shared pure Fountain-lite screenplay parser + scene-input mapping —
+│   │              unit-tested, DOM-free; consumed by scene-list import UI)
 ├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
 │   │            clip playback, embedded audio generation)
 ├── review-board (job candidate comparison with two-candidate A/B mode — synced play/seek +
@@ -209,6 +213,8 @@ server.ts (entry point)
  │   ├── Prompt versioning + reference resolution on creative objects
  │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; runner
  │   │   links preview/clip outputs back to panels and shots
+ │   ├── POST /projects/:id/scenes/from-script — bulk-create draft scenes from a parsed
+ │   │   script (SCN-015; validated, max 200 entries, prompts attached)
  │   └── (see docs/storyboards.md)
   ├── Review routes (/api/v1/review/*, auth middleware, asset write permission)
   │   ├── Job candidate comparison; approve (promote active) / reject / shortlist + notes

@@ -551,6 +551,14 @@ describe("ApiClient", () => {
       assertEquals(captured[1].options.method, "POST");
       assertEquals(JSON.parse(captured[1].options.body).seed, "9");
     });
+
+    it("importScriptScenes posts the parsed scenes under the project", async () => {
+      await api.importScriptScenes("p 1", [{ name: "INT. OFFICE - DAY", prompt: "p" }]);
+      assertEquals(captured[0].url, "/api/v1/projects/p%201/scenes/from-script");
+      assertEquals(captured[0].options.method, "POST");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.scenes[0].name, "INT. OFFICE - DAY");
+    });
   });
 
   describe("v1 review endpoints", () => {
