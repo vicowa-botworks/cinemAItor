@@ -268,7 +268,7 @@ export const assetRouter = new Router()
     if (!hasAssetPermission(userId, asset.id, "write")) throw forbidden();
 
     const maxBytes = loadConfig().uploadMaxBytes;
-    const { stream, filename, notes } = readRawUpload(ctx, maxBytes);
+    const { stream, filename, notes, technicalMetadata } = readRawUpload(ctx, maxBytes);
     const stored = await getContentStore().putStream(stream, filename, maxBytes);
     const type = mediaTypeFor(filename || stored.path);
     const version = createAssetVersion(asset.id, userId, {
@@ -277,6 +277,7 @@ export const assetRouter = new Router()
       format: type.format,
       mime_type: type.mime,
       file_size: stored.size,
+      technical_metadata_json: technicalMetadata,
       notes,
     });
     queueProxyGeneration(asset.id, version, userId, asset.project_id);

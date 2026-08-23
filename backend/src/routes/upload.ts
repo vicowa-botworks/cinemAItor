@@ -17,6 +17,7 @@ export function readRawUpload(
   stream: ReadableStream<Uint8Array>;
   filename: string;
   notes: string | null;
+  technicalMetadata: string | null;
 } {
   const body = ctx.request.body;
   const bodyType = body.type();
@@ -41,11 +42,42 @@ export function readRawUpload(
     stream,
     filename: sanitizeFilename(ctx.request.headers.get("x-file-name")),
     notes: readNotesHeader(ctx.request.headers.get("x-upload-notes")),
+    technicalMetadata: readTechnicalMetadataHeader(
+      ctx.request.headers.get("x-technical-metadata"),
+    ),
   };
 }
 
 const MAX_FILENAME_LENGTH = 255;
 const MAX_NOTES_LENGTH = 500;
+const MAX_TECHNICAL_METADATA_LENGTH = 8192;
+
+/**
+ * Parse the optional X-Technical-Metadata header (percent-encoded JSON object)
+ * into a normalized JSON string. Stored verbatim as the uploaded version's
+ * technical_metadata_json — e.g. provenance for derived media such as images
+ * rendered from 3D views.
+ */
+export function readTechnicalMetadataHeader(raw: string | null): string | null {
+  if (!raw) return null;
+  const decoded = percentDecode(raw).trim();
+  if (!decoded) return null;
+  if (decoded.length > MAX_TECHNICAL_METADATA_LENGTH) {
+    throw badRequest(
+      `X-Technical-Metadata must be at most ${MAX_TECHNICAL_METADATA_LENGTH} characters`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoded);
+  } catch {
+    throw badRequest("X-Technical-Metadata must be a percent-encoded JSON object");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw badRequest("X-Technical-Metadata must be a JSON object");
+  }
+  return JSON.stringify(parsed);
+}
 
 export function sanitizeFilename(raw: string | null): string {
   if (!raw) return "upload.bin";

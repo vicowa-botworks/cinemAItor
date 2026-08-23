@@ -1,6 +1,8 @@
 {
   "imports": {
-    "lit": "npm:lit@^3.2.1"
+    "lit": "npm:lit@^3.2.1",
+    "three": "npm:three@0.169.0",
+    "three/addons/": "npm:three@0.169.0/examples/jsm/"
   },
   "formatter": {
     "lineWidth": 100
