@@ -267,6 +267,10 @@ export class UserManager extends LitElement {
     return this.meId !== null && user.id === this.meId;
   }
 
+  _activeAdminCount() {
+    return this.users.filter((u) => u.role === "admin" && u.is_active).length;
+  }
+
   async _createUser(e) {
     e.preventDefault();
     this.error = "";
@@ -487,6 +491,8 @@ export class UserManager extends LitElement {
 
   _renderUserRow(user) {
     const self = this._isSelf(user);
+    const lastActiveAdmin = user.role === "admin" && user.is_active &&
+      this._activeAdminCount() <= 1;
     return html`
       <tr>
         <td>
@@ -516,10 +522,15 @@ export class UserManager extends LitElement {
         <td>${user.created_at?.slice(0, 10)}</td>
         <td>
           <div class="actions">
-            <button class="btn btn-secondary btn-small" ?disabled=${self && user.role !== "admin"}
-              @click=${this._toggleRole}>
-              ${user.role === "admin" ? "Make user" : "Make admin"}
-            </button>
+            <span title=${lastActiveAdmin
+              ? "This is the only active admin — demoting them would leave the instance without an admin. Promote or create another admin first."
+              : undefined}>
+              <button class="btn btn-secondary btn-small"
+                ?disabled=${(self && user.role !== "admin") || lastActiveAdmin}
+                @click=${this._toggleRole}>
+                ${user.role === "admin" ? "Make user" : "Make admin"}
+              </button>
+            </span>
             <button class="btn btn-secondary btn-small" ?disabled=${self}
               @click=${this._toggleActive}>
               ${user.is_active ? "Deactivate" : "Activate"}
@@ -544,6 +555,7 @@ export class UserManager extends LitElement {
       `;
     }
 
+    const smtpSaved = Boolean(this.emailSettings?.smtp_host);
     return html`
       <h1>User management</h1>
 
@@ -676,9 +688,13 @@ export class UserManager extends LitElement {
           <div class="actions" style="margin-top: 12px;">
             <button type="submit" class="btn" ?disabled=${this.busy}>Save
               settings</button>
-            <button type="button" class="btn btn-secondary"
-              ?disabled=${this.busy || !this.emailForm.smtp_host}
-              @click=${this._sendTestEmail}>Send test email</button>
+            <span title=${smtpSaved
+              ? undefined
+              : "Save the SMTP settings first — the test is sent with the stored configuration."}>
+              <button type="button" class="btn btn-secondary"
+                ?disabled=${this.busy || !smtpSaved}
+                @click=${this._sendTestEmail}>Send test email</button>
+            </span>
             <button type="button" class="btn btn-danger"
               ?disabled=${this.busy} @click=${this._clearSmtpPassword}>Clear
               stored password</button>
