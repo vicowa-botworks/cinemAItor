@@ -266,10 +266,15 @@ server.ts (entry point)
   │   │   clips to the fx pass for a frame-accurate cut), ffmpeg fx pass (source trim/speed,
   │   │   transitions/fades/grade, `drawtext` text overlays, audio-track mix via
   │   │   `atrim`/`atempo`/`volume`/`adelay`/`amix` → AAC, with ducking: music items drop by the
-  │   │   track's `duck_db` under audible dialogue via a frame-evaluated `volume` stage), ffmpeg
+  │   │   track's `duck_db` under audible dialogue via a frame-evaluated `volume` stage; video
+  │   │   re-encode is preset-driven (`videoEncodeArgs`: legacy default libx264 veryfast CRF 20,
+  │   │   advanced presets raise quality or switch to 10-bit wide-gamut HEVC + BT.2020 metadata —
+  │   │   an `ffmpeg -encoders` probe up front fails the job if the build lacks e.g. `libx265`),
+  │   │   ffmpeg
   │   │   audio-only export for `wav`
   │   │   presets (`amix=duration=longest` → `pcm_s16le`, no video), or deterministic mock (auto
-  │   │   by availability, `RENDER_ENGINE=auto|ffmpeg|mock`); cancel (queued/running, polled during
+  │   │   by availability, `RENDER_ENGINE=auto|ffmpeg|mock`, fingerprint includes the preset
+  │   │   encode profile); cancel (queued/running, polled during
   │   │   ffmpeg runs); progress from ffmpeg `-progress pipe:1` out_time; structured logs
     │   ├── Draft/final source selection (video + audio items): draft presets render proxies
     │   │   (master fallback), final presets render masters only; per-source tallies in the

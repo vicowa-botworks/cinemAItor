@@ -97,10 +97,25 @@ export function itemNeedsSourceEdit(
 }
 
 /**
+ * True when a preset's encode profile differs from the legacy default
+ * (libx264 veryfast CRF 20 8-bit + AAC) — such presets (archival master,
+ * HDR HEVC) must go through the re-encoding fx pass even on fx-free
+ * timelines, because the lossless concat path stream-copies whatever the
+ * sources were encoded with.
+ */
+export function presetRequiresReencode(preset: RenderPreset | null): boolean {
+  return (
+    (preset?.codec ?? "h264").toLowerCase() !== "h264" ||
+    presetEncodeProfile(preset) !== presetEncodeProfile(null)
+  );
+}
+
+/**
  * True when the plan needs the re-encoding fx pass: per-item fx, text
- * overlays, audio-track placement, or per-item source edits (the lossless
+ * overlays, audio-track placement, per-item source edits (the lossless
  * concat path can only splice whole video files and cannot cut a
- * tail-trimmed item frame-accurately).
+ * tail-trimmed item frame-accurately), or a preset whose encode profile
+ * differs from the stream-copied default.
  */
 export function planNeedsFxPass(plan: RenderPlan): boolean {
   return (
@@ -108,7 +123,8 @@ export function planNeedsFxPass(plan: RenderPlan): boolean {
     plan.text_overlays.length > 0 ||
     (plan.audio_items?.length ?? 0) > 0 ||
     plan.items.some(itemNeedsSourceEdit) ||
-    plan.items.some((i) => i.consumes_full_source === false)
+    plan.items.some((i) => i.consumes_full_source === false) ||
+    presetRequiresReencode(plan.preset)
   );
 }
 
@@ -293,6 +309,65 @@ export function duckVolumeExpr(
   return `1-(1-${d})*clip(${terms},0,1)`;
 }
 
+// ---------------------------------------------------------------------------
+// Preset video/audio encode args (advanced exports, MS-8)
+// ---------------------------------------------------------------------------
+
+/**
+ * The ffmpeg encoder a preset's video stream goes through when the fx pass
+ * re-encodes. `hevc` presets need libx265 in the ffmpeg build; the
+ * FfmpegRenderEngine checks availability before rendering and fails the job
+ * with a clear error instead of a mid-render ffmpeg crash.
+ */
+export function requiredVideoEncoder(preset: RenderPreset | null): string {
+  return (preset?.codec ?? "h264").toLowerCase() === "hevc" ? "libx265" : "libx264";
+}
+
+interface EncodeSettings {
+  crf: number;
+  preset: string;
+  pix_fmt: string;
+  color?: { primaries?: string; transfer?: string; space?: string };
+}
+
+function presetEncodeSettings(preset: RenderPreset | null): EncodeSettings {
+  const s = (preset?.settings ?? {}) as Record<string, unknown>;
+  const hevc = (preset?.codec ?? "").toLowerCase() === "hevc";
+  const color = s.color && typeof s.color === "object"
+    ? (s.color as EncodeSettings["color"])
+    : undefined;
+  return {
+    crf: typeof s.crf === "number" ? s.crf : 20,
+    preset: typeof s.preset === "string" && s.preset ? s.preset : "veryfast",
+    pix_fmt: typeof s.pix_fmt === "string" && s.pix_fmt
+      ? s.pix_fmt
+      : hevc
+      ? "yuv420p10le"
+      : "yuv420p",
+    color,
+  };
+}
+
+/**
+ * Video encoder args for the fx pass from the plan's preset. Defaults
+ * reproduce the legacy hardcoded settings (libx264 veryfast CRF 20 8-bit);
+ * advanced presets may raise quality (archival master) or switch to 10-bit
+ * wide-gamut HEVC (HDR preset) with BT.2020 color metadata.
+ */
+export function videoEncodeArgs(preset: RenderPreset | null): string[] {
+  const hevc = requiredVideoEncoder(preset) === "libx265";
+  const args: string[] = ["-c:v", hevc ? "libx265" : "libx264"];
+  if (hevc) args.push("-tag:v", "hvc1");
+  const s = presetEncodeSettings(preset);
+  args.push("-preset", s.preset, "-crf", String(s.crf), "-pix_fmt", s.pix_fmt);
+  if (s.color) {
+    if (s.color.primaries) args.push("-color_primaries", s.color.primaries);
+    if (s.color.transfer) args.push("-color_trc", s.color.transfer);
+    if (s.color.space) args.push("-colorspace", s.color.space);
+  }
+  return args;
+}
+
 /**
  * Per-audio-item filter chain (shared by the fx and audio-only passes):
  * trim the source window, reset timestamps, apply speed, static gain, duck
@@ -330,13 +405,15 @@ export function buildAudioItemChain(audio: RenderAudioItem): string[] {
  * overlay. Audio-track items become additional inputs, each trimmed, speed-
  * adjusted, gain-scaled, ducked (AUD-013) and faded, then silenced into its
  * timeline slot via `adelay` and summed with `amix` (no normalization) onto
- * the output. Re-encodes to H.264 (+ AAC when audio is mixed).
+ * the output. Re-encodes with the preset's encoder settings (H.264 defaults,
+ * or 10-bit wide-gamut HEVC for HDR presets; + AAC when audio is mixed).
  */
 export function buildFxArgs(
   items: RenderInputItem[],
   textOverlays: RenderTextOverlay[],
   outputPath: string,
   audioItems: RenderAudioItem[] = [],
+  preset: RenderPreset | null = null,
 ): string[] {
   const args: string[] = ["-v", "error", "-y"];
   for (const item of items) args.push("-i", item.file_path);
@@ -427,11 +504,20 @@ export function buildFxArgs(
   args.push("-filter_complex", filters.join(";"));
   args.push("-map", finalLabel);
   if (audioItems.length > 0) {
-    args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+    args.push(
+      "-map",
+      "[aout]",
+      "-c:a",
+      (preset?.audio_codec ?? "aac").toLowerCase(),
+      "-b:a",
+      "192k",
+    );
   } else {
     args.push("-an");
   }
-  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p");
+  // Video encode settings from the preset (H.264 defaults, or the
+  // archival-master / HDR encodes).
+  args.push(...videoEncodeArgs(preset));
   args.push(outputPath);
   return args;
 }
@@ -535,11 +621,25 @@ export class FfmpegRenderEngine implements RenderEngine {
   ): Promise<RenderResult> {
     checkCancelled(hooks);
     hooks.onProgress(10);
+    if (plan.format !== "wav") {
+      // Fail early when the preset's encoder is missing from this ffmpeg
+      // build (e.g. libx265 for the HDR preset) — a clean job failure with a
+      // readable error beats a mid-render ffmpeg crash.
+      const encoder = requiredVideoEncoder(plan.preset);
+      const available = await this.availableEncoders();
+      if (available && !available.has(encoder)) {
+        throw new RenderFailedError(
+          `Required video encoder '${encoder}' is not available in this ffmpeg build; ` +
+            "choose a different preset or update ffmpeg",
+        );
+      }
+    }
     const args = buildFxArgs(
       plan.items,
       plan.text_overlays,
       plan.output_path,
       plan.audio_items ?? [],
+      plan.preset,
     );
     await this.runFfmpeg(args, plan.total_duration, 10, hooks);
     checkCancelled(hooks);
@@ -563,6 +663,53 @@ export class FfmpegRenderEngine implements RenderEngine {
     const stat = await Deno.stat(plan.output_path);
     hooks.onProgress(100);
     return { output_path: plan.output_path, file_size: stat.size, ticks: 3 };
+  }
+
+  private encoderProbe: Set<string> | null | undefined;
+
+  /**
+   * Probe `ffmpeg -encoders` once and cache the encoder name set.
+   * Returns null when the probe itself fails (treated as "unknown" — the
+   * render proceeds and lets ffmpeg report the real error).
+   */
+  private async availableEncoders(): Promise<Set<string> | null> {
+    if (this.encoderProbe !== undefined) return this.encoderProbe;
+    try {
+      const proc = new Deno.Command(this.binary, {
+        args: ["-hide_banner", "-encoders"],
+        stdout: "piped",
+        stderr: "piped",
+      }).spawn();
+      const bufs: Uint8Array[] = [];
+      for await (const chunk of proc.stdout) bufs.push(chunk);
+      const outLen = bufs.reduce((n, b) => n + b.byteLength, 0);
+      const outBytes = new Uint8Array(outLen);
+      let offset = 0;
+      for (const b of bufs) {
+        outBytes.set(b, offset);
+        offset += b.byteLength;
+      }
+      const out = new TextDecoder().decode(outBytes);
+      await proc.status;
+      const names = new Set<string>();
+      for (const line of out.split("\n")) {
+        // Lines look like: ` V..... libx264  libx264 H.264 / AVC ...`
+        const m = line.match(/^\s*V\.\S*\s+(\S+)/);
+        if (m) names.add(m[1]);
+      }
+      // A real ffmpeg always lists many encoders; an empty list means the
+      // probe output was not what we expected — treat as unknown and let
+      // the render proceed (ffmpeg will report the real error).
+      if (names.size === 0) {
+        this.encoderProbe = null;
+        return null;
+      }
+      this.encoderProbe = names;
+      return names;
+    } catch {
+      this.encoderProbe = null;
+      return null;
+    }
   }
 
   /**
@@ -697,10 +844,26 @@ function seedFromText(text: string): number {
  * transitions, grades, text overlays, audio placement); mixed into the mock
  * engine's seed so different fx produce different output bytes.
  */
+/**
+ * Canonical description of a preset's encode profile (encoder settings +
+ * audio codec). Part of the mock engine's seed so renders of the same
+ * timeline with different presets produce different bytes, and re-renders
+ * with the same preset stay byte-identical.
+ */
+export function presetEncodeProfile(preset: RenderPreset | null): string {
+  const s = presetEncodeSettings(preset);
+  const color = s.color
+    ? `:${s.color.primaries ?? "-"}:${s.color.transfer ?? "-"}:${s.color.space ?? "-"}`
+    : "";
+  return `${requiredVideoEncoder(preset)}:${s.crf}:${s.preset}:${s.pix_fmt}${color}` +
+    `:${(preset?.audio_codec ?? "aac").toLowerCase()}`;
+}
+
 export function fxFingerprint(
   items: RenderInputItem[],
   textOverlays: RenderTextOverlay[] = [],
   audioItems: RenderAudioItem[] = [],
+  preset: RenderPreset | null = null,
 ): string {
   const itemPart = items
     .map((i) =>
@@ -722,7 +885,9 @@ export function fxFingerprint(
         `:${a.source_duration}:${a.speed}:${a.gain}:${a.fade_in}:${a.fade_out}:${duck}`;
     })
     .join("|");
-  const tail = [overlayPart, audioPart].filter((p) => p !== "").join("##");
+  const tail = [overlayPart, audioPart, presetEncodeProfile(preset)]
+    .filter((p) => p !== "")
+    .join("##");
   return tail === "" ? itemPart : `${itemPart}##${tail}`;
 }
 
@@ -741,7 +906,12 @@ export class MockRenderEngine implements RenderEngine {
     const rand = xorshift(
       seedFromText(
         plan.format + plan.total_duration +
-          fxFingerprint(plan.items, plan.text_overlays, plan.audio_items ?? []),
+          fxFingerprint(
+            plan.items,
+            plan.text_overlays,
+            plan.audio_items ?? [],
+            plan.preset,
+          ),
       ),
     );
     const chunks: number[] = [];
