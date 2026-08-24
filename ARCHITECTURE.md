@@ -81,7 +81,10 @@ app-root (main router)
 │   │             deactivate/reset-password/delete users + self-registration
 │   │             toggle + SMTP email settings (host/port/TLS/auth/from/base URL,
 │   │             test email, stored-password management) + invitations
-│   │             (send/revoke, status chips; unconfirmed users flagged), #/users)
+│   │             (send/revoke, status chips; unconfirmed users flagged); the
+│   │             "Make user" demotion button is disabled with an explanatory
+│   │             tooltip on the only active admin (backend enforces the same
+│   │             lockout), #/users)
 ├── project-list (project dashboard)
 │   ├── project-card (individual project)
 │   └── project-form (create; template picker pre-creates a starting timeline)
