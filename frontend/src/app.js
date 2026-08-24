@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "./api.js";
-import "./components/app-header.js";
+import "./components/app-sidebar.js";
 import "./components/login-form.js";
 import "./components/project-list.js";
 import "./components/project-detail.js";
@@ -44,12 +44,46 @@ export class AppRoot extends LitElement {
     }
 
     .app {
+      display: flex;
+      align-items: flex-start;
       min-height: 100vh;
     }
 
     .view {
-      min-height: calc(100vh - 70px);
+      flex: 1;
+      min-width: 0;
+      min-height: 100vh;
       padding: 30px 20px;
+    }
+
+    .menu-toggle {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 300;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      background-color: var(--color-surface);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .menu-toggle:hover {
+      background-color: var(--color-surface-hover);
+    }
+
+    .menu-toggle span {
+      display: block;
+      width: 18px;
+      height: 2px;
+      background-color: currentColor;
+      border-radius: 1px;
     }
   `;
 
@@ -60,6 +94,7 @@ export class AppRoot extends LitElement {
     currentView: {},
     viewParams: {},
     assetProjectId: {},
+    navCollapsed: {},
   };
 
   constructor() {
@@ -70,6 +105,7 @@ export class AppRoot extends LitElement {
     this.currentView = "login";
     this.viewParams = {};
     this.assetProjectId = null;
+    this.navCollapsed = window.innerWidth < 1024;
   }
 
   connectedCallback() {
@@ -88,7 +124,7 @@ export class AppRoot extends LitElement {
         this.userName = user.display_name;
         this.userRole = user.role || "";
         this.loggedIn = true;
-        this._updateHeader();
+        this._updateSidebar();
         if (user.must_change_password) {
           window.location.hash = "#/change-password";
           return;
@@ -116,7 +152,7 @@ export class AppRoot extends LitElement {
       this.userName = "";
       this.userRole = "";
     }
-    this._updateHeader();
+    this._updateSidebar();
     if (detail.user?.must_change_password) {
       window.location.hash = "#/change-password";
       return;
@@ -137,15 +173,23 @@ export class AppRoot extends LitElement {
     this.loggedIn = false;
     this.userName = "";
     this.userRole = "";
-    this._updateHeader();
+    this._updateSidebar();
     this._route();
   }
 
-  _updateHeader() {
-    const header = this.shadowRoot?.querySelector("app-header");
-    if (header) {
-      header.setUserData(this.userName, this.loggedIn, this.userRole);
+  _updateSidebar() {
+    const sidebar = this.shadowRoot?.querySelector("app-sidebar");
+    if (sidebar) {
+      sidebar.setUserData(this.userName, this.loggedIn, this.userRole);
     }
+  }
+
+  _onSidebarCollapseChange(e) {
+    this.navCollapsed = e.detail.collapsed;
+  }
+
+  _expandNav() {
+    this.shadowRoot?.querySelector("app-sidebar")?.expand();
   }
 
   _route() {
@@ -334,7 +378,19 @@ export class AppRoot extends LitElement {
   render() {
     return html`
       <div class="app">
-        <app-header></app-header>
+        <app-sidebar
+          @sidebar-collapse-change=${this._onSidebarCollapseChange}
+        ></app-sidebar>
+        ${this.navCollapsed
+          ? html`
+            <button
+              class="menu-toggle"
+              title="Show navigation"
+              aria-label="Show navigation"
+              @click=${this._expandNav}
+            ><span></span><span></span><span></span></button>
+          `
+          : ""}
         <div class="view">
           ${this._renderView()}
         </div>
