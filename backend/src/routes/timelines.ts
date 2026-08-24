@@ -48,6 +48,8 @@ import { listPanels, listStoryboards } from "@cinemaItor/db/storyboards.ts";
 import { generateAudio } from "@cinemaItor/services/creative_generation.ts";
 import { type ScoreInput, suggestScore } from "@cinemaItor/services/score_suggestion.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -759,3 +761,335 @@ function loadScoreInput(timeline: Timeline, userId: number): ScoreInput {
     panels,
   };
 }
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/timelines": {
+    summary: "List accessible timelines",
+    parameters: {
+      project_id: { schema: { type: "string" } },
+    },
+    responses: {
+      200: {
+        description: "The timelines",
+        schema: { type: "array", items: ref("Timeline") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/timelines": {
+    summary: "Create a timeline",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["project_id", "name"],
+        properties: {
+          project_id: { type: "string" },
+          name: { type: "string" },
+          settings: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The timeline",
+        schema: ref("Timeline"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/timelines/{id}": {
+    summary: "Get a timeline with tracks (with items) and markers",
+    responses: {
+      200: {
+        description: "The full timeline detail",
+        schema: ref("TimelineDetail"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "PATCH /api/v1/timelines/{id}": {
+    summary: "Update a timeline",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          duration: { type: "number", minimum: 0 },
+          settings: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "The updated timeline",
+        schema: ref("Timeline"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/timelines/{id}": {
+    summary: "Delete a timeline",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/tracks": {
+    summary: "Add a track",
+    requestBody: { schema: ref("TrackInput") },
+    responses: {
+      201: { description: "The track", schema: ref("Track") },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "PATCH /api/v1/timelines/{id}/tracks/{trackId}": {
+    summary: "Update a track (lock/mute, mixer gain/ducking, reorder)",
+    requestBody: { schema: ref("TrackUpdateInput") },
+    responses: {
+      200: {
+        description: "The updated track",
+        schema: ref("Track"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/timelines/{id}/tracks/{trackId}": {
+    summary: "Remove a track (and its items)",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/items": {
+    summary: "Place an item on a track",
+    description: "track_id, asset_version_id, start_time and end_time are required. " +
+      "Media-kind matching is enforced: video tracks need video assets, " +
+      "audio tracks need audio assets, text/subtitle tracks carry inline " +
+      "text.",
+    requestBody: { schema: ref("ItemInput") },
+    responses: {
+      201: {
+        description: "The placed item",
+        schema: ref("TimelineItem"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "PATCH /api/v1/timelines/{id}/items/{itemId}": {
+    summary: "Update an item (move/trim/speed/fades/grade/transition)",
+    requestBody: { schema: ref("ItemUpdateInput") },
+    responses: {
+      200: {
+        description: "The updated item",
+        schema: ref("TimelineItem"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/items/{itemId}/duplicate": {
+    summary: "Duplicate an item (optionally at a new position)",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          at_time: { type: "number", minimum: 0 },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The new item",
+        schema: ref("TimelineItem"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/timelines/{id}/items/{itemId}": {
+    summary: "Remove an item",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/markers": {
+    summary: "Add a marker",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["time"],
+        properties: {
+          time: { type: "number", minimum: 0 },
+          label: { type: "string" },
+          notes: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The marker",
+        schema: ref("TimelineMarker"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/timelines/{id}/markers": {
+    summary: "List a timeline's markers",
+    responses: {
+      200: {
+        description: "The markers",
+        schema: { type: "array", items: ref("TimelineMarker") },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "DELETE /api/v1/timelines/{id}/markers/{markerId}": {
+    summary: "Remove a marker",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/state": {
+    summary: "Atomic full-state restore (backs the editor's undo/redo)",
+    description: "Replaces duration/settings/tracks/items/markers in one " +
+      "transaction, with per-row validation like the item routes. " +
+      "Duplicate ids are rejected. Media-kind matching is enforced on " +
+      "every item.",
+    requestBody: { schema: ref("TimelineState") },
+    responses: {
+      200: {
+        description: "The full timeline detail after the restore",
+        schema: ref("TimelineDetail"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/snapshots": {
+    summary: "Create a full-state snapshot",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["name"],
+        properties: {
+          name: { type: "string" },
+          notes: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The snapshot",
+        schema: ref("TimelineSnapshot"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/timelines/{id}/snapshots": {
+    summary: "List a timeline's snapshots",
+    responses: {
+      200: {
+        description: "The snapshots",
+        schema: { type: "array", items: ref("TimelineSnapshot") },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/snapshots/{snapshotId}/restore": {
+    summary: "Restore a snapshot",
+    responses: {
+      200: {
+        description: "The full timeline detail after the restore",
+        schema: ref("TimelineDetail"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/timelines/{id}/score-suggestion": {
+    summary: "Deterministic music-score suggestion (MS-8)",
+    description: "Analyzes the assembled cut (duration in 5s steps, dominant time-" +
+      "of-day/lighting/mood, music cues, dialogue/existing-music presence) " +
+      "and synthesizes a music prompt. Read-only.",
+    responses: {
+      200: {
+        description: "The suggestion",
+        schema: {
+          type: "object",
+          required: ["timeline_id", "project_id", "suggestion"],
+          properties: {
+            timeline_id: { type: "string" },
+            project_id: { type: "string" },
+            suggestion: { $ref: "#/components/schemas/ScoreSuggestion" },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/timelines/{id}/score": {
+    summary: "Generate a score from the suggestion (music job)",
+    description: "Uses the suggested prompt (or a client-supplied one) and enqueues " +
+      "a normal music job; candidates land on a fresh score asset. " +
+      "Fails with 400 if the timeline has no video items.",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          model_id: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      202: {
+        description: "The suggestion and the queued music job",
+        schema: {
+          type: "object",
+          required: ["timeline_id", "suggestion", "job"],
+          properties: {
+            timeline_id: { type: "string" },
+            suggestion: { $ref: "#/components/schemas/ScoreSuggestion" },
+            job: {
+              type: "object",
+              required: ["job_id", "job_type", "asset_id", "model_id"],
+              properties: {
+                job_id: { type: "string" },
+                job_type: { type: "string" },
+                asset_id: { type: "string" },
+                model_id: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404, 503),
+    },
+  },
+};

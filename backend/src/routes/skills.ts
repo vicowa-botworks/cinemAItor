@@ -17,6 +17,8 @@ import {
 } from "@cinemaItor/db/skills.ts";
 import { runSkill } from "@cinemaItor/services/skill_engine.ts";
 import { badRequest, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -148,3 +150,126 @@ function updateSkillOrCreate(
   }
   return createSkill(id, definition, userId);
 }
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/skills": {
+    summary: "List skills (v1: JSON audio-generation definitions)",
+    responses: {
+      200: {
+        description: "The skills",
+        schema: { type: "array", items: ref("Skill") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/skills": {
+    summary: "Create a skill",
+    requestBody: { schema: ref("SkillCreateRequest") },
+    responses: {
+      201: { description: "The created skill", schema: ref("Skill") },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/skills/{id}": {
+    summary: "Get one skill",
+    responses: {
+      200: { description: "The skill", schema: ref("Skill") },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "PUT /api/v1/skills/{id}": {
+    summary: "Replace a skill's definition (snapshots a new version)",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["definition"],
+        properties: { definition: { $ref: "#/components/schemas/SkillDefinition" } },
+      },
+    },
+    responses: {
+      200: {
+        description: "The updated skill",
+        schema: ref("Skill"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/skills/{id}": {
+    summary: "Delete a skill",
+    responses: {
+      204: { description: "Deleted" },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/skills/{id}/toggle": {
+    summary: "Enable or disable a skill",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["enabled"],
+        properties: { enabled: { type: "boolean" } },
+      },
+    },
+    responses: {
+      200: {
+        description: "The updated skill",
+        schema: ref("Skill"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/skills/{id}/versions": {
+    summary: "List a skill's immutable version snapshots",
+    responses: {
+      200: {
+        description: "The versions",
+        schema: { type: "array", items: ref("SkillVersion") },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "POST /api/v1/skills/{id}/run": {
+    summary: "Run a skill (one generation job per step)",
+    description: "Resolves typed inputs, expands the {{placeholders}} and enqueues " +
+      "one generation job per step (all-or-nothing pre-flight). The run " +
+      "settles lazily: running → succeeded/failed from the step jobs.",
+    requestBody: { schema: ref("SkillRunRequest") },
+    responses: {
+      202: {
+        description: "The run and its step jobs",
+        schema: {
+          type: "object",
+          required: ["run", "jobs"],
+          properties: {
+            run: { $ref: "#/components/schemas/SkillRun" },
+            jobs: { type: "array", items: ref("Job") },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/skills/{id}/runs": {
+    summary: "List a skill's runs",
+    parameters: {
+      project_id: { schema: { type: "string" } },
+    },
+    responses: {
+      200: {
+        description: "The runs, newest first",
+        schema: { type: "array", items: ref("SkillRun") },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/skills/{id}/runs/{runId}": {
+    summary: "Get one skill run",
+    responses: {
+      200: {
+        description: "The run (settled from its step jobs)",
+        schema: ref("SkillRun"),
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+};

@@ -31,6 +31,8 @@ import {
   restoreProjectBackup,
 } from "@cinemaItor/services/project_backup.ts";
 import { getContentStore } from "@cinemaItor/storage/content_store.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -232,3 +234,192 @@ export const diagnosticsRouter = new Router()
     }
     ctx.response.body = { message: "Backup deleted" };
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/diagnostics/hardware": {
+    summary: "Hardware report (CPU/RAM/GPU/OS) (DIA-001)",
+    responses: {
+      200: {
+        description: "The hardware report",
+        schema: ref("HardwareReport"),
+      },
+      ...errorResponses(401),
+    },
+  },
+  "GET /api/v1/diagnostics/models": {
+    summary: "Model health batch report (DIA-002)",
+    responses: {
+      200: {
+        description: "The models report",
+        schema: ref("ModelsReport"),
+      },
+      ...errorResponses(401),
+    },
+  },
+  "GET /api/v1/diagnostics/storage": {
+    summary: "Storage report: usage, orphans, missing media (STO-010/011)",
+    description: "Adds a content-store checksum `integrity` block when `?verify=1`.",
+    parameters: {
+      verify: {
+        schema: { type: "string" },
+        description: "Pass `1` to run the content-store checksum integrity pass.",
+      },
+    },
+    responses: {
+      200: {
+        description: "The storage report",
+        schema: ref("StorageReport"),
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/diagnostics/storage/cleanup": {
+    summary: "Remove regenerable caches (admin) (STO-012)",
+    description: "Removes regenerable preview/proxy/thumbnail caches and, only when " +
+      "`include_orphaned_media` is true, orphaned media. Referenced media " +
+      "is never touched.",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          include_orphaned_media: { type: "boolean" },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "What was removed",
+        schema: ref("CleanupReport"),
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "GET /api/v1/diagnostics/logs": {
+    summary: "Browse the durable diagnostics log (DIA-003/005)",
+    parameters: {
+      category: { schema: { type: "string" } },
+      severity: { schema: { type: "string" } },
+      limit: { schema: { type: "integer" } },
+      since_hours: { schema: { type: "number" } },
+    },
+    responses: {
+      200: {
+        description: "The log report",
+        schema: ref("LogsReport"),
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "POST /api/v1/diagnostics/export": {
+    summary: "Export a redacted diagnostics bundle (admin) (DIA-004)",
+    responses: {
+      201: {
+        description: "The export (file path + contents summary)",
+        schema: {
+          type: "object",
+          additionalProperties: true,
+        },
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "POST /api/v1/diagnostics/backups": {
+    summary: "Create a project backup (DIA-006)",
+    description: "Schema-3 bundles cover assets, timelines (tracks/items/markers/" +
+      "snapshots) and creative objects (storyboards/panels, scenes/shots, " +
+      "prompt versions, references). A media bundle is written alongside " +
+      "the JSON for transferability.",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["project_id"],
+        properties: {
+          project_id: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The backup record, object counts and media manifest",
+        schema: {
+          type: "object",
+          required: ["backup", "counts", "media"],
+          properties: {
+            backup: { $ref: "#/components/schemas/Backup" },
+            counts: {
+              type: "object",
+              additionalProperties: { type: "integer" },
+            },
+            media: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/diagnostics/backups": {
+    summary: "List backups (admin sees all, users see their own)",
+    responses: {
+      200: {
+        description: "The backups",
+        schema: {
+          type: "object",
+          required: ["backups"],
+          properties: {
+            backups: { type: "array", items: ref("Backup") },
+          },
+        },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/diagnostics/backups/{id}/restore": {
+    summary: "Restore a project backup (DIA-007)",
+    description: "Remaps every creative FK, rewrites snapshot-embedded ids, and " +
+      "imports the bundle media (SHA-256 verified). Reports dangling " +
+      "links and missing/corrupt media. An optional `project_name` " +
+      "restores the data under a new project name.",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          project_name: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The restore result with issue list and media summary",
+        schema: {
+          type: "object",
+          required: ["project_id", "project_name", "counts", "issues", "media"],
+          properties: {
+            project_id: { type: "string" },
+            project_name: { type: "string" },
+            counts: { type: "object", additionalProperties: { type: "integer" } },
+            issues: { type: "array", items: { type: "string" } },
+            media: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404, 409),
+    },
+  },
+  "DELETE /api/v1/diagnostics/backups/{id}": {
+    summary: "Delete a backup (owner or admin)",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { message: { type: "string" } },
+          required: ["message"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+};

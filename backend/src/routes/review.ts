@@ -8,6 +8,8 @@ import {
   setReviewDecision,
 } from "@cinemaItor/db/reviews.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -101,3 +103,110 @@ export const reviewRouter = new Router()
     if (!toggledOff && !row) throw notFound("Review decision not recorded");
     ctx.response.body = { decision: row, toggled_off: toggledOff };
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/review/jobs/{jobId}/candidates": {
+    summary: "List the candidate versions of a job for review",
+    responses: {
+      200: {
+        description: "Job summary and its candidates",
+        schema: {
+          type: "object",
+          required: ["job", "candidates"],
+          properties: {
+            job: {
+              type: "object",
+              required: ["id", "job_type", "status", "progress"],
+              properties: {
+                id: { type: "string" },
+                job_type: { type: "string" },
+                status: { type: "string" },
+                progress: { type: "number" },
+                prompt_text: { type: ["string", "null"] },
+                seed: { type: ["string", "null"] },
+                settings: { type: "object", additionalProperties: true },
+                model_id: { type: ["string", "null"] },
+                asset_id: { type: ["string", "null"] },
+                created_at: { type: "string" },
+                finished_at: { type: ["string", "null"] },
+              },
+            },
+            candidates: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "asset_version",
+                  "asset",
+                  "candidate_index",
+                  "candidate_count",
+                  "decision",
+                ],
+                properties: {
+                  asset_version: { $ref: "#/components/schemas/AssetVersion" },
+                  asset: {
+                    type: "object",
+                    required: ["id", "unique_slug", "display_name", "asset_type", "status"],
+                    properties: {
+                      id: { type: "string" },
+                      unique_slug: { type: "string" },
+                      display_name: { type: "string" },
+                      asset_type: { type: "string" },
+                      status: { type: "string" },
+                    },
+                  },
+                  candidate_index: { type: "integer" },
+                  candidate_count: { type: "integer" },
+                  decision: { $ref: "#/components/schemas/ReviewDecision" },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/review/candidates/{versionId}/approve": {
+    summary: "Approve a candidate (promotes it to the asset's active version)",
+    requestBody: { schema: ref("ReviewNotesRequest") },
+    responses: {
+      200: {
+        description: "The recorded decision",
+        schema: ref("ReviewDecision"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/review/candidates/{versionId}/reject": {
+    summary: "Reject a candidate",
+    requestBody: { schema: ref("ReviewNotesRequest") },
+    responses: {
+      200: {
+        description: "The recorded decision",
+        schema: ref("ReviewDecision"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/review/candidates/{versionId}/shortlist": {
+    summary: "Toggle a candidate's shortlist flag",
+    description: "Shortlisting is a toggle: shortlisting an already-shortlisted " +
+      "candidate clears the decision.",
+    requestBody: { schema: ref("ReviewNotesRequest") },
+    responses: {
+      200: {
+        description: "The resulting decision (null when toggled off)",
+        schema: {
+          type: "object",
+          required: ["decision", "toggled_off"],
+          properties: {
+            decision: { $ref: "#/components/schemas/ReviewDecision" },
+            toggled_off: { type: "boolean" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+};

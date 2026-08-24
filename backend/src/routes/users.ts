@@ -36,6 +36,8 @@ import {
   notFound,
   unauthorized,
 } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 const MIN_PASSWORD_LENGTH = 8;
 const REGISTRATION_KEY = "registration_enabled";
@@ -361,3 +363,168 @@ export const router = new Router()
   .post("/api/v1/users", authMiddleware, handleCreateUser)
   .patch("/api/v1/users/:id", authMiddleware, handleUpdateUser)
   .delete("/api/v1/users/:id", authMiddleware, handleDeleteUser);
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/users": {
+    summary: "List all users",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "All users",
+        schema: {
+          type: "object",
+          required: ["users"],
+          properties: {
+            users: { type: "array", items: ref("UserAdmin") },
+          },
+        },
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "POST /api/v1/users": {
+    summary: "Create a user",
+    description: "Admin-provisioned accounts default to must_change_password=true so " +
+      "the user must set their own password at first login.",
+    adminOnly: true,
+    requestBody: { schema: ref("UserCreateRequest") },
+    responses: {
+      201: {
+        description: "The created user",
+        schema: {
+          type: "object",
+          required: ["user"],
+          properties: { user: { $ref: "#/components/schemas/UserAdmin" } },
+        },
+      },
+      ...errorResponses(400, 401, 403, 409),
+    },
+  },
+  "PATCH /api/v1/users/{id}": {
+    summary: "Update a user (role, status, flags, display name, password)",
+    description: "At least one field must be present. Setting a password assigns a " +
+      "temporary one and forces a change at next login (unless " +
+      "must_change_password is explicitly false). The last active admin " +
+      "cannot be demoted, deactivated or deleted, and an admin cannot " +
+      "deactivate or delete their own account.",
+    adminOnly: true,
+    requestBody: { schema: ref("UserUpdateRequest") },
+    responses: {
+      200: {
+        description: "The updated user",
+        schema: {
+          type: "object",
+          required: ["user"],
+          properties: { user: { $ref: "#/components/schemas/UserAdmin" } },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  "DELETE /api/v1/users/{id}": {
+    summary: "Deactivate a user (soft delete)",
+    description: "Soft delete: the account is kept for referential integrity but its " +
+      "sessions are rejected by the auth middleware.",
+    adminOnly: true,
+    responses: {
+      204: { description: "User deactivated" },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  "GET /api/v1/users/settings": {
+    summary: "Get the self-registration setting",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "Current setting",
+        schema: {
+          type: "object",
+          required: ["registration_enabled"],
+          properties: { registration_enabled: { type: "boolean" } },
+        },
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "PATCH /api/v1/users/settings": {
+    summary: "Enable or disable self-registration",
+    adminOnly: true,
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["registration_enabled"],
+        properties: { registration_enabled: { type: "boolean" } },
+      },
+    },
+    responses: {
+      200: {
+        description: "Updated setting",
+        schema: {
+          type: "object",
+          required: ["registration_enabled"],
+          properties: { registration_enabled: { type: "boolean" } },
+        },
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "GET /api/v1/users/settings/email": {
+    summary: "Get the SMTP / email settings",
+    description: "smtp_password is never returned — only whether it is set " +
+      "(smtp_password_set).",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "Current email settings",
+        schema: ref("EmailSettings"),
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "PATCH /api/v1/users/settings/email": {
+    summary: "Update the SMTP / email settings",
+    description: "Partial update: only the provided keys change. smtp_password " +
+      "accepts a string (new secret) or null (clear). Unknown keys are " +
+      "ignored.",
+    adminOnly: true,
+    requestBody: { schema: ref("EmailSettingsUpdate") },
+    responses: {
+      200: {
+        description: "Updated email settings",
+        schema: ref("EmailSettings"),
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "POST /api/v1/users/settings/email/test": {
+    summary: "Send a test email",
+    description: "Sends a plain test message via the configured transport (SMTP, or " +
+      "the mock transport when unconfigured — the response says which " +
+      "transport was used). Defaults to the requesting admin's address.",
+    adminOnly: true,
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: { to: { type: "string", format: "email" } },
+      },
+    },
+    responses: {
+      200: {
+        description: "Delivery result",
+        schema: {
+          type: "object",
+          required: ["sent", "transport"],
+          properties: {
+            sent: { type: "boolean" },
+            transport: {
+              type: "string",
+              enum: ["smtp", "mock"],
+              description: "Which transport handled the message",
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 503),
+    },
+  },
+};

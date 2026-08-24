@@ -18,6 +18,7 @@ import { templateRouter } from "@cinemaItor/routes/templates.ts";
 import { promptRouter } from "@cinemaItor/routes/prompts.ts";
 import { referenceRouter } from "@cinemaItor/routes/references.ts";
 import { healthRouter } from "@cinemaItor/routes/health.ts";
+import { router as openApiRouter } from "@cinemaItor/routes/openapi.ts";
 import { type AppConfig, loadConfig } from "@cinemaItor/config.ts";
 import { createLogger } from "@cinemaItor/logger.ts";
 import { createDiagnosticLogSink } from "@cinemaItor/db/diagnostics.ts";
@@ -117,6 +118,7 @@ export function createApp(
   app.use(sceneRouter.routes());
   app.use(promptRouter.routes());
   app.use(referenceRouter.routes());
+  app.use(openApiRouter.routes());
   app.use(healthRouter.allowedMethods());
   app.use(authRouter.allowedMethods());
   app.use(usersRouter.allowedMethods());
@@ -134,6 +136,7 @@ export function createApp(
   app.use(sceneRouter.allowedMethods());
   app.use(promptRouter.allowedMethods());
   app.use(referenceRouter.allowedMethods());
+  app.use(openApiRouter.allowedMethods());
 
   return app;
 }

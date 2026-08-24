@@ -14,6 +14,8 @@ import {
   type PresetInput,
 } from "@cinemaItor/db/renders.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -194,3 +196,126 @@ export const renderRouter = new Router()
       created_at: row.created_at as string,
     }));
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/render-presets": {
+    summary: "List render presets (system + user)",
+    responses: {
+      200: {
+        description: "The presets",
+        schema: { type: "array", items: ref("RenderPreset") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/render-presets": {
+    summary: "Create a render preset (admin only)",
+    requestBody: { schema: ref("PresetInput") },
+    responses: {
+      201: {
+        description: "The preset",
+        schema: ref("RenderPreset"),
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "POST /api/v1/renders": {
+    summary: "Queue a render job for a timeline",
+    description: "Enqueues a durable render job (leases, stale recovery). The " +
+      "engine is auto-selected by availability (RENDER_ENGINE=auto|" +
+      "ffmpeg|mock). Draft presets render proxies with master fallback; " +
+      "final presets render masters only.",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["project_id", "timeline_id"],
+        properties: {
+          project_id: { type: "string" },
+          timeline_id: { type: "string" },
+          preset_id: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      202: {
+        description: "The queued render job",
+        schema: ref("RenderJob"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/renders/{id}": {
+    summary: "Get a render job (status, progress, validation report)",
+    responses: {
+      200: {
+        description: "The render job",
+        schema: ref("RenderJob"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/renders/{id}/log": {
+    summary: "List a render job's structured log events",
+    responses: {
+      200: {
+        description: "The log events",
+        schema: { type: "array", items: ref("RenderEvent") },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/renders/{id}/cancel": {
+    summary: "Cancel a render job (queued or running)",
+    description: "Returns the job directly once cancellation took effect, or 202 " +
+      "while cancellation is in flight (polled during ffmpeg runs).",
+    responses: {
+      200: {
+        description: "The cancelled render job",
+        schema: ref("RenderJob"),
+      },
+      202: {
+        description: "Cancelling (poll the job for the terminal state)",
+        schema: ref("RenderJob"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/exports": {
+    summary: "List exports (render outputs saved as assets)",
+    parameters: {
+      project_id: { schema: { type: "string" } },
+      render_job_id: { schema: { type: "string" } },
+    },
+    responses: {
+      200: {
+        description: "The exports (newest first, max 200)",
+        schema: {
+          type: "array",
+          items: {
+            type: "object",
+            required: [
+              "id",
+              "project_id",
+              "render_job_id",
+              "file_path",
+              "format",
+              "created_at",
+            ],
+            properties: {
+              id: { type: "string" },
+              project_id: { type: "string" },
+              render_job_id: { type: "string" },
+              asset_id: { type: ["string", "null"] },
+              asset_version_id: { type: ["string", "null"] },
+              file_path: { type: "string" },
+              format: { type: "string" },
+              settings: { type: ["object", "null"], additionalProperties: true },
+              created_at: { type: "string" },
+            },
+          },
+        },
+      },
+      ...errorResponses(401),
+    },
+  },
+};

@@ -48,6 +48,8 @@ import {
   notFound,
   unauthorized,
 } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_]{0,63}$/;
 const ASSET_TYPE_RE = /^[a-z0-9][a-z0-9_+-]{0,49}$/;
@@ -598,3 +600,277 @@ export const assetRouter = new Router()
     ctx.response.status = 202;
     ctx.response.body = { message: "Proxy regeneration queued", job };
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/assets": {
+    summary: "List accessible assets",
+    parameters: {
+      project_id: { schema: { type: "string" }, description: "Only this project's assets" },
+      library_scope: {
+        schema: { type: "string", enum: ["global", "project"] },
+      },
+      asset_type: { schema: { type: "string" } },
+      status: {
+        schema: {
+          type: "string",
+          enum: ["draft", "approved", "rejected", "archived", "deleted"],
+        },
+      },
+      tag: { schema: { type: "string" } },
+      q: {
+        schema: { type: "string" },
+        description: "Search slugs, display names, aliases and tags",
+      },
+    },
+    responses: {
+      200: {
+        description: "Accessible assets",
+        schema: { type: "array", items: ref("Asset") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/assets": {
+    summary: "Create a metadata-only asset",
+    requestBody: { schema: ref("AssetCreateRequest") },
+    responses: {
+      201: {
+        description: "The created asset",
+        schema: ref("AssetDetail"),
+      },
+      ...errorResponses(400, 401, 409),
+    },
+  },
+  "GET /api/v1/assets/{id}": {
+    summary: "Get an asset with its active version, aliases and tags",
+    responses: {
+      200: { description: "The asset", schema: ref("AssetDetail") },
+      ...errorResponses(401, 404),
+    },
+  },
+  "PATCH /api/v1/assets/{id}": {
+    summary: "Update asset metadata",
+    requestBody: { schema: ref("AssetUpdateRequest") },
+    responses: {
+      200: { description: "The updated asset", schema: ref("AssetDetail") },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "DELETE /api/v1/assets/{id}": {
+    summary: "Delete an asset (soft, with dependency report)",
+    description: "Marks the asset deleted and reports how many references still point " +
+      "at it (those become 'missing' in the reference audit).",
+    responses: {
+      200: {
+        description: "Deletion result and dangling-reference warning",
+        schema: ref("AssetDeleted"),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "GET /api/v1/assets/{id}/dependencies": {
+    summary: "What uses this asset (dependency view)",
+    description: "Timeline items, panel/shot pointers and prompt references that " +
+      "point at the asset — feeds the 'Used in' view and delete warnings.",
+    responses: {
+      200: {
+        description: "The dependency report",
+        schema: ref("AssetDependencies"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/assets/{id}/upload": {
+    summary: "Upload a new version (raw bytes)",
+    description: "The request body is the raw file bytes. Metadata travels in " +
+      "headers: X-File-Name (percent-encoded), optional X-Upload-Notes " +
+      "(percent-encoded) and optional X-Technical-Metadata " +
+      "(percent-encoded JSON object, e.g. provenance). A media proxy is " +
+      "queued for the new version.",
+    requestBody: {
+      description: "Raw file bytes with X-File-Name header",
+      contentType: "application/octet-stream",
+      schema: { type: "string", format: "binary" },
+    },
+    responses: {
+      201: {
+        description: "The asset with its new active version",
+        schema: ref("AssetUploadResult"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/assets/{id}/versions": {
+    summary: "Register a version from an existing content-store hash",
+    description: "For content that is already in the content store (e.g. produced by " +
+      "a job). The hash must be present in the store.",
+    requestBody: { schema: ref("AssetVersionHashRequest") },
+    responses: {
+      201: {
+        description: "The new version",
+        schema: ref("AssetVersion"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "GET /api/v1/assets/{id}/versions": {
+    summary: "List all versions of an asset",
+    responses: {
+      200: {
+        description: "All versions",
+        schema: { type: "array", items: ref("AssetVersion") },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/assets/{id}/versions/{versionId}": {
+    summary: "One version of an asset",
+    responses: {
+      200: {
+        description: "The version",
+        schema: ref("AssetVersion"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/assets/{id}/versions/{versionId}/restore": {
+    summary: "Restore a version (make it active)",
+    responses: {
+      200: {
+        description: "The asset with the restored active version",
+        schema: ref("AssetVersionRestored"),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "POST /api/v1/assets/{id}/aliases": {
+    summary: "Add a @alias slug",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["alias_slug"],
+        properties: {
+          alias_slug: {
+            type: "string",
+            pattern: "^[a-z0-9][a-z0-9_]{0,63}$",
+          },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "All aliases of the asset",
+        schema: ref("AssetAliasChange"),
+      },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  "DELETE /api/v1/assets/{id}/aliases/{aliasSlug}": {
+    summary: "Remove an alias",
+    responses: {
+      200: {
+        description: "Remaining aliases",
+        schema: ref("AssetAliasChange"),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "POST /api/v1/assets/{id}/tags": {
+    summary: "Add a tag",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["tag"],
+        properties: {
+          tag: {
+            type: "string",
+            pattern: "^[a-z0-9][a-z0-9_+-]{0,39}$",
+          },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "All tags of the asset",
+        schema: ref("AssetTagChange"),
+      },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  "DELETE /api/v1/assets/{id}/tags/{tag}": {
+    summary: "Remove a tag",
+    responses: {
+      200: {
+        description: "Remaining tags",
+        schema: ref("AssetTagChange"),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "GET /api/v1/assets/{id}/preview": {
+    summary: "Stream the preview (or active) version's media",
+    description: "Raw media bytes with the version's MIME type. Serves the " +
+      "preview_version when set, else the active version.",
+    responses: {
+      200: {
+        description: "The media file",
+        mediaType: "application/octet-stream",
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/assets/{id}/versions/{versionId}/preview": {
+    summary: "Stream one specific version's media (A/B compare)",
+    responses: {
+      200: {
+        description: "The media file",
+        mediaType: "application/octet-stream",
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/assets/{id}/versions/{versionId}/thumbnail": {
+    summary: "Cached JPEG thumbnail (video frame or scaled image)",
+    parameters: {
+      at: {
+        schema: { type: "number", minimum: 0 },
+        description: "Video frame time in seconds (quantized for caching)",
+      },
+      w: {
+        schema: { type: "integer", minimum: 1 },
+        description: "Thumbnail width in px (clamped)",
+      },
+    },
+    responses: {
+      200: { description: "JPEG thumbnail", mediaType: "image/jpeg" },
+      ...errorResponses(400, 401, 404, 502, 503),
+    },
+  },
+  "GET /api/v1/assets/{id}/versions/{versionId}/proxy": {
+    summary: "Stream the low-res media proxy of a version",
+    responses: {
+      200: {
+        description: "The proxy file",
+        mediaType: "application/octet-stream",
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/assets/{id}/versions/{versionId}/proxy": {
+    summary: "Queue proxy regeneration for a version",
+    responses: {
+      202: {
+        description: "The queued proxy job",
+        schema: {
+          type: "object",
+          required: ["message", "job"],
+          properties: {
+            message: { type: "string" },
+            job: { $ref: "#/components/schemas/Job" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+};

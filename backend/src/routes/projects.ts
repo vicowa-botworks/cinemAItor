@@ -14,6 +14,8 @@ import {
 } from "@cinemaItor/db/projects.ts";
 import { applyTemplateStructure, getTemplate } from "@cinemaItor/db/templates.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
   const body = ctx.request.body;
@@ -219,3 +221,52 @@ export const projectRouter = new Router()
     if (!deleted) throw notFound("Project not found");
     ctx.response.body = { message: "Project deleted" };
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/projects": {
+    summary: "List projects the user can access",
+    responses: {
+      200: {
+        description: "Accessible projects",
+        schema: { type: "array", items: ref("Project") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/projects": {
+    summary: "Create a project",
+    description: "When template_id is given, the template's starting timeline and " +
+      "tracks are materialized into the new project (the project is removed " +
+      "again if materialization fails).",
+    requestBody: { schema: ref("ProjectInput") },
+    responses: {
+      201: { description: "The created project", schema: ref("Project") },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/projects/{id}": {
+    summary: "Get one project",
+    responses: {
+      200: { description: "The project", schema: ref("Project") },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "PATCH /api/v1/projects/{id}": {
+    summary: "Update project settings",
+    description: "At least one field must be present. default_model_preferences accepts " +
+      "an object or a JSON string.",
+    requestBody: { schema: ref("ProjectUpdates") },
+    responses: {
+      200: { description: "The updated project", schema: ref("Project") },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "DELETE /api/v1/projects/{id}": {
+    summary: "Delete a project (soft delete)",
+    description: "Requires admin permission on the project.",
+    responses: {
+      200: { description: "Deletion acknowledged", schema: ref("Message") },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+};
