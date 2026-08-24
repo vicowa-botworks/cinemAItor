@@ -8,7 +8,11 @@ DIA-001…DIA-008).
 ## Concepts
 
 - **Hardware report** (DIA-001): `detectHardware()` (from the model manager) plus OS/arch, Deno
-  version, and process uptime.
+  version, and process uptime. GPU detection is shared with the models hardware endpoint — the
+  report carries
+  `hardware.gpu = { vendor, model, vram_mb, vram_used_mb, driver_version,
+  cuda_version }` (all
+  null when no GPU is detected; see `docs/models.md`, Hardware detection).
 - **Model report** (DIA-002): every registered model with a live `checkModelHealth` result and
   summary counters (`total`, `enabled`, `unhealthy`).
 - **Diagnostics table** (DIA-003): a durable, capped store of operational events. The backend logger

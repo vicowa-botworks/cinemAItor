@@ -2,6 +2,9 @@ export interface GpuInfo {
   vendor: string;
   model: string;
   vram_mb: number | null;
+  vram_used_mb: number | null;
+  driver_version: string | null;
+  cuda_version: string | null;
 }
 
 export interface HardwareInfo {
@@ -64,6 +67,34 @@ async function runCommand(cmd: string, args: string[]): Promise<string | null> {
 }
 
 /**
+ * Parse a `nvidia-smi` memory field ("97871 MiB", "95.6 GB", "1024") into
+ * megabytes. nvidia-smi reports memory in MiB by default; unit handling is
+ * kept so explicit units are honoured. Returns null when unparseable.
+ */
+export function parseNvidiaSmiMemory(value: string | undefined | null): number | null {
+  if (!value) return null;
+  const match = value.match(/([\d.]+)\s*([KMGT]?i?B)?/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return null;
+  const unit = (match[2] ?? "MiB").toLowerCase();
+  const factorByMb: Record<string, number> = {
+    "b": 1 / MB,
+    "ib": 1 / MB,
+    "kb": 1 / 1024,
+    "kib": 1 / 1024,
+    "mb": 1,
+    "mib": 1,
+    "gb": 1024,
+    "gib": 1024,
+    "tb": 1024 * 1024,
+    "tib": 1024 * 1024,
+  };
+  const factor = factorByMb[unit] ?? 1;
+  return Math.round(amount * factor);
+}
+
+/**
  * Best-effort hardware detection (MOD-009). Every field degrades gracefully:
  * unknown values are null/1 rather than throwing, so the API never fails on
  * exotic platforms.
@@ -88,16 +119,21 @@ export async function detectHardware(): Promise<HardwareInfo> {
 
   let gpu: GpuInfo | null = null;
   const nvidia = await runCommand("nvidia-smi", [
-    "--query-gpu=name,memory.total",
+    "--query-gpu=name,memory.total,memory.used,driver_version,cuda_version",
     "--format=csv,noheader",
   ]);
   if (nvidia) {
-    const [name, vram] = nvidia.split("\n")[0].split(",").map((s) => s.trim());
-    const vramMatch = vram?.match(/[\d.]+/);
+    const [name, total, used, driver, cuda] = nvidia
+      .split("\n")[0]
+      .split(",")
+      .map((s) => s.trim());
     gpu = {
       vendor: "nvidia",
-      model: name ?? "unknown",
-      vram_mb: vramMatch ? Math.round(Number(vramMatch[0]) / MB) : null,
+      model: name || "unknown",
+      vram_mb: parseNvidiaSmiMemory(total),
+      vram_used_mb: parseNvidiaSmiMemory(used),
+      driver_version: driver || null,
+      cuda_version: cuda || null,
     };
   }
 

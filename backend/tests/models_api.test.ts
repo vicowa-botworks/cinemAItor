@@ -354,6 +354,21 @@ describe("models api", () => {
         };
         assertEquals(body.hardware.platform, Deno.build.os);
         assert(body.hardware.cpu_count >= 1);
+        if (body.hardware.gpu !== null) {
+          const g = body.hardware.gpu as Record<string, unknown>;
+          for (
+            const key of [
+              "vendor",
+              "model",
+              "vram_mb",
+              "vram_used_mb",
+              "driver_version",
+              "cuda_version",
+            ]
+          ) {
+            assert(key in g, `gpu report missing key: ${key}`);
+          }
+        }
         const texts = body.warnings.map((w) => w.warning);
         assert(texts.some((t) => t.includes("VRAM")));
         assert(texts.some((t) => t.includes("RAM")));
