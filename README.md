@@ -1,4 +1,4 @@
-# CinemaItor
+# CinemAItor
 
 AI-assisted movie creation platform. Plan, write, and generate movies with AI.
 

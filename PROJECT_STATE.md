@@ -1,4 +1,4 @@
-# Project State - CinemaItor
+# Project State - CinemAItor
 
 ## Current Status: Milestone 8 complete — Advanced Studio Features (every exit criterion shipped)
 

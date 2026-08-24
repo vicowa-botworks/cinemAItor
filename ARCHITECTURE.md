@@ -2,7 +2,7 @@
 
 ## Overview
 
-CinemaItor is a full-stack web application for AI-assisted movie creation. Users can plan movies,
+CinemAItor is a full-stack web application for AI-assisted movie creation. Users can plan movies,
 write scenes, and generate content using AI tools.
 
 ## Tech Stack
