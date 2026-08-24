@@ -1,8 +1,6 @@
 # Project State - CinemaItor
 
-## Current Status: Milestone 7 complete — Professional Workflow Expansion (every scope item
-
-shipped)
+## Current Status: Milestone 8 complete — Advanced Studio Features (every exit criterion shipped)
 
 Milestone 7's full scope is in: audio generation + waveforms (music/voiceover/SFX), batch shot
 generation, transitions + color grading, subtitles + text overlays, proxy workflow polish, basic
@@ -11,15 +9,18 @@ the model benchmark and A/B + version comparison, skill system v1, project templ
 storage management, production hardening (auth rate limiting, chunked upload streaming), asset
 dependency tracking (AST-015, "Used in" + real delete warnings), and broken reference repair (Prompt
 Studio repair flow). Remaining deferred items: render farm and real model adapters (both explicitly
-out of MVP scope). Milestone 8 (Advanced Studio Features) is underway: 3D support — the first MS-8
-item — is in (model import, in-browser three.js preview, and derived view export as `@`-references;
-see `docs/3d.md`), followed by the script importer (SCN-015: paste a screenplay, preview the parsed
-Fountain-lite scenes, bulk-create them as draft scenes with prompts), the continuity analyzer (MS-8:
-`GET /projects/:id/continuity`, a deterministic read-only report over panels/scenes/shots with a
-scene-list UI panel) and the score suggestion (MS-8: `GET /timelines/:id/score-suggestion` +
-`POST /timelines/:id/score` — deterministic cut + storyboard analysis synthesized into a music
-prompt, then a normal `music` job whose candidates land on a score asset; see `docs/timelines.md`).
-Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
+out of MVP scope). Milestone 8 (Advanced Studio Features) is complete: 3D support (model import,
+in-browser three.js preview, and derived view export as `@`-references; see `docs/3d.md`), the
+script importer (SCN-015: paste a screenplay, preview the parsed Fountain-lite scenes, bulk-create
+them as draft scenes with prompts), the continuity analyzer (MS-8: `GET /projects/:id/continuity`, a
+deterministic read-only report over panels/scenes/shots with a scene-list UI panel), the score
+suggestion (MS-8: `GET /timelines/:id/score-suggestion` + `POST /timelines/:id/score` —
+deterministic cut + storyboard analysis synthesized into a music prompt, then a normal `music` job
+whose candidates land on a score asset; see `docs/timelines.md`) and advanced exports (MS-8:
+preset-driven video encoding with seeded archival `preset-master` and HDR `preset-hdr` presets,
+fx-pass re-encode routing for non-default encode profiles, an `ffmpeg -encoders` availability probe,
+and preset definition validation; see `docs/renders.md`). Remaining MS-8 items are tracked in
+`MASTER-PLAN.md`.
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -509,6 +510,20 @@ The product track follows `MASTER-PLAN.md`.
       editable prompt, Analyze cut / Generate score, job + asset links) and `api.getScoreSuggestion`
       / `api.generateScore` (+2 frontend steps); backend 408 + frontend 269 test steps green — see
       `docs/timelines.md`
+- [x] Advanced exports (MS-8, fifth Milestone 8 item — "advanced exports work reliably"):
+      preset-driven video encoding in the render engine. `videoEncodeArgs(preset)` replaces the
+      legacy hardcoded libx264 `veryfast` CRF 20 (still the default when a preset matches it); two
+      advanced presets are seeded (migration 0022): `preset-master` (archival h264, CRF 17, `slow`,
+      yuv420p) and `preset-hdr` (HEVC HLG 10-bit wide-gamut, CRF 20, `slow`, yuv420p10le + `hvc1`
+      tag + BT.2020 primaries/transfer/matrix). A preset whose encode profile differs from the
+      default forces the re-encoding fx pass even on fx-free timelines (`presetRequiresReencode` in
+      `planNeedsFxPass`), and a one-time `ffmpeg -encoders` probe (cached per engine) fails the job
+      with a readable error when the build lacks the preset's encoder (e.g. `libx265` for HDR)
+      instead of crashing mid-render. Preset definitions are validated on create (format
+      `mp4|mov|wav`, codec `h264|hevc`, resolution `WxH`, frame rate 0–240). The mock engine's
+      fingerprint includes the preset encode profile, so the same timeline renders to different
+      deterministic bytes per preset. +5 backend steps; backend 413 + frontend 269 test steps green
+      — see `docs/renders.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 

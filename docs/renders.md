@@ -7,9 +7,14 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 
 - **Render presets** (`render_presets`) capture output settings: `name`, `kind` (`draft` or
   `final`), `output_format`, `resolution`, `frame_rate`, `codec`, `audio_codec`, `bitrate` plus
-  free-form `settings` JSON. Three defaults are seeded by migration 0010 (`preset-draft` 720p30,
-  `preset-final` 1080p60, `preset-audio` wav). Presets are global; creation is admin-only.
-  `ensureDefaultPresets()` re-seeds idempotently for databases reset row-wise.
+  free-form `settings` JSON. Five defaults are seeded (migration 0010 + 0022): `preset-draft`
+  720p30, `preset-final` 1080p60, `preset-audio` wav, `preset-master` (archival-quality h264: CRF
+  17, `slow` preset, yuv420p) and `preset-hdr` (HEVC HLG 10-bit wide-gamut: CRF 20, `slow`,
+  yuv420p10le with BT.2020 primaries / arib-std-b67 transfer / bt2020nc matrix — needs `libx265` in
+  the ffmpeg build). Presets are global; creation is admin-only. `ensureDefaultPresets()` re-seeds
+  idempotently for databases reset row-wise. Preset definitions are validated on create:
+  `output_format` ∈ {`mp4`, `mov`, `wav`}, `codec` ∈ {`h264`, `hevc`}, `resolution` must look like
+  `1920x1080`, `frame_rate` 0–240.
 - **Render jobs** (`render_jobs`) are a durable queue that mirrors the generation job system:
   `queued → running → succeeded | failed | cancelled` (or `cancelling` while a running job winds
   down). Jobs carry a lease (`lease_owner`, `lease_expires_at`); stale leases are recovered back to
@@ -19,10 +24,12 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
   - `FfmpegRenderEngine` — three paths, chosen per plan (audio preset first, then
     `planNeedsFxPass`):
   - **No fx** (all items hard-cut, no fades, no grade, no source trim/speed, no text overlays, no
-    audio, and every item plays its source to the end — no tail trim): lossless concat demuxer
-    (`ffmpeg -f concat -c copy`), stream copy. The concat demuxer can only splice whole files, so a
-    tail-trimmed item instead takes the fx path below and gets a frame-accurate cut (see the plan's
-    `consumes_full_source` flag).
+    audio, every item plays its source to the end — no tail trim — and the preset's encode profile
+    matches the legacy default): lossless concat demuxer (`ffmpeg -f concat -c copy`), stream copy.
+    The concat demuxer can only splice whole files, so a tail-trimmed item instead takes the fx path
+    below and gets a frame-accurate cut (see the plan's `consumes_full_source` flag). A preset whose
+    encode profile differs from the default (the advanced presets) can never be satisfied by a
+    stream copy and forces the fx path (`presetRequiresReencode`).
   - **With fx**: one input per item plus a filter graph — per-item `trim` + `setpts` (source offset
     / speed), `eq` (brightness/contrast/saturation), `colortemperature` (grade temperature →
     Kelvin), `fade` in/out — chained with `xfade` for real transitions and the `concat` filter for
@@ -34,8 +41,11 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
     frame-evaluated ducking `volume` stage for music items (see “Ducking”) + `afade` in/out, then
     silenced into its timeline slot with `adelay` and summed with
     `amix=duration=longest:normalize=0` (no 1/N normalization) — the mix is trimmed back to the
-    video length and mapped as AAC (192 k). Re-encodes to H.264 (+AAC when audio is mixed); silent
-    plans keep `-an`.
+    video length and mapped as AAC (192 k). Re-encodes with the plan's preset: the video stream goes
+    through `videoEncodeArgs(preset)` (defaults reproduce the legacy libx264 `veryfast` CRF 20
+    8-bit; advanced presets raise quality, or switch to 10-bit wide-gamut HEVC with the `hvc1` tag
+    and BT.2020 color metadata), and the audio codec comes from `preset.audio_codec` (default
+    `aac`). Silent plans keep `-an`.
   - **Audio-only** (`wav` presets): one input per audio-track item, each run through the same
     `atrim` + `asetpts` + `atempo` + `volume` + `afade` chain as the fx pass, then silenced into its
     timeline slot with `adelay` and summed with `amix=duration=longest:normalize=0` (no 1/N
@@ -47,10 +57,15 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
     read loop races against process exit (a killed ffmpeg with helper processes would otherwise hold
     the pipe open), and a 250 ms poller kills ffmpeg when the job is cancelled so cancellation does
     not wait on ffmpeg output.
+  - **Encoder availability**: before the fx pass, the engine probes `ffmpeg -encoders` once per
+    process (cached) and fails the job with a readable error when the preset requires an encoder the
+    build lacks (e.g. `libx265` for the HDR preset) instead of crashing mid-render. An unparseable
+    probe result is treated as "unknown" and the render proceeds.
 - `MockRenderEngine` — deterministic placeholder output, content-addressed on the plan (seeded from
-  format + duration + a fingerprint of every item's source/source-edit, fx and the text and audio
-  overlays; valid minimal WAV for the `wav` format) so rendering works on machines without ffmpeg
-  and re-renders of an unchanged timeline deduplicate in the content store.
+  format + duration + a fingerprint of every item's source/source-edit, fx, the text and audio
+  overlays, and the preset's encode profile — so the same timeline rendered with different presets
+  produces different bytes; valid minimal WAV for the `wav` format) so rendering works on machines
+  without ffmpeg and re-renders of an unchanged timeline deduplicate in the content store.
 - Selection: `RENDER_ENGINE=auto|ffmpeg|mock` (default `auto` = ffmpeg when available, else mock).
   `setRenderEngine()` is a test hook.
 - **Render plan**: non-archived items on unlocked video/overlay tracks, sorted by start time, each
@@ -107,7 +122,7 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 | Method | Endpoint                     | Description                                                                                                |
 | ------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | GET    | `/api/v1/render-presets`     | List presets                                                                                               |
-| POST   | `/api/v1/render-presets`     | Create a preset (admin only)                                                                               |
+| POST   | `/api/v1/render-presets`     | Create a preset (admin only; format/codec/resolution/frame-rate validated)                                 |
 | POST   | `/api/v1/renders`            | Queue a render: `{project_id, timeline_id, preset_id?}` → 202 with the queued job                          |
 | GET    | `/api/v1/renders/:id`        | Job state (status, progress, error, output path, validation report)                                        |
 | GET    | `/api/v1/renders/:id/log`    | Structured event log for the job                                                                           |

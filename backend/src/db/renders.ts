@@ -127,8 +127,49 @@ export function ensureDefaultPresets(): void {
      VALUES
      ('preset-draft', 'Draft 720p30', 'draft', 'mp4', '1280x720', 30, 'h264', 'aac', '5000k', NULL, datetime('now'), datetime('now')),
      ('preset-final', 'Final 1080p60', 'final', 'mp4', '1920x1080', 60, 'h264', 'aac', '12000k', NULL, datetime('now'), datetime('now')),
-     ('preset-audio', 'Audio WAV', 'final', 'wav', NULL, NULL, NULL, NULL, NULL, NULL, datetime('now'), datetime('now'))`,
+     ('preset-audio', 'Audio WAV', 'final', 'wav', NULL, NULL, NULL, NULL, NULL, NULL, datetime('now'), datetime('now')),
+     ('preset-master', 'Master 1080p60 (HQ)', 'final', 'mp4', '1920x1080', 60, 'h264', 'aac', '25000k', '{"crf":17,"preset":"slow","pix_fmt":"yuv420p"}', datetime('now'), datetime('now')),
+     ('preset-hdr', 'HDR 1080p60 (HEVC HLG)', 'final', 'mp4', '1920x1080', 60, 'hevc', 'aac', '25000k', '{"crf":20,"preset":"slow","pix_fmt":"yuv420p10le","color":{"primaries":"bt2020","transfer":"arib-std-b67","space":"bt2020nc"}}', datetime('now'), datetime('now'))`,
   );
+}
+
+export const PRESET_OUTPUT_FORMATS = ["mp4", "mov", "wav"];
+export const PRESET_VIDEO_CODECS = ["h264", "hevc"];
+const RESOLUTION_RE = /^\d{2,5}x\d{2,5}$/;
+
+/**
+ * Validate the field values of a (new) preset before it can be stored.
+ * The engine understands exactly these formats/codecs, so anything else
+ * would queue a render that can never produce the promised output —
+ * reject it at creation time instead.
+ */
+export function validatePresetFields(input: PresetInput): void {
+  const format = input.output_format.trim().toLowerCase();
+  if (!PRESET_OUTPUT_FORMATS.includes(format)) {
+    throw badRequest(
+      `output_format must be one of: ${PRESET_OUTPUT_FORMATS.join(", ")}`,
+    );
+  }
+  if (
+    input.codec &&
+    !PRESET_VIDEO_CODECS.includes(input.codec.trim().toLowerCase())
+  ) {
+    throw badRequest(
+      `codec must be one of: ${PRESET_VIDEO_CODECS.join(", ")}`,
+    );
+  }
+  if (input.resolution !== undefined && input.resolution !== null) {
+    if (!RESOLUTION_RE.test(input.resolution.trim())) {
+      throw badRequest("resolution must look like '1920x1080'");
+    }
+  }
+  if (
+    input.frame_rate !== undefined && input.frame_rate !== null &&
+    (!Number.isFinite(input.frame_rate) || input.frame_rate <= 0 ||
+      input.frame_rate > 240)
+  ) {
+    throw badRequest("frame_rate must be a number between 0 and 240");
+  }
 }
 
 export function listPresets(): RenderPreset[] {
@@ -164,6 +205,7 @@ export function createPreset(adminUserId: number, input: PresetInput): RenderPre
     throw badRequest("kind must be 'draft' or 'final'");
   }
   if (!input.output_format?.trim()) throw badRequest("output_format is required");
+  validatePresetFields(input);
   const db = getDb();
   const id = crypto.randomUUID();
   const now = nowIso();

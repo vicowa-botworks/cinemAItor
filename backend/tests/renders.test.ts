@@ -25,6 +25,7 @@ import {
   listRenderEvents,
   listRenderJobs,
   rawGetRenderJob,
+  type RenderPreset,
   TERMINAL_RENDER_STATUSES,
   updateRenderProgress,
 } from "../src/db/renders.ts";
@@ -48,11 +49,15 @@ import {
   MockRenderEngine,
   newFfmpegProgressState,
   planNeedsFxPass,
+  presetEncodeProfile,
+  presetRequiresReencode,
   type RenderAudioItem,
   type RenderInputItem,
   type RenderPlan,
   type RenderTextOverlay,
+  requiredVideoEncoder,
   setRenderEngine,
+  videoEncodeArgs,
 } from "../src/services/render_engine.ts";
 import { getContentStore, resetContentStore } from "../src/storage/content_store.ts";
 
@@ -63,6 +68,20 @@ let timelineId: string;
 let appData: string;
 let runner: RenderRunner | null = null;
 let mediaAssetId: string;
+
+function baseItem(): RenderInputItem {
+  return {
+    file_path: "/tmp/fake_in.mp4",
+    start_time: 0,
+    end_time: 5,
+    duration: 5,
+    transition: "cut",
+    transition_duration: 0,
+    fade_in: 0,
+    fade_out: 0,
+    color_grade: null,
+  };
+}
 
 describe("renders", () => {
   beforeEach(async () => {
@@ -147,6 +166,106 @@ describe("renders", () => {
       resolution: "3840x2160",
     });
     assertEquals(created.kind, "final");
+  });
+
+  it("seeds the advanced export presets", () => {
+    const ids = listPresets().map((p) => p.id);
+    assert(ids.includes("preset-master"));
+    assert(ids.includes("preset-hdr"));
+    const master = listPresets().find((p) => p.id === "preset-master")!;
+    const hdr = listPresets().find((p) => p.id === "preset-hdr")!;
+    assertEquals(master.codec, "h264");
+    assertEquals(hdr.codec, "hevc");
+    assertEquals(hdr.output_format, "mp4");
+  });
+
+  it("advanced preset encode profiles drive the ffmpeg args", () => {
+    const presets = Object.fromEntries(listPresets().map((p) => [p.id, p]));
+    // The no-preset default reproduces the legacy hardcoded encoder args.
+    assertEquals(videoEncodeArgs(null), [
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+    ]);
+    // Default (no preset) and the plain final preset match the legacy
+    // profile: the lossless concat path stays available.
+    assertEquals(presetRequiresReencode(null), false);
+    assertEquals(presetRequiresReencode(presets["preset-final"]), false);
+    // Advanced presets force the re-encoding fx pass.
+    assertEquals(presetRequiresReencode(presets["preset-master"]), true);
+    assertEquals(presetRequiresReencode(presets["preset-hdr"]), true);
+    // Master: archival-quality h264.
+    assertEquals(requiredVideoEncoder(presets["preset-master"]), "libx264");
+    const masterArgs = videoEncodeArgs(presets["preset-master"]);
+    assertEquals(masterArgs[masterArgs.indexOf("-crf") + 1], "17");
+    assertEquals(masterArgs[masterArgs.indexOf("-preset") + 1], "slow");
+    // HDR: HEVC 10-bit wide-gamut with BT.2020 / HLG metadata.
+    assertEquals(requiredVideoEncoder(presets["preset-hdr"]), "libx265");
+    const hdrArgs = videoEncodeArgs(presets["preset-hdr"]);
+    assert(hdrArgs.includes("libx265"));
+    assert(hdrArgs.includes("hvc1"));
+    assertEquals(hdrArgs[hdrArgs.indexOf("-pix_fmt") + 1], "yuv420p10le");
+    assertEquals(hdrArgs[hdrArgs.indexOf("-color_primaries") + 1], "bt2020");
+    assertEquals(hdrArgs[hdrArgs.indexOf("-color_trc") + 1], "arib-std-b67");
+    assertEquals(hdrArgs[hdrArgs.indexOf("-colorspace") + 1], "bt2020nc");
+    // buildFxArgs picks the preset's video and audio encoders.
+    const audioItem: RenderAudioItem = {
+      file_path: "/tmp/fake_in.wav",
+      start_time: 0,
+      end_time: 5,
+      duration: 5,
+      source_offset: 0,
+      source_duration: 5,
+      speed: 1,
+      gain: 1,
+      fade_in: 0,
+      fade_out: 0,
+    };
+    const fxArgs = buildFxArgs(
+      [baseItem()],
+      [],
+      "/tmp/out.mp4",
+      [audioItem],
+      presets["preset-hdr"],
+    );
+    assertEquals(fxArgs[fxArgs.indexOf("-c:v") + 1], "libx265");
+    assertEquals(fxArgs[fxArgs.indexOf("-c:a") + 1], "aac");
+  });
+
+  it("mock renders are content-addressed on the preset encode profile", async () => {
+    const presets = Object.fromEntries(listPresets().map((p) => [p.id, p]));
+    const engine = new MockRenderEngine();
+    const hooks = { onProgress: () => {}, isCancelled: () => false };
+    const plan = (preset: RenderPreset): RenderPlan => ({
+      output_path: "/tmp/fx-out.mp4",
+      filename: "out.mp4",
+      format: "mp4",
+      preset,
+      items: [baseItem()],
+      text_overlays: [],
+      total_duration: 5,
+    });
+    await engine.render(plan(presets["preset-final"]), hooks);
+    const finalBytes = await Deno.readFile("/tmp/fx-out.mp4");
+    Deno.removeSync("/tmp/fx-out.mp4");
+    await engine.render(plan(presets["preset-master"]), hooks);
+    const masterBytes = await Deno.readFile("/tmp/fx-out.mp4");
+    Deno.removeSync("/tmp/fx-out.mp4");
+    assertNotEquals(finalBytes, masterBytes);
+    // Same preset again: byte-identical (deterministic).
+    await engine.render(plan(presets["preset-master"]), hooks);
+    assertEquals(await Deno.readFile("/tmp/fx-out.mp4"), masterBytes);
+    Deno.removeSync("/tmp/fx-out.mp4");
+    // The profile string itself is stable and distinct per preset.
+    assertNotEquals(
+      presetEncodeProfile(presets["preset-final"]),
+      presetEncodeProfile(presets["preset-hdr"]),
+    );
   });
 
   it("validates render creation", () => {
@@ -254,6 +373,9 @@ describe("renders", () => {
       const dir = Deno.makeTempDirSync({ prefix: "fake_ffmpeg_" });
       const path = join(dir, "ffmpeg");
       const body = [
+        'if [ "$2" = "-encoders" ]; then',
+        "  exit 0",
+        "fi",
         'printf "%s\\n" "$@" > "' + argsLog + '"',
         "out=$1",
         'for a in "$@"; do out=$a; done',
@@ -1182,6 +1304,11 @@ describe("renders", () => {
     }
 
     const progressScript = [
+      // The engine probes `ffmpeg -hide_banner -encoders` before the fx pass;
+      // exit quietly so the probe has no output-file side effect.
+      'if [ "$2" = "-encoders" ]; then',
+      "  exit 0",
+      "fi",
       "out=$1",
       'for a in "$@"; do out=$a; done',
       'printf "out_time_us=2500000\\nprogress=continue\\n"',
@@ -1258,6 +1385,44 @@ describe("renders", () => {
       // Same progress band as the fx pass (base 10), not the concat fast
       // path (base 20).
       assertEquals(flat(seen), [5, 10, 50, 90, 100]);
+    });
+
+    it("routes advanced presets through the fx pass with the preset encoder", async () => {
+      const presets = Object.fromEntries(listPresets().map((p) => [p.id, p]));
+      const argsLog = join(appData, "advanced-args.txt");
+      // The fake build advertises only libx264 — enough for the master
+      // preset, missing libx265 for the HDR one.
+      const script = writeFakeFfmpeg(
+        [
+          'if [ "$2" = "-encoders" ]; then',
+          "  printf ' V..... libx264  libx264 H.264 / AVC\\n'",
+          "  exit 0",
+          "fi",
+          'printf "%s\\n" "$@" > "' + argsLog + '"',
+          ...progressScript.split("\n"),
+        ].join("\n"),
+      );
+      const hooks = { onProgress: () => {}, isCancelled: () => false };
+      const engine = new FfmpegRenderEngine(script);
+      // Archival master on an fx-free timeline: the re-encoding fx pass with
+      // the preset's encoder settings, not the lossless concat fast path.
+      await engine.render(planFor({}, { preset: presets["preset-master"] }), hooks);
+      let args = (await Deno.readTextFile(argsLog)).split("\n");
+      assert(args.includes("libx264"));
+      assertEquals(args[args.indexOf("-crf") + 1], "17");
+      assertEquals(args[args.indexOf("-preset") + 1], "slow");
+      // The plain final preset matches the legacy profile: stays lossless.
+      Deno.removeSync(argsLog);
+      await engine.render(planFor({}, { preset: presets["preset-final"] }), hooks);
+      args = (await Deno.readTextFile(argsLog)).split("\n");
+      assert(args.includes("copy"));
+      // HDR needs libx265, which this (fake) build lacks: clean job failure
+      // instead of a mid-render ffmpeg crash.
+      await assertRejects(
+        () => engine.render(planFor({}, { preset: presets["preset-hdr"] }), hooks),
+        Error,
+        "libx265",
+      );
     });
 
     it("routes wav plans to the audio path", async () => {

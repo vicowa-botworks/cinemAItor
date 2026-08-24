@@ -139,6 +139,8 @@ describe("renders api", () => {
         assertEquals(list.status, 200);
         const ids = (list.json as { id: string }[]).map((p) => p.id);
         assert(ids.includes("preset-final"));
+        assert(ids.includes("preset-master"));
+        assert(ids.includes("preset-hdr"));
 
         const created = await req(
           "POST",
@@ -157,6 +159,46 @@ describe("renders api", () => {
           otherToken,
         );
         assertEquals(res.status, 403);
+      })();
+    }));
+
+  it("rejects preset definitions with unsupported fields", () =>
+    withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const cases: { body: Record<string, unknown>; status: number }[] = [
+          {
+            body: { name: "AV1", kind: "final", output_format: "mp4", codec: "av1" },
+            status: 400,
+          },
+          {
+            body: { name: "WebM", kind: "draft", output_format: "webm" },
+            status: 400,
+          },
+          {
+            body: { name: "BadRes", kind: "final", output_format: "mp4", resolution: "wide" },
+            status: 400,
+          },
+          {
+            body: { name: "Fast", kind: "final", output_format: "mp4", frame_rate: 999 },
+            status: 400,
+          },
+        ];
+        for (const c of cases) {
+          const res = await req("POST", "/api/v1/render-presets", c.body, ownerToken);
+          assertEquals(res.status, c.status, JSON.stringify(c.body));
+        }
+        // A fully valid advanced preset definition is accepted.
+        const ok = await req("POST", "/api/v1/render-presets", {
+          name: "Master Copy",
+          kind: "final",
+          output_format: "mp4",
+          codec: "h264",
+          resolution: "1920x1080",
+          frame_rate: 24,
+          settings: { crf: 16, preset: "slow", pix_fmt: "yuv420p" },
+        }, ownerToken);
+        assertEquals(ok.status, 201);
       })();
     }));
 
