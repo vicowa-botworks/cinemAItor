@@ -8,6 +8,7 @@ import {
   getUserById,
   listUsers,
   setUserActive,
+  setUserEmailConfirmed,
   setUserMustChangePassword,
   setUserPassword,
   setUserRole,
@@ -17,7 +18,24 @@ import {
 import { getSetting, setSetting } from "@cinemaItor/db/settings.ts";
 import { hashPassword } from "@cinemaItor/services/password.ts";
 import { logAudit } from "@cinemaItor/services/audit.ts";
-import { badRequest, conflict, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import {
+  getEmailSettings,
+  isMailAvailable,
+  isValidTlsMode,
+  type MailResult,
+  sendMail,
+  setEmailSetting,
+} from "@cinemaItor/services/mail.ts";
+import { SmtpError } from "@cinemaItor/services/smtp.ts";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  ERROR_CODES,
+  forbidden,
+  notFound,
+  unauthorized,
+} from "@cinemaItor/errors.ts";
 
 const MIN_PASSWORD_LENGTH = 8;
 const REGISTRATION_KEY = "registration_enabled";
@@ -49,6 +67,7 @@ function publicUser(user: User) {
     role: user.role,
     is_active: user.is_active === 1,
     must_change_password: user.must_change_password === 1,
+    email_confirmed: user.email_confirmed === 1,
     created_at: user.created_at,
   };
 }
@@ -160,6 +179,12 @@ async function handleUpdateUser(ctx: ParamContext): Promise<void> {
     changes.push("must_change_password");
   }
 
+  const emailConfirmed = asOptionalBool(body.email_confirmed);
+  if (emailConfirmed !== undefined && emailConfirmed !== (target.email_confirmed === 1)) {
+    setUserEmailConfirmed(id, emailConfirmed);
+    changes.push("email_confirmed");
+  }
+
   if (typeof body.display_name === "string" && body.display_name) {
     if (body.display_name !== target.display_name) {
       updateDisplayName(id, body.display_name);
@@ -219,10 +244,120 @@ async function handleUpdateSettings(ctx: Context): Promise<void> {
   ctx.response.body = { registration_enabled: enabled };
 }
 
+function handleGetEmailSettings(ctx: Context): void {
+  requireAdmin(ctx);
+  ctx.response.body = { ...getEmailSettings() };
+}
+
+// Partial update of the SMTP/URL/confirmation settings. `smtp_password`
+// accepts a string (new secret) or null (clear); unknown keys are ignored
+// like the other settings routes.
+async function handleUpdateEmailSettings(ctx: Context): Promise<void> {
+  const adminId = requireAdmin(ctx);
+  const body = await readJsonBody(ctx);
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(body)) {
+    switch (key) {
+      case "smtp_host":
+      case "smtp_user":
+      case "smtp_from":
+      case "app_base_url": {
+        if (typeof value !== "string") throw badRequest(`${key} must be a string`);
+        values[key] = value.trim();
+        break;
+      }
+      case "smtp_port": {
+        const port = Number(value);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          throw badRequest("smtp_port must be an integer between 1 and 65535");
+        }
+        values.smtp_port = String(port);
+        break;
+      }
+      case "smtp_tls": {
+        if (typeof value !== "string" || !isValidTlsMode(value)) {
+          throw badRequest("smtp_tls must be one of: none, starttls, implicit");
+        }
+        values.smtp_tls = value;
+        break;
+      }
+      case "smtp_password": {
+        if (value === null) values.smtp_password = "";
+        else if (typeof value === "string") values.smtp_password = value;
+        else throw badRequest("smtp_password must be a string or null to clear");
+        break;
+      }
+      case "email_confirmation_required": {
+        if (typeof value !== "boolean") {
+          throw badRequest("email_confirmation_required must be a boolean");
+        }
+        values.email_confirmation_required = value ? "1" : "0";
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  if (Object.keys(values).length === 0) {
+    throw badRequest("No valid fields to update");
+  }
+  for (const [key, value] of Object.entries(values)) setEmailSetting(key, value);
+  logAudit(adminId, "email.settings_update", "setting", Object.keys(values).join(","));
+  ctx.response.body = { ...getEmailSettings() };
+}
+
+async function handleSendEmailTest(ctx: Context): Promise<void> {
+  const adminId = requireAdmin(ctx);
+  const body = await readJsonBody(ctx);
+  const to = typeof body.to === "string" ? body.to.trim().toLowerCase() : "";
+  if (!isMailAvailable()) {
+    throw new AppError(
+      ERROR_CODES.NETWORK_ERROR,
+      "SMTP is not configured (smtp_host is empty)",
+      { status: 503 },
+    );
+  }
+  let result: MailResult;
+  try {
+    result = await sendMail({
+      to: to || getUserById(adminId)!.email,
+      subject: "CinemAItor mail test",
+      text: "This is a test message from CinemAItor.\n\n" +
+        "If you received it, your SMTP settings work.",
+    });
+  } catch (err) {
+    if (err instanceof SmtpError) {
+      throw new AppError(
+        ERROR_CODES.NETWORK_ERROR,
+        `Failed to send the test email via SMTP: ${err.message}`,
+        { status: 503 },
+      );
+    }
+    throw err;
+  }
+  logAudit(adminId, "email.test_sent", "email", result.transport);
+  ctx.response.body = { sent: result.sent, transport: result.transport };
+}
+
 export const router = new Router()
   .get("/api/v1/users", authMiddleware, handleListUsers)
   .get("/api/v1/users/settings", authMiddleware, handleGetSettings)
   .patch("/api/v1/users/settings", authMiddleware, handleUpdateSettings)
+  .get(
+    "/api/v1/users/settings/email",
+    authMiddleware,
+    handleGetEmailSettings,
+  )
+  .patch(
+    "/api/v1/users/settings/email",
+    authMiddleware,
+    handleUpdateEmailSettings,
+  )
+  .post(
+    "/api/v1/users/settings/email/test",
+    authMiddleware,
+    handleSendEmailTest,
+  )
   .post("/api/v1/users", authMiddleware, handleCreateUser)
   .patch("/api/v1/users/:id", authMiddleware, handleUpdateUser)
   .delete("/api/v1/users/:id", authMiddleware, handleDeleteUser);

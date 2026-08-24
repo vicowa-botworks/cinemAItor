@@ -1091,7 +1091,23 @@ POST /api/v1/auth/bootstrap
 POST /api/v1/auth/login
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
+GET  /api/v1/auth/setup-status
+PUT  /api/v1/auth/password
+POST /api/v1/auth/password-reset/request
+POST /api/v1/auth/password-reset/confirm
+POST /api/v1/auth/email-confirmation/confirm
+POST /api/v1/auth/email-confirmation/resend
+GET    /api/v1/invitations
+POST   /api/v1/invitations
+DELETE /api/v1/invitations/:id
+POST   /api/v1/invitations/accept
+GET    /api/v1/users/settings/email
+PATCH  /api/v1/users/settings/email
+POST   /api/v1/users/settings/email/test
 ```
+
+Email system (SMTP configuration, password reset, email confirmation, invitations): see
+`docs/email.md`.
 
 ## 8.2 Projects
 

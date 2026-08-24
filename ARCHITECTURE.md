@@ -65,12 +65,21 @@ only planned processing step:
 ```
 app-root (main router)
 ├── app-header (navigation)
-├── login-form (v1 auth: login / bootstrap; setup tab hidden once a user exists)
+├── login-form (v1 auth: login / bootstrap / self-register tabs; forgot-password
+│   │             link; unconfirmed-email login state with resend-confirmation button)
 ├── password-change-form (forced password change on first login for
 │   │             admin-provisioned accounts with must_change_password)
+├── forgot-password (request a password reset link, #/forgot-password)
+├── reset-password (set a new password from the emailed token,
+│   │               #/reset-password?token=…; a used/expired link reports the error)
+├── email-confirmation (auto-confirms on load, #/confirm-email?token=…)
+├── invitation (accept an admin invitation: choose display name + password,
+│   │           #/invitation?token=…; creates the account + a session)
 ├── user-manager (admin-only user management: add/promote/demote/activate/
 │   │             deactivate/reset-password/delete users + self-registration
-│   │             toggle, #/users)
+│   │             toggle + SMTP email settings (host/port/TLS/auth/from/base URL,
+│   │             test email, stored-password management) + invitations
+│   │             (send/revoke, status chips; unconfirmed users flagged), #/users)
 ├── project-list (project dashboard)
 │   ├── project-card (individual project)
 │   └── project-form (create; template picker pre-creates a starting timeline)
@@ -172,18 +181,30 @@ server.ts (entry point)
 ├── Health routes (/api/v1/health)
 ├── Auth routes (/api/v1/auth/*)
 │   ├── POST /bootstrap (first user, becomes admin)
-│   ├── POST /login
+│   ├── POST /login (403 EMAIL_NOT_CONFIRMED while the address is unconfirmed)
 │   ├── POST /logout
 │   ├── GET /me
-│   ├── GET /setup-status (public; `{registered}` — hides the first-user setup UI)
-│   └── PUT /password (auth; change own password, clears must_change_password)
+│   ├── GET /setup-status (public; `{registered, registration_enabled}`)
+│   ├── PUT /password (auth; change own password, clears must_change_password)
+│   ├── POST /password-reset/request (public; always 202 — no account enumeration;
+│   │   503 when mail delivery is disabled)
+│   ├── POST /password-reset/confirm (public; single-use 1h token; sets the password,
+│   │   confirms the email, revokes all sessions of the account)
+│   ├── POST /email-confirmation/confirm (public; single-use 24h token)
+│   └── POST /email-confirmation/resend (public; always 202; new link invalidates the old)
+├── Invitation routes (/api/v1/invitations/*)
+│   ├── GET / + POST / + DELETE /:id (admin; 7-day links, re-invite reissues,
+│   │   409 for existing accounts, 503 when mail delivery is disabled)
+│   └── POST /accept (public; single-use token → confirmed account + session)
 ├── User routes (/api/v1/users/*, auth middleware, admin-only)
 │   ├── GET / (list), POST / (create with default password, optional
 │   │   must_change_password flag + role),
 │   │   PATCH /:id (role / is_active / must_change_password / password reset /
 │   │   display_name; last-active-admin lockout guard, no self-deactivate/delete),
 │   │   DELETE /:id (soft — is_active=0, sessions die in auth middleware)
-│   └── GET/PATCH /settings (self-registration toggle; enforced on register)
+│   ├── GET/PATCH /settings (self-registration toggle; enforced on register)
+│   └── GET/PATCH /settings/email + POST /settings/email/test (SMTP configuration;
+│       see docs/email.md)
 ├── Project routes (/api/v1/projects/*, auth middleware)
 │   ├── GET / (list accessible)
 │   ├── POST / (create; optional template_id materializes a starting timeline)
@@ -331,6 +352,8 @@ server.ts (entry point)
 - `skills.ts`: Skill system v1 repository — definition parse/validation, CRUD, version snapshots,
   runs, and idempotent `seedSystemSkills`; `skill_engine.ts` (services) resolves typed inputs,
   expands placeholders and enqueues one generation job per step (see `docs/skills.md`)
+- `email_tokens.ts` + `invitations.ts`: single-use email tokens (SHA-256-stored, per-kind
+  revocation) and admin invitation links (see `docs/email.md`)
 
 ### Storage layer:
 
@@ -372,6 +395,23 @@ Forced password change (admin-provisioned accounts):
   4. PUT /api/v1/auth/password verifies the old password, stores the new hash,
      and clears the flag
 
+Password reset (see docs/email.md):
+  1. POST /api/v1/auth/password-reset/request {email} — answers 202 for every
+     address; a single-use 1-hour token is issued and mailed only if the account exists
+  2. POST /api/v1/auth/password-reset/confirm {token, new_password} — sets the
+     password, confirms the email, revokes all of the account's sessions
+
+Email confirmation (self-registration, when SMTP is configured):
+  1. POST /api/auth/register creates the account unconfirmed, mails a 24-hour
+     single-use link, and returns 201 without a token
+  2. Login attempts fail with 403 EMAIL_NOT_CONFIRMED until the link is opened
+     (or a password reset, which proves mailbox ownership)
+
+Invitations (admin):
+  1. POST /api/v1/invitations {email, display_name?} — 7-day single-use link
+  2. POST /api/v1/invitations/accept {token, password, display_name?} — creates a
+     confirmed account and a session in one step
+
 Authenticated Request:
   1. Client sends Bearer token in Authorization header
   2. Auth middleware verifies JWT signature and expiry
@@ -390,6 +430,8 @@ Authenticated Request:
 - `role` (TEXT, default: 'user')
 - `must_change_password` (INTEGER, default: 0) - set on admin-provisioned accounts when the admin
   wants the password changed at first login
+- `email_confirmed` (INTEGER, default: 1) - 0 while a self-registered account awaits its
+  confirmation link; login is refused with 403 `EMAIL_NOT_CONFIRMED`
 - `created_at`, `updated_at` (TEXT, datetime)
 
 **Legacy demo tables (unused):** The `movies`, `scenes` (movie scenes), and v0 `prompts` tables were
@@ -408,6 +450,9 @@ gone; the tables remain for backward compatibility of existing databases. v1 pro
   `Retry-After`
 - **Self-registration**: the legacy `POST /api/auth/register` endpoint is gated by the
   `registration_enabled` app setting (admin toggle under `#/users`; on by default)
+- **Email tokens**: reset/confirmation/invitation links are random 32-byte tokens stored only as
+  SHA-256 digests, single-use, TTL-bounded (1 h / 24 h / 7 d); reset + confirmation + invitation
+  endpoints are rate-limited like login (see `docs/email.md`)
 - **SQL**: All queries use parameterized statements (no string concatenation)
 - **CORS**: Restricted to `http://localhost:8124` in development
 - **Data isolation**: All v1 queries are permission-gated (see Authorization above), enforced in the

@@ -1,6 +1,7 @@
 import { Application, type Middleware } from "@oak/oak";
 import { router as authRouter } from "@cinemaItor/routes/auth.ts";
 import { router as usersRouter } from "@cinemaItor/routes/users.ts";
+import { router as invitationsRouter } from "@cinemaItor/routes/invitations.ts";
 import { assetRouter } from "@cinemaItor/routes/assets.ts";
 import { audioRouter } from "@cinemaItor/routes/audio.ts";
 import { jobRouter } from "@cinemaItor/routes/jobs.ts";
@@ -100,6 +101,7 @@ export function createApp(
   app.use(healthRouter.routes());
   app.use(authRouter.routes());
   app.use(usersRouter.routes());
+  app.use(invitationsRouter.routes());
   app.use(projectRouter.routes());
   app.use(skillsRouter.routes());
   app.use(templateRouter.routes());

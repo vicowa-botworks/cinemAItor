@@ -20,8 +20,12 @@ analysis synthesized into a music prompt, then a normal `music` job whose candid
 asset; see `docs/timelines.md`) and advanced exports (MS-8: preset-driven video encoding with seeded
 archival `preset-master` and HDR `preset-hdr` presets, fx-pass re-encode routing for non-default
 encode profiles, an `ffmpeg -encoders` availability probe, and preset definition validation; see
-`docs/renders.md`). Every Milestone 8 exit criterion is now shipped; the only remaining deferred
-item is the render farm (explicitly out of MVP scope).
+`docs/renders.md`). Since then the email system shipped: admin-configured SMTP
+(host/port/TLS/auth/From + base URL, test email), password reset by emailed single-use link,
+self-registration email confirmation (login gated with 403 `EMAIL_NOT_CONFIRMED`), and admin
+invitations with acceptance links — all degrading gracefully when no SMTP host is configured (see
+`docs/email.md`). Every Milestone 8 exit criterion is now shipped; the only remaining deferred item
+is the render farm (explicitly out of MVP scope).
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -562,6 +566,30 @@ The product track follows `MASTER-PLAN.md`.
       `default_settings`; +17 backend steps (`backend/tests/real_adapters.test.ts`: fake CLI
       scripts + a mock ComfyUI HTTP server, no real model needed); backend 444 + frontend 277 test
       steps green — see `docs/models.md`
+- [x] Email system (SMTP outbox): the instance can now send email. `settings` rows under `smtp_*`
+      (host/port/TLS mode/auth/From + `app_base_url`) are managed by an admin **Email** card in
+      `#/users` (password stored but never returned, test-email button); `services/smtp.ts` is a
+      minimal in-process SMTP client (plain / STARTTLS / implicit TLS, `AUTH LOGIN` with
+      `AUTH PLAIN` fallback, MIME text with dot-stuffing — no external mail dependency) and
+      `services/mail.ts` selects the transport (SMTP when `smtp_host` is set, in-memory mock
+      otherwise, `EMAIL_TRANSPORT` env override). Three flows ride on it, all with SHA-256-stored,
+      single-use, TTL-bounded tokens in the new `email_tokens` table (1 h reset / 24 h confirmation)
+      and the new `invitations` table (7 d): (1) **password reset** — public request/confirm
+      endpoints answer identically for unknown addresses (no enumeration), confirming the link sets
+      the password, confirms the email, and revokes all of the account's sessions (recovering an
+      account that never opened its confirmation email); (2) **email confirmation** — with mail
+      available, self-registration creates the account unconfirmed, mails a 24-h link, and returns
+      no token; login is refused with 403 `EMAIL_NOT_CONFIRMED` until the link is opened (resend
+      reissues and invalidates the old link); without mail configured registration behaves exactly
+      as before (immediate token); (3) **admin invitations** — 7-day links, re-invite reissues, 409
+      for existing accounts, accept creates a confirmed account + session in one step; unconfirmed
+      users are flagged in the user list with a manual "confirm email" action. Frontend: register
+      tab + forgot-password link + unconfirmed-login state in the login form, new `forgot-password`,
+      `reset-password`, `email-confirmation`, and `invitation` components, and the Email +
+      Invitations cards in user-manager. All new token endpoints are rate-limited like login; a
+      fresh token of a kind revokes the previous one; failed sends roll the token/invitation back.
+      `docs/email.md` covers the configuration and flows; +19 backend steps; backend 464 + frontend
+      277 test steps green
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -627,3 +655,5 @@ The product track follows `MASTER-PLAN.md`.
   2026
 - Advanced exports (MS-8, final item: preset-driven encoding, `preset-master`/`preset-hdr` seeds,
   encoder probe, preset validation): Sun Aug 23 2026
+- Email system (SMTP configuration, password reset, email confirmation, admin invitations): Mon Aug
+  24 2026

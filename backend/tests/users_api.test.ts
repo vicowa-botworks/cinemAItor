@@ -81,7 +81,7 @@ describe("user management api", () => {
         assertEquals(before.status, 200);
         assertEquals(
           (await before.json()) as Record<string, unknown>,
-          { registered: false },
+          { registered: false, registration_enabled: true },
         );
 
         await bootstrap("owner@example.com", "password123");
@@ -89,7 +89,7 @@ describe("user management api", () => {
         assertEquals(after.status, 200);
         assertEquals(
           (await after.json()) as Record<string, unknown>,
-          { registered: true },
+          { registered: true, registration_enabled: true },
         );
       })();
     });
