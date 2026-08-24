@@ -8,22 +8,24 @@ mixer + ducking, audio cleanup (denoise/normalize), subtitle generation (voiceov
 the model benchmark and A/B + version comparison, skill system v1, project templates, advanced
 storage management, production hardening (auth rate limiting, chunked upload streaming), asset
 dependency tracking (AST-015, "Used in" + real delete warnings), and broken reference repair (Prompt
-Studio repair flow). Remaining deferred items: render farm and real model adapters (both explicitly
-out of MVP scope). Milestone 8 (Advanced Studio Features) is complete: 3D support (model import,
-in-browser three.js preview, and derived view export as `@`-references; see `docs/3d.md`), the
-script importer (SCN-015: paste a screenplay, preview the parsed Fountain-lite scenes, bulk-create
-them as draft scenes with prompts), the continuity analyzer (MS-8: `GET /projects/:id/continuity`, a
-deterministic read-only report over panels/scenes/shots with a scene-list UI panel), the score
-suggestion (MS-8: `GET /timelines/:id/score-suggestion` + `POST /timelines/:id/score` —
-deterministic cut + storyboard analysis synthesized into a music prompt, then a normal `music` job
-whose candidates land on a score asset; see `docs/timelines.md`) and advanced exports (MS-8:
-preset-driven video encoding with seeded archival `preset-master` and HDR `preset-hdr` presets,
-fx-pass re-encode routing for non-default encode profiles, an `ffmpeg -encoders` availability probe,
-and preset definition validation; see `docs/renders.md`). Since then the email system shipped:
-admin-configured SMTP (host/port/TLS/auth/From + base URL, test email), password reset by emailed
-single-use link, self-registration email confirmation (login gated with 403 `EMAIL_NOT_CONFIRMED`),
-and admin invitations with acceptance links — all degrading gracefully when no SMTP host is
-configured (see `docs/email.md`). Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
+Studio repair flow), and the real model adapters (`local_cli` + `comfyui`, GEN-009/010 —
+`docs/models.md`). Remaining deferred item: the render farm (explicitly out of MVP scope). Milestone
+8 (Advanced Studio Features) is complete: 3D support (model import, in-browser three.js preview, and
+derived view export as `@`-references; see `docs/3d.md`), the script importer (SCN-015: paste a
+screenplay, preview the parsed Fountain-lite scenes, bulk-create them as draft scenes with prompts),
+the continuity analyzer (MS-8: `GET /projects/:id/continuity`, a deterministic read-only report over
+panels/scenes/shots with a scene-list UI panel), the score suggestion (MS-8:
+`GET /timelines/:id/score-suggestion` + `POST /timelines/:id/score` — deterministic cut + storyboard
+analysis synthesized into a music prompt, then a normal `music` job whose candidates land on a score
+asset; see `docs/timelines.md`) and advanced exports (MS-8: preset-driven video encoding with seeded
+archival `preset-master` and HDR `preset-hdr` presets, fx-pass re-encode routing for non-default
+encode profiles, an `ffmpeg -encoders` availability probe, and preset definition validation; see
+`docs/renders.md`). Since then the email system shipped: admin-configured SMTP
+(host/port/TLS/auth/From + base URL, test email), password reset by emailed single-use link,
+self-registration email confirmation (login gated with 403 `EMAIL_NOT_CONFIRMED`), and admin
+invitations with acceptance links — all degrading gracefully when no SMTP host is configured (see
+`docs/email.md`). Every Milestone 8 exit criterion is now shipped; the only remaining deferred item
+is the render farm (explicitly out of MVP scope).
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -472,6 +474,13 @@ The product track follows `MASTER-PLAN.md`.
       audited path for re-pointing rows on saved versions. Pure span-rewrite helper
       `replaceReferenceToken` in `frontend/src/reference-repair.js` (unit-tested, +9 frontend
       steps); all 365 backend + 228 frontend test steps green
+- [x] User management (admin provisioning): `/api/v1/users/*` (admin-only) — create users with a
+      default password + optional `must_change_password`, role promote/demote, activate/deactivate,
+      password reset, soft delete (last-active-admin lockout guard, no self-deactivate/delete);
+      `PUT /api/v1/auth/password` for the forced change flow (`password-change-form` routes
+      `#/change-password` right after login for flagged accounts) and the self-registration toggle
+      (`GET/PATCH /users/settings`, enforced on register) with the admin `user-manager` component
+      (`#/users`). +12 backend + 8 frontend test steps
 - [x] 3D support (first Milestone 8 item): `model` asset type with registered media types
       (glb/gltf/obj + fbx/usd/usdz/stl stored without preview), raw-bytes upload now accepts an
       optional percent-encoded `X-Technical-Metadata` JSON header, a `model-viewer` web component
@@ -527,6 +536,36 @@ The product track follows `MASTER-PLAN.md`.
       fingerprint includes the preset encode profile, so the same timeline renders to different
       deterministic bytes per preset. +5 backend steps; backend 413 + frontend 269 test steps green
       — see `docs/renders.md`
+- [x] GPU info fix (issue #73): the diagnostics panel rendered `gpu.name` / `gpu.vram_bytes` /
+      `gpu.driver` — keys that don't exist on the shared `GpuInfo` (`{ vendor, model, vram_mb }`) —
+      so Diagnostics always showed "GPU none detected / driver unknown" even when the models
+      hardware endpoint detected the GPU correctly. The panel now uses the real keys. The models
+      panel showed "0 MB" VRAM because `detectHardware` divided nvidia-smi's already-MiB
+      `memory.total` by 1048576 (bytes/MB). GPU detection now queries
+      `name,memory.total,memory.used,driver_version,cuda_version` and parses memory fields
+      unit-aware (`parseNvidiaSmiMemory`: `MiB` default, `B`/`K`/`M`/`G`/`T` + binary variants), so
+      `GpuInfo` gains `vram_used_mb`, `driver_version`, `cuda_version` (null when undetectable). The
+      diagnostics panel shows `VRAM used / total · driver · CUDA x.y`; the models panel is unchanged
+      in shape (its `_fmtMb(gpu.vram_mb)` now yields the correct number). +2 backend steps (unit
+      parser + fake-`nvidia-smi`-on-PATH pipeline test, green without a GPU); backend 427 + frontend
+      277 test steps green — see `docs/models.md` + `docs/diagnostics.md`
+- [x] Real model adapters (GEN-009/010, Milestone 3 follow-up): the `local_cli` and `comfyui`
+      backends in `services/adapters.ts` now run real generation — the job runner resolves the job's
+      input asset files, merges the model's `default_settings` into the job settings, and passes a
+      scratch working directory to the adapter (content-store cache area; adapters write UUID-named
+      temp files there). `local_cli` runs a user-configured `command` once per candidate with
+      `{prompt}` / `{seed}` / `{candidate}` / `{count}` / `{output}` / `{input:<i>}` placeholders
+      plus optional `env`, `timeout_seconds`, and `output_extension`; a non-zero exit fails the job
+      with the stderr tail, and a timeout SIGKILLs the child with a 2-second drain grace (orphaned
+      grandchildren can hold the pipes open, so `output()` is bounded instead of waiting for EOF).
+      `comfyui` uploads `{{input:<i>}}` references via `/upload/image`, submits the `workflow` graph
+      to `/prompt` with `{{prompt}}` / `{{seed}}` substitution, polls `/history/<prompt_id>` (1s
+      cadence, `execution_error` details surfaced), and collects every `images` / `gifs` / `videos`
+      output via `/view`; an unreachable endpoint, rejected prompt, or zero outputs fails the job,
+      and cancellation issues `POST /interrupt`. The model card UI renders the model's
+      `default_settings`; +17 backend steps (`backend/tests/real_adapters.test.ts`: fake CLI
+      scripts + a mock ComfyUI HTTP server, no real model needed); backend 444 + frontend 277 test
+      steps green — see `docs/models.md`
 - [x] Email system (SMTP outbox): the instance can now send email. `settings` rows under `smtp_*`
       (host/port/TLS mode/auth/From + `app_base_url`) are managed by an admin **Email** card in
       `#/users` (password stored but never returned, test-email button); `services/smtp.ts` is a
@@ -549,13 +588,12 @@ The product track follows `MASTER-PLAN.md`.
       `reset-password`, `email-confirmation`, and `invitation` components, and the Email +
       Invitations cards in user-manager. All new token endpoints are rate-limited like login; a
       fresh token of a kind revokes the previous one; failed sends roll the token/invitation back.
-      `docs/email.md` covers the configuration and flows; backend 444 + frontend 277 test steps
-      green
+      `docs/email.md` covers the configuration and flows; +19 backend steps; backend 463 + frontend
+      277 test steps green
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
-- [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 
 ### Known Issues
 
@@ -613,7 +651,9 @@ The product track follows `MASTER-PLAN.md`.
   Aug 23 2026
 - Score suggestion (MS-8: cut-aware music prompt synthesis + one-click score generation from the
   timeline editor): Sun Aug 23 2026
-- Advanced exports (MS-8: preset-driven video encoding, `preset-master` + `preset-hdr`, encoder
-  probe): Sun Aug 23 2026
+- User management (admin provisioning, forced password change, self-registration toggle): Sun Aug 23
+  2026
+- Advanced exports (MS-8, final item: preset-driven encoding, `preset-master`/`preset-hdr` seeds,
+  encoder probe, preset validation): Sun Aug 23 2026
 - Email system (SMTP configuration, password reset, email confirmation, admin invitations): Mon Aug
   24 2026

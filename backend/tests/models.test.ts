@@ -27,6 +27,7 @@ import {
   detectHardware,
   type HardwareInfo,
   modelRequirementWarnings,
+  parseNvidiaSmiMemory,
 } from "../src/services/hardware.ts";
 
 let dataDir = "";
@@ -39,7 +40,14 @@ function fakeHardware(overrides: Partial<HardwareInfo> = {}): HardwareInfo {
     arch: "x86_64",
     cpu_count: 8,
     mem_total_mb: 16_384,
-    gpu: { vendor: "nvidia", model: "Test GPU", vram_mb: 4096 },
+    gpu: {
+      vendor: "nvidia",
+      model: "Test GPU",
+      vram_mb: 4096,
+      vram_used_mb: 0,
+      driver_version: "550.0",
+      cuda_version: "12.4",
+    },
     detected_at: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -391,6 +399,44 @@ describe("model manager", () => {
     assert(hw.mem_total_mb === null || hw.mem_total_mb > 0);
     if (hw.gpu) {
       assertEquals(typeof hw.gpu.model, "string");
+      assert(hw.gpu.vram_mb === null || hw.gpu.vram_mb > 0);
+      assert(hw.gpu.vram_used_mb === null || hw.gpu.vram_used_mb >= 0);
+    }
+  });
+
+  it("parses nvidia-smi memory values with units", () => {
+    assertEquals(parseNvidiaSmiMemory("97871 MiB"), 97871);
+    assertEquals(parseNvidiaSmiMemory("97871"), 97871);
+    assertEquals(parseNvidiaSmiMemory("95.5 GB"), 97792);
+    assertEquals(parseNvidiaSmiMemory("1 GB"), 1024);
+    assertEquals(parseNvidiaSmiMemory("2048 KB"), 2);
+    assertEquals(parseNvidiaSmiMemory("512 B"), 0);
+    assertEquals(parseNvidiaSmiMemory(null), null);
+    assertEquals(parseNvidiaSmiMemory(""), null);
+    assertEquals(parseNvidiaSmiMemory("n/a"), null);
+  });
+
+  it("detects an nvidia gpu through nvidia-smi on PATH", async () => {
+    const binDir = await Deno.makeTempDir();
+    const bin = join(binDir, "nvidia-smi");
+    await Deno.writeTextFile(
+      bin,
+      "#!/bin/sh\necho 'NVIDIA RTX PRO 6000 Blackwell Max-Q, 97871 MiB, 2048 MiB, 570.81.09, 12.6'\n",
+    );
+    await Deno.chmod(bin, 0o755);
+    const oldPath = Deno.env.get("PATH") ?? "";
+    Deno.env.set("PATH", `${binDir}:${oldPath}`);
+    try {
+      const hw = await detectHardware();
+      assertEquals(hw.gpu?.vendor, "nvidia");
+      assertEquals(hw.gpu?.model, "NVIDIA RTX PRO 6000 Blackwell Max-Q");
+      assertEquals(hw.gpu?.vram_mb, 97871);
+      assertEquals(hw.gpu?.vram_used_mb, 2048);
+      assertEquals(hw.gpu?.driver_version, "570.81.09");
+      assertEquals(hw.gpu?.cuda_version, "12.6");
+    } finally {
+      Deno.env.set("PATH", oldPath);
+      await Deno.remove(binDir, { recursive: true });
     }
   });
 

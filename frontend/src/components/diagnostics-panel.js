@@ -493,15 +493,21 @@ export class DiagnosticsPanel extends LitElement {
                   hw?.mem_total_mb !== undefined
                 ? `${formatBytes(hw.mem_total_mb * 1024 * 1024)}`
                 : "—"}</div>
-              <div><span class="k">GPU</span>${hw?.gpu?.name ?? "none detected"}</div>
+              <div><span class="k">GPU</span>${hw?.gpu?.model ?? "none detected"}</div>
             </div>
             ${hw?.gpu
               ? html`<div class="notice" style="margin-top:8px;">
                 ${
-                hw.gpu.vram_bytes !== null && hw.gpu.vram_bytes !== undefined
-                  ? `VRAM ${formatBytes(hw.gpu.vram_bytes)} · `
+                hw.gpu.vram_used_mb !== null && hw.gpu.vram_mb !== null
+                  ? `VRAM ${formatBytes(hw.gpu.vram_used_mb * 1024 * 1024)} / ${
+                    formatBytes(hw.gpu.vram_mb * 1024 * 1024)
+                  } · `
+                  : hw.gpu.vram_mb !== null
+                  ? `VRAM ${formatBytes(hw.gpu.vram_mb * 1024 * 1024)} · `
                   : nothing
-              }${hw.gpu.driver ?? "driver unknown"}
+              }${hw.gpu.driver_version ?? "driver unknown"}${
+                hw.gpu.cuda_version ? ` · CUDA ${hw.gpu.cuda_version}` : nothing
+              }
               </div>`
               : nothing}
           `

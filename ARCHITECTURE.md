@@ -238,7 +238,10 @@ server.ts (entry point)
    │   └── (see docs/models.md)
   ├── Job routes (/api/v1/jobs/*, auth middleware)
   │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
-  │   ├── Adapters: mock (deterministic); provenance on produced asset versions
+   │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
+   │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
+   │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
+   │   │   model default_settings, passes per-job workDir; provenance on produced asset versions
   │   ├── Model-less `proxy` jobs (ffmpeg or mock transcode of media proxies); list filter
   │   │   `?job_type=`
   │   ├── WebSocket `/ws/v1/jobs` (?token= auth): pushes job + render progress/status
