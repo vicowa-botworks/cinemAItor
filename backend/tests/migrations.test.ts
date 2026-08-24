@@ -87,7 +87,8 @@ describe("migrations", () => {
         "0020_model_benchmarks.sql",
         "0021_user_management.sql",
         "0022_advanced_presets.sql",
-        "0023_email_system.sql",
+        "0023_sessions_jti.sql",
+        "0024_email_system.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -115,13 +116,14 @@ describe("migrations", () => {
         "0020_model_benchmarks.sql",
         "0021_user_management.sql",
         "0022_advanced_presets.sql",
-        "0023_email_system.sql",
+        "0023_sessions_jti.sql",
+        "0024_email_system.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        23,
+        24,
       );
     } finally {
       db.close();
@@ -155,7 +157,8 @@ describe("migrations", () => {
       "0020_model_benchmarks.sql",
       "0021_user_management.sql",
       "0022_advanced_presets.sql",
-      "0023_email_system.sql",
+      "0023_sessions_jti.sql",
+      "0024_email_system.sql",
     ]);
   });
 
@@ -165,5 +168,89 @@ describe("migrations", () => {
       name: string;
     }[];
     assert(cols.some((c) => c.name === "is_active"));
+  });
+
+  it("upgrades databases created before the jti column existed (0023)", () => {
+    const db = new Database(":memory:");
+    try {
+      // Simulate a dev database created before 0002 was revised: 0001 + the
+      // original 0002 (no jti column) already applied, with a live session row.
+      db.exec(
+        Deno.readTextFileSync(
+          new URL("../src/db/migrations/0001_init.sql", import.meta.url),
+        ),
+      );
+      db.exec(
+        Deno.readTextFileSync(
+          new URL("../src/db/migrations/0002_sessions.sql", import.meta.url),
+        ),
+      );
+      db.exec(
+        `CREATE TABLE schema_migrations (
+           name TEXT PRIMARY KEY,
+           applied_at TEXT NOT NULL
+         )`,
+      );
+      db.exec(
+        `INSERT INTO schema_migrations (name, applied_at) VALUES
+         ('0001_init.sql', '2026-01-01T00:00:00.000Z'),
+         ('0002_sessions.sql', '2026-01-01T00:00:00.000Z')`,
+      );
+      db.exec(
+        `INSERT INTO users (email, password_hash, display_name, role, created_at, updated_at)
+         VALUES ('old@example.com', 'salt:hash', 'Old User', 'admin',
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      );
+      db.exec(
+        `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, revoked_at)
+         VALUES ('sess-old', 1, 'token-hash-1', '2026-01-01T00:00:00.000Z',
+                 '2026-01-08T00:00:00.000Z', NULL)`,
+      );
+
+      const result = runMigrations(db);
+      assert(result.skipped.includes("0001_init.sql"));
+      assert(result.skipped.includes("0002_sessions.sql"));
+      assert(result.applied.includes("0023_sessions_jti.sql"));
+
+      // The old session row survived with jti backfilled from the session id.
+      const row = db.prepare(
+        "SELECT id, user_id, jti, token_hash, created_at, expires_at, revoked_at FROM sessions WHERE id = 'sess-old'",
+      ).get() as {
+        id: string;
+        user_id: number;
+        jti: string;
+        token_hash: string;
+        created_at: string;
+        expires_at: string;
+        revoked_at: string | null;
+      };
+      assertEquals(row.user_id, 1);
+      assertEquals(row.jti, "sess-old");
+      assertEquals(row.token_hash, "token-hash-1");
+      assertEquals(row.created_at, "2026-01-01T00:00:00.000Z");
+      assertEquals(row.expires_at, "2026-01-08T00:00:00.000Z");
+      assertEquals(row.revoked_at, null);
+
+      // jti is now a unique column with its own index.
+      const indexes = db.prepare("PRAGMA index_list(sessions)").all() as unknown as {
+        name: string;
+        "unique": number;
+      }[];
+      const jtiIndex = indexes.find((i) => {
+        const cols = db.prepare(`PRAGMA index_info(${i.name})`)
+          .all() as unknown as { name: string | null }[];
+        return i["unique"] === 1 && cols.some((c) => c.name === "jti");
+      });
+      assert(jtiIndex, "expected a unique index over sessions.jti");
+
+      // token_hash is no longer unique: duplicate hashes must be accepted.
+      db.exec(
+        `INSERT INTO sessions (id, user_id, jti, token_hash, created_at, expires_at)
+         VALUES ('sess-new', 1, 'sess-new', 'token-hash-1',
+                 '2026-01-01T00:00:00.000Z', '2026-01-08T00:00:00.000Z')`,
+      );
+    } finally {
+      db.close();
+    }
   });
 });

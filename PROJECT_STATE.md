@@ -588,7 +588,7 @@ The product track follows `MASTER-PLAN.md`.
       `reset-password`, `email-confirmation`, and `invitation` components, and the Email +
       Invitations cards in user-manager. All new token endpoints are rate-limited like login; a
       fresh token of a kind revokes the previous one; failed sends roll the token/invitation back.
-      `docs/email.md` covers the configuration and flows; +19 backend steps; backend 463 + frontend
+      `docs/email.md` covers the configuration and flows; +19 backend steps; backend 464 + frontend
       277 test steps green
 
 ### Planned (next work packages per MASTER-PLAN.md)
