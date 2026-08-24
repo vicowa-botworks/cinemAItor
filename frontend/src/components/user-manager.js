@@ -170,9 +170,15 @@ export class UserManager extends LitElement {
     meId: {},
     users: {},
     settings: {},
+    emailSettings: {},
+    emailForm: {},
+    invitations: {},
+    inviteEmail: {},
+    inviteName: {},
     error: {},
     status: {},
     loading: {},
+    busy: {},
     newEmail: {},
     newName: {},
     newPassword: {},
@@ -186,9 +192,24 @@ export class UserManager extends LitElement {
     this.meId = null;
     this.users = [];
     this.settings = { registration_enabled: true };
+    this.emailSettings = null;
+    this.emailForm = {
+      smtp_host: "",
+      smtp_port: 587,
+      smtp_user: "",
+      smtp_password: "",
+      smtp_from: "",
+      smtp_tls: "starttls",
+      app_base_url: "",
+      email_confirmation_required: true,
+    };
+    this.invitations = [];
+    this.inviteEmail = "";
+    this.inviteName = "";
     this.error = "";
     this.status = "";
     this.loading = false;
+    this.busy = false;
     this.newEmail = "";
     this.newName = "";
     this.newPassword = "";
@@ -207,12 +228,26 @@ export class UserManager extends LitElement {
 
   async _load() {
     try {
-      const [users, settings] = await Promise.all([
+      const [users, settings, email, invitations] = await Promise.all([
         api.listUsers(),
         api.getUserSettings(),
+        api.getEmailSettings(),
+        api.listInvitations(),
       ]);
       this.users = users.users;
       this.settings = settings;
+      this.emailSettings = email;
+      this.emailForm = {
+        smtp_host: email.smtp_host || "",
+        smtp_port: email.smtp_port || 587,
+        smtp_user: email.smtp_user || "",
+        smtp_password: "",
+        smtp_from: email.smtp_from || "",
+        smtp_tls: email.smtp_tls || "starttls",
+        app_base_url: email.app_base_url || "",
+        email_confirmation_required: email.email_confirmation_required !== false,
+      };
+      this.invitations = invitations.invitations;
     } catch (err) {
       this.error = err.message || "Failed to load users";
     }
@@ -339,6 +374,117 @@ export class UserManager extends LitElement {
     }
   }
 
+  async _saveEmailSettings() {
+    const form = this.emailForm;
+    const payload = {
+      smtp_host: form.smtp_host.trim(),
+      smtp_port: Number(form.smtp_port) || 0,
+      smtp_user: form.smtp_user.trim(),
+      smtp_from: form.smtp_from.trim(),
+      smtp_tls: form.smtp_tls,
+      app_base_url: form.app_base_url.trim(),
+      email_confirmation_required: form.email_confirmation_required,
+    };
+    // Only sent when the admin actually typed a new password; the stored
+    // secret is never returned by the API.
+    if (form.smtp_password) payload.smtp_password = form.smtp_password;
+    try {
+      this.busy = true;
+      const email = await api.updateEmailSettings(payload);
+      this.emailSettings = email;
+      this.emailForm = { ...this.emailForm, smtp_password: "" };
+      this._flash("Email settings saved");
+    } catch (err) {
+      this._fail(err, "Failed to save email settings");
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async _clearSmtpPassword() {
+    try {
+      this.busy = true;
+      const email = await api.updateEmailSettings({ smtp_password: null });
+      this.emailSettings = email;
+      this._flash("SMTP password cleared");
+    } catch (err) {
+      this._fail(err, "Failed to clear the SMTP password");
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async _sendTestEmail() {
+    try {
+      this.busy = true;
+      // No `to`: the backend sends the test to the admin's own address.
+      const result = await api.sendEmailTest();
+      this._flash(
+        result.transport === "mock"
+          ? "Test message accepted (mock transport — SMTP is not configured)"
+          : `Test email sent via ${result.transport}`,
+      );
+    } catch (err) {
+      this._fail(err, "Failed to send the test email");
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async _createInvitation(e) {
+    e.preventDefault();
+    this.error = "";
+    this.status = "";
+    if (!this.inviteEmail.trim()) {
+      this.error = "Email is required";
+      return;
+    }
+    try {
+      this.busy = true;
+      const res = await api.createInvitation({
+        email: this.inviteEmail.trim(),
+        display_name: this.inviteName.trim() || undefined,
+      });
+      this._flash(
+        res.invitation.transport === "mock"
+          ? `Invitation recorded for ${res.invitation.email} (mock transport — configure SMTP to deliver it)`
+          : `Invitation sent to ${res.invitation.email}`,
+      );
+      this.inviteEmail = "";
+      this.inviteName = "";
+      await this._load();
+    } catch (err) {
+      this._fail(err, "Failed to send the invitation");
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async _revokeInvitation(invitation) {
+    if (!window.confirm(`Revoke the invitation for ${invitation.email}?`)) {
+      return;
+    }
+    try {
+      this.busy = true;
+      await api.revokeInvitation(invitation.id);
+      this._flash(`Revoked the invitation for ${invitation.email}`);
+      await this._load();
+    } catch (err) {
+      this._fail(err, "Failed to revoke the invitation");
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  _invitationChip(invitation) {
+    const cls = invitation.status === "accepted"
+      ? "ok"
+      : invitation.status === "pending"
+      ? "warn"
+      : "";
+    return html`<span class="chip ${cls}">${invitation.status}</span>`;
+  }
+
   _renderUserRow(user) {
     const self = this._isSelf(user);
     return html`
@@ -359,6 +505,11 @@ export class UserManager extends LitElement {
           ${user.must_change_password
             ? html`
               <span class="chip">change pw</span>
+            `
+            : ""}
+          ${user.email_confirmed === false
+            ? html`
+              <span class="chip bad">unconfirmed</span>
             `
             : ""}
         </td>
@@ -437,12 +588,175 @@ export class UserManager extends LitElement {
       </div>
 
       <div class="card">
-        <h2>Settings</h2>
+        <h2>User settings</h2>
         <label class="check">
           <input type="checkbox" .checked=${this.settings.registration_enabled}
             @change=${this._toggleRegistration} />
           Allow self-registration
         </label>
+      </div>
+
+      <div class="card">
+        <h2>Email (SMTP)</h2>
+        <p class="notice">
+          Configure an SMTP server to send password resets, email
+          confirmations, and invitations. Leave the host empty to keep
+          running without email.
+        </p>
+        <form @submit=${(e) => {
+          e.preventDefault();
+          this._saveEmailSettings();
+        }}>
+          <div class="grid">
+            <div class="field">
+              <label for="smtp-host">Host</label>
+              <input id="smtp-host" type="text" .value=${this.emailForm.smtp_host}
+                @input=${(e) => (this.emailForm = { ...this.emailForm, smtp_host: e.target.value })}
+                placeholder="smtp.example.com" />
+            </div>
+            <div class="field">
+              <label for="smtp-port">Port</label>
+              <input id="smtp-port" type="number" min="1" max="65535"
+                .value=${this.emailForm.smtp_port}
+                @input=${(
+                  e,
+                ) => (this.emailForm = { ...this.emailForm, smtp_port: e.target.value })} />
+            </div>
+            <div class="field">
+              <label for="smtp-tls">TLS</label>
+              <select id="smtp-tls" .value=${this.emailForm.smtp_tls}
+                @change=${(
+                  e,
+                ) => (this.emailForm = { ...this.emailForm, smtp_tls: e.target.value })}>
+                <option value="starttls">starttls (port 587)</option>
+                <option value="implicit">implicit / TLS (port 465)</option>
+                <option value="none">none (local relay)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="smtp-user">Username</label>
+              <input id="smtp-user" type="text" .value=${this.emailForm.smtp_user}
+                @input=${(
+                  e,
+                ) => (this.emailForm = { ...this.emailForm, smtp_user: e.target.value })} />
+            </div>
+            <div class="field">
+              <label for="smtp-pass">New password</label>
+              <input id="smtp-pass" type="password" .value=${this.emailForm.smtp_password}
+                @input=${(
+                  e,
+                ) => (this.emailForm = { ...this.emailForm, smtp_password: e.target.value })}
+                placeholder="leave empty to keep" />
+            </div>
+            <div class="field">
+              <label for="smtp-from">From</label>
+              <input id="smtp-from" type="text" .value=${this.emailForm.smtp_from}
+                @input=${(e) => (this.emailForm = { ...this.emailForm, smtp_from: e.target.value })}
+                placeholder='CinemAItor &lt;noreply@example.com&gt;' />
+            </div>
+            <div class="field">
+              <label for="base-url">App base URL</label>
+              <input id="base-url" type="text" .value=${this.emailForm.app_base_url}
+                @input=${(
+                  e,
+                ) => (this.emailForm = { ...this.emailForm, app_base_url: e.target.value })}
+                placeholder="https://studio.example.com" />
+            </div>
+            <label class="check">
+              <input type="checkbox" .checked=${this.emailForm.email_confirmation_required}
+                @change=${(
+                  e,
+                ) => (this.emailForm = {
+                  ...this.emailForm,
+                  email_confirmation_required: e.target.checked,
+                })} />
+              Require email confirmation for self-registration
+            </label>
+          </div>
+          <div class="actions" style="margin-top: 12px;">
+            <button type="submit" class="btn" ?disabled=${this.busy}>Save
+              settings</button>
+            <button type="button" class="btn btn-secondary"
+              ?disabled=${this.busy || !this.emailForm.smtp_host}
+              @click=${this._sendTestEmail}>Send test email</button>
+            <button type="button" class="btn btn-danger"
+              ?disabled=${this.busy} @click=${this._clearSmtpPassword}>Clear
+              stored password</button>
+          </div>
+        </form>
+        ${this.emailSettings?.smtp_password_set
+          ? html`
+            <div class="notice">
+              A password is stored for the configured SMTP account.
+            </div>
+          `
+          : ""}
+      </div>
+
+      <div class="card">
+        <h2>Invitations</h2>
+        <p class="notice">
+          Invite a person by email: they accept the link and choose their own
+          password. Invited accounts are confirmed automatically.
+        </p>
+        <form @submit=${this._createInvitation}>
+          <div class="grid">
+            <div class="field">
+              <label for="invite-email">Email</label>
+              <input id="invite-email" type="email" .value=${this.inviteEmail}
+                @input=${(e) => (this.inviteEmail = e.target.value)} required />
+            </div>
+            <div class="field">
+              <label for="invite-name">Display name (optional)</label>
+              <input id="invite-name" type="text" .value=${this.inviteName}
+                @input=${(e) => (this.inviteName = e.target.value)} />
+            </div>
+            <button type="submit" class="btn" ?disabled=${this.busy}>Send
+              invitation</button>
+          </div>
+        </form>
+        ${this.invitations.length > 0
+          ? html`
+            <table style="margin-top: 14px;">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>By</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Expires</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${this.invitations.map((inv) =>
+                  html`
+                    <tr>
+                      <td>${inv.email}</td>
+                      <td>${inv.display_name || ""}</td>
+                      <td>${inv.created_by_name || ""}</td>
+                      <td>${this._invitationChip(inv)}</td>
+                      <td>${inv.created_at?.slice(0, 10)}</td>
+                      <td>${inv.expires_at?.slice(0, 10)}</td>
+                      <td>
+                        <div class="actions">
+                          ${inv.status === "pending"
+                            ? html`
+                              <button class="btn btn-danger btn-small"
+                                ?disabled=${this.busy}
+                                @click=${() => this._revokeInvitation(inv)}>Revoke</button>
+                            `
+                            : ""}
+                        </div>
+                      </td>
+                    </tr>
+                  `
+                )}
+              </tbody>
+            </table>
+          `
+          : ""}
       </div>
 
       <div class="card">

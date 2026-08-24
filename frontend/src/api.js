@@ -1,11 +1,23 @@
 const V1_BASE = "/api/v1";
 
 class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, code) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code || null;
   }
+}
+
+// The backend sends `{error: {code, message, details?, traceId}}`; older
+// shapes carry a plain string. Extract both the human message and the code.
+function extractApiError(body, fallbackMessage) {
+  const detail = body && body.error !== undefined ? body.error : body;
+  const message = typeof detail === "string"
+    ? detail
+    : (detail && detail.message) || fallbackMessage;
+  const code = detail && typeof detail === "object" && detail.code ? detail.code : null;
+  return { message, code };
 }
 
 class ApiClient {
@@ -50,7 +62,11 @@ class ApiClient {
       const error = await response
         .json()
         .catch(() => ({ error: response.statusText }));
-      throw new ApiError(error.error || "Request failed", response.status);
+      const { message, code } = extractApiError(
+        error,
+        response.statusText || "Request failed",
+      );
+      throw new ApiError(message, response.status, code);
     }
 
     return response.json();
@@ -84,7 +100,11 @@ class ApiClient {
       const error = await response
         .json()
         .catch(() => ({ error: response.statusText }));
-      throw new ApiError(error.error || "Request failed", response.status);
+      const { message, code } = extractApiError(
+        error,
+        response.statusText || "Request failed",
+      );
+      throw new ApiError(message, response.status, code);
     }
 
     const blob = await response.blob();
@@ -126,6 +146,92 @@ class ApiClient {
         current_password: currentPassword,
         new_password: newPassword,
       }),
+    });
+  }
+
+  // Self-registration (legacy base path: /api, not /api/v1)
+  register(email, password, displayName) {
+    return this.request(
+      "/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify({ email, password, display_name: displayName }),
+      },
+      "/api",
+    );
+  }
+
+  requestPasswordReset(email) {
+    return this.request("/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  confirmPasswordReset(token, newPassword) {
+    return this.request("/auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+  }
+
+  confirmEmail(token) {
+    return this.request("/auth/email-confirmation/confirm", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  resendEmailConfirmation(email) {
+    return this.request("/auth/email-confirmation/resend", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  // --- v1 invitations (admin) ---
+
+  listInvitations() {
+    return this.request("/invitations");
+  }
+
+  createInvitation(data) {
+    return this.request("/invitations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  revokeInvitation(id) {
+    return this.request(`/invitations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  acceptInvitation(token, password, displayName) {
+    return this.request("/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token, password, display_name: displayName }),
+    });
+  }
+
+  // --- v1 email/SMTP settings (admin) ---
+
+  getEmailSettings() {
+    return this.request("/users/settings/email");
+  }
+
+  updateEmailSettings(data) {
+    return this.request("/users/settings/email", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  sendEmailTest(to) {
+    return this.request("/users/settings/email/test", {
+      method: "POST",
+      body: JSON.stringify({ to: to || null }),
     });
   }
 

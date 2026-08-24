@@ -25,6 +25,16 @@ import "./components/audio-dialog.js";
 import "./components/diagnostics-panel.js";
 import "./components/password-change-form.js";
 import "./components/user-manager.js";
+import "./components/password-reset-request-form.js";
+import "./components/password-reset-form.js";
+import "./components/email-confirm-form.js";
+import "./components/invitation-form.js";
+
+// Extract a query parameter from a hash route like "#/reset-password?token=…"
+function hashParam(hash, name) {
+  const query = hash.split("?")[1] || "";
+  return new URLSearchParams(query).get(name) || "";
+}
 
 export class AppRoot extends LitElement {
   static styles = css`
@@ -287,6 +297,33 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "change-password";
+    } else if (hash.startsWith("#/forgot-password")) {
+      if (this.loggedIn) {
+        window.location.hash = "#/projects";
+        return;
+      }
+      this.currentView = "forgot-password";
+    } else if (hash.startsWith("#/reset-password")) {
+      if (this.loggedIn) {
+        window.location.hash = "#/projects";
+        return;
+      }
+      this.currentView = "reset-password";
+      this.viewParams.token = hashParam(hash, "token");
+    } else if (hash.startsWith("#/confirm-email")) {
+      if (this.loggedIn) {
+        window.location.hash = "#/projects";
+        return;
+      }
+      this.currentView = "confirm-email";
+      this.viewParams.token = hashParam(hash, "token");
+    } else if (hash.startsWith("#/invitation")) {
+      if (this.loggedIn) {
+        window.location.hash = "#/projects";
+        return;
+      }
+      this.currentView = "invitation";
+      this.viewParams.token = hashParam(hash, "token");
     } else {
       this.currentView = "login";
     }
@@ -360,6 +397,20 @@ export class AppRoot extends LitElement {
         return html`<user-manager .userRole=${this.userRole}></user-manager>`;
       case "change-password":
         return html`<password-change-form></password-change-form>`;
+      case "forgot-password":
+        return html`<password-reset-request-form></password-reset-request-form>`;
+      case "reset-password":
+        return html`
+          <password-reset-form .token=${this.viewParams.token}></password-reset-form>
+        `;
+      case "confirm-email":
+        return html`
+          <email-confirm-form .token=${this.viewParams.token}></email-confirm-form>
+        `;
+      case "invitation":
+        return html`
+          <invitation-form .token=${this.viewParams.token}></invitation-form>
+        `;
       default:
         return html`<login-form></login-form>`;
     }

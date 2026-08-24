@@ -8,6 +8,7 @@ export interface User {
   role: string;
   is_active: number;
   must_change_password: number;
+  email_confirmed: number;
   created_at: string;
   updated_at: string;
 }
@@ -18,11 +19,12 @@ export function createUser(
   displayName: string,
   role = "user",
   mustChangePassword = false,
+  emailConfirmed = true,
 ): number {
   const db = getDb();
   const stmt = db.prepare(
-    `INSERT INTO users (email, password_hash, display_name, role, must_change_password)
-     VALUES (?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO users (email, password_hash, display_name, role, must_change_password, email_confirmed)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
   );
   const row = stmt.get<{ id: number }>(
     email,
@@ -30,6 +32,7 @@ export function createUser(
     displayName,
     role,
     mustChangePassword ? 1 : 0,
+    emailConfirmed ? 1 : 0,
   );
   if (!row) throw new Error("Failed to create user");
   return row.id;
@@ -102,4 +105,18 @@ export function updateDisplayName(id: number, displayName: string): void {
   db.prepare(
     "UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?",
   ).run(displayName, new Date().toISOString(), id);
+}
+
+export function setUserEmailConfirmed(id: number, confirmed: boolean): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE users SET email_confirmed = ?, updated_at = ? WHERE id = ?",
+  ).run(confirmed ? 1 : 0, new Date().toISOString(), id);
+}
+
+// Hard delete. Only used to roll back a partially-completed registration
+// (confirmation mail failed after the row was inserted).
+export function deleteUserById(id: number): void {
+  const db = getDb();
+  db.prepare("DELETE FROM users WHERE id = ?").run(id);
 }

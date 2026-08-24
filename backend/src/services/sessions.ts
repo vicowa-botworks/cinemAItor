@@ -57,3 +57,10 @@ export function revokeSession(jti: string): boolean {
   )(nowIso(), jti);
   return affected > 0;
 }
+
+export function revokeAllUserSessions(userId: number): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+  ).run(nowIso(), userId);
+}

@@ -87,6 +87,7 @@ describe("migrations", () => {
         "0020_model_benchmarks.sql",
         "0021_user_management.sql",
         "0022_advanced_presets.sql",
+        "0023_email_system.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -114,12 +115,13 @@ describe("migrations", () => {
         "0020_model_benchmarks.sql",
         "0021_user_management.sql",
         "0022_advanced_presets.sql",
+        "0023_email_system.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        22,
+        23,
       );
     } finally {
       db.close();
@@ -153,6 +155,7 @@ describe("migrations", () => {
       "0020_model_benchmarks.sql",
       "0021_user_management.sql",
       "0022_advanced_presets.sql",
+      "0023_email_system.sql",
     ]);
   });
 
