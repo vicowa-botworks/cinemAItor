@@ -23,6 +23,8 @@ import "./components/timeline-detail.js";
 import "./components/timeline-preview.js";
 import "./components/audio-dialog.js";
 import "./components/diagnostics-panel.js";
+import "./components/password-change-form.js";
+import "./components/user-manager.js";
 
 export class AppRoot extends LitElement {
   static styles = css`
@@ -44,6 +46,7 @@ export class AppRoot extends LitElement {
   static properties = {
     loggedIn: {},
     userName: {},
+    userRole: {},
     currentView: {},
     viewParams: {},
     assetProjectId: {},
@@ -53,6 +56,7 @@ export class AppRoot extends LitElement {
     super();
     this.loggedIn = false;
     this.userName = "";
+    this.userRole = "";
     this.currentView = "login";
     this.viewParams = {};
     this.assetProjectId = null;
@@ -72,8 +76,13 @@ export class AppRoot extends LitElement {
       api.setToken(token);
       api.getMe().then((user) => {
         this.userName = user.display_name;
+        this.userRole = user.role || "";
         this.loggedIn = true;
         this._updateHeader();
+        if (user.must_change_password) {
+          window.location.hash = "#/change-password";
+          return;
+        }
         this._route();
       }).catch(() => {
         this._logout();
@@ -92,10 +101,16 @@ export class AppRoot extends LitElement {
     this.loggedIn = detail.loggedIn;
     if (detail.user) {
       this.userName = detail.user.display_name;
+      this.userRole = detail.user.role || "";
     } else {
       this.userName = "";
+      this.userRole = "";
     }
     this._updateHeader();
+    if (detail.user?.must_change_password) {
+      window.location.hash = "#/change-password";
+      return;
+    }
     this._route();
   }
 
@@ -111,6 +126,7 @@ export class AppRoot extends LitElement {
     api.clearToken();
     this.loggedIn = false;
     this.userName = "";
+    this.userRole = "";
     this._updateHeader();
     this._route();
   }
@@ -118,7 +134,7 @@ export class AppRoot extends LitElement {
   _updateHeader() {
     const header = this.shadowRoot?.querySelector("app-header");
     if (header) {
-      header.setUserData(this.userName, this.loggedIn);
+      header.setUserData(this.userName, this.loggedIn, this.userRole);
     }
   }
 
@@ -259,6 +275,18 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "diagnostics";
+    } else if (hash === "#/users") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "users";
+    } else if (hash === "#/change-password") {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "change-password";
     } else {
       this.currentView = "login";
     }
@@ -328,6 +356,10 @@ export class AppRoot extends LitElement {
         `;
       case "diagnostics":
         return html`<diagnostics-panel></diagnostics-panel>`;
+      case "users":
+        return html`<user-manager .userRole=${this.userRole}></user-manager>`;
+      case "change-password":
+        return html`<password-change-form></password-change-form>`;
       default:
         return html`<login-form></login-form>`;
     }

@@ -113,6 +113,7 @@ export class LoginForm extends LitElement {
     displayName: {},
     error: {},
     loading: {},
+    registered: {},
   };
 
   constructor() {
@@ -123,9 +124,19 @@ export class LoginForm extends LitElement {
     this.displayName = "";
     this.error = "";
     this.loading = false;
+    this.registered = false;
+  }
+
+  connectedCallback() {
+    super.connectedCallback?.();
+    api.getAuthSetupStatus().then((status) => {
+      this.registered = Boolean(status.registered);
+      if (this.registered && !this.isLogin) this.isLogin = true;
+    }).catch(() => {});
   }
 
   _toggleMode() {
+    if (!this.isLogin && this.registered) return;
     this.isLogin = !this.isLogin;
     this.error = "";
   }
@@ -162,7 +173,7 @@ export class LoginForm extends LitElement {
           detail: { loggedIn: true, user: result.user },
         }),
       );
-      window.location.hash = "#/projects";
+      window.location.hash = result.user?.must_change_password ? "#/change-password" : "#/projects";
     } catch (err) {
       this.error = err.message || "Authentication failed";
     } finally {
@@ -174,12 +185,14 @@ export class LoginForm extends LitElement {
     return html`
       <div class="login-container">
         <div class="login-card">
-          <div class="tabs">
-            <button class="tab ${this.isLogin ? "active" : ""}" @click=${this
-              ._toggleMode}>Login</button>
-            <button class="tab ${!this.isLogin ? "active" : ""}" @click=${this
-              ._toggleMode}>Setup</button>
-          </div>
+          ${this.registered ? "" : html`
+            <div class="tabs">
+              <button class="tab ${this.isLogin ? "active" : ""}"
+                @click=${this._toggleMode}>Login</button>
+              <button class="tab ${!this.isLogin ? "active" : ""}"
+                @click=${this._toggleMode}>Setup</button>
+            </div>
+          `}
 
           <h2>${this.isLogin ? "Welcome back" : "Initial setup"}</h2>
 

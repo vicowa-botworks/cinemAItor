@@ -115,6 +115,55 @@ class ApiClient {
     return this.request("/auth/me");
   }
 
+  getAuthSetupStatus() {
+    return this.request("/auth/setup-status");
+  }
+
+  changePassword(currentPassword, newPassword) {
+    return this.request("/auth/password", {
+      method: "PUT",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+  }
+
+  // --- v1 user management (admin) ---
+
+  listUsers() {
+    return this.request("/users");
+  }
+
+  createUser(data) {
+    return this.request("/users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updateUser(id, data) {
+    return this.request(`/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteUser(id) {
+    return this.request(`/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  getUserSettings() {
+    return this.request("/users/settings");
+  }
+
+  updateUserSettings(data) {
+    return this.request("/users/settings", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   // --- v1 projects ---
 
   listProjects() {
