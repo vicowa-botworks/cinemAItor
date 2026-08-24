@@ -522,8 +522,8 @@ The product track follows `MASTER-PLAN.md`.
       instead of crashing mid-render. Preset definitions are validated on create (format
       `mp4|mov|wav`, codec `h264|hevc`, resolution `WxH`, frame rate 0–240). The mock engine's
       fingerprint includes the preset encode profile, so the same timeline renders to different
-       deterministic bytes per preset. +5 backend steps; backend 413 + frontend 269 test steps
-       green — see `docs/renders.md`
+      deterministic bytes per preset. +5 backend steps; backend 413 + frontend 269 test steps green
+      — see `docs/renders.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
