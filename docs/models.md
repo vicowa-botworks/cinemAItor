@@ -45,6 +45,14 @@ written to `audit_logs` (entity type `model`).
   - `comfyui` / `local_http` → file exists + checksum ok + (if `default_settings.endpoint` is set)
     the endpoint answers. Result is persisted (`health_status`, `health_error`,
     `health_checked_at`).
+- **Hardware detection** (`detectHardware` in `services/hardware.ts`): platform, CPU count, and
+  total RAM come from `/proc` (Linux) or `sysctl` (macOS); the GPU is detected via
+  `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version,cuda_version` (3s timeout,
+  first GPU on multi-GPU hosts). Memory fields are unit-aware (`MiB` is the nvidia-smi default),
+  e.g. `97871 MiB` → `vram_mb: 97871`. The GPU object is
+  `{ vendor, model, vram_mb, vram_used_mb, driver_version, cuda_version }` with every field null
+  when undetectable — both the models hardware endpoint and the diagnostics hardware report
+  (DIA-001) return this same object, so the UIs must use these exact keys.
 - **Requirement warnings**: each enabled model is compared against detected hardware (VRAM / total
   RAM / missing dependencies) and reported by `/api/v1/models/hardware`.
 - **Disable**: disabled models are excluded from task-mapping lookups, so the generation pipeline

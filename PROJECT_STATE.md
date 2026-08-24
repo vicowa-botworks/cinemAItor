@@ -532,6 +532,19 @@ The product track follows `MASTER-PLAN.md`.
       fingerprint includes the preset encode profile, so the same timeline renders to different
       deterministic bytes per preset. +5 backend steps; backend 413 + frontend 269 test steps green
       — see `docs/renders.md`
+- [x] GPU info fix (issue #73): the diagnostics panel rendered `gpu.name` / `gpu.vram_bytes` /
+      `gpu.driver` — keys that don't exist on the shared `GpuInfo` (`{ vendor, model, vram_mb }`) —
+      so Diagnostics always showed "GPU none detected / driver unknown" even when the models
+      hardware endpoint detected the GPU correctly. The panel now uses the real keys. The models
+      panel showed "0 MB" VRAM because `detectHardware` divided nvidia-smi's already-MiB
+      `memory.total` by 1048576 (bytes/MB). GPU detection now queries
+      `name,memory.total,memory.used,driver_version,cuda_version` and parses memory fields
+      unit-aware (`parseNvidiaSmiMemory`: `MiB` default, `B`/`K`/`M`/`G`/`T` + binary variants), so
+      `GpuInfo` gains `vram_used_mb`, `driver_version`, `cuda_version` (null when undetectable). The
+      diagnostics panel shows `VRAM used / total · driver · CUDA x.y`; the models panel is unchanged
+      in shape (its `_fmtMb(gpu.vram_mb)` now yields the correct number). +2 backend steps (unit
+      parser + fake-`nvidia-smi`-on-PATH pipeline test, green without a GPU); backend 427 + frontend
+      277 test steps green — see `docs/models.md` + `docs/diagnostics.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
