@@ -624,6 +624,19 @@ describe("ApiClient", () => {
       assertEquals(captured[0].options.method, "DELETE");
     });
 
+    it("getScoreSuggestion requests the score-suggestion subpath", async () => {
+      await api.getScoreSuggestion("tl 1");
+      assertEquals(captured[0].url, "/api/v1/timelines/tl%201/score-suggestion");
+      assertEquals(captured[0].options.method ?? "GET", "GET");
+    });
+
+    it("generateScore posts an optional prompt override", async () => {
+      await api.generateScore("tl-1", { prompt: "dark ambient score" });
+      assertEquals(captured[0].url, "/api/v1/timelines/tl-1/score");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).prompt, "dark ambient score");
+    });
+
     it("track methods hit the tracks subpaths", async () => {
       await api.createTimelineTrack("tl-1", { track_type: "video", name: "V1" });
       assertEquals(captured[0].url, "/api/v1/timelines/tl-1/tracks");

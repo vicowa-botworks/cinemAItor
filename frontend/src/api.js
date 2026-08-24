@@ -665,6 +665,19 @@ class ApiClient {
     });
   }
 
+  getScoreSuggestion(timelineId) {
+    return this.request(
+      `/timelines/${encodeURIComponent(timelineId)}/score-suggestion`,
+    );
+  }
+
+  generateScore(timelineId, options = {}) {
+    return this.request(`/timelines/${encodeURIComponent(timelineId)}/score`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
   createTimelineTrack(timelineId, data) {
     return this.request(
       `/timelines/${encodeURIComponent(timelineId)}/tracks`,

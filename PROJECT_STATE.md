@@ -14,9 +14,12 @@ Studio repair flow). Remaining deferred items: render farm and real model adapte
 out of MVP scope). Milestone 8 (Advanced Studio Features) is underway: 3D support — the first MS-8
 item — is in (model import, in-browser three.js preview, and derived view export as `@`-references;
 see `docs/3d.md`), followed by the script importer (SCN-015: paste a screenplay, preview the parsed
-Fountain-lite scenes, bulk-create them as draft scenes with prompts) and the continuity analyzer
-(MS-8: `GET /projects/:id/continuity`, a deterministic read-only report over panels/scenes/shots
-with a scene-list UI panel). Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
+Fountain-lite scenes, bulk-create them as draft scenes with prompts), the continuity analyzer (MS-8:
+`GET /projects/:id/continuity`, a deterministic read-only report over panels/scenes/shots with a
+scene-list UI panel) and the score suggestion (MS-8: `GET /timelines/:id/score-suggestion` +
+`POST /timelines/:id/score` — deterministic cut + storyboard analysis synthesized into a music
+prompt, then a normal `music` job whose candidates land on a score asset; see `docs/timelines.md`).
+Remaining MS-8 items are tracked in `MASTER-PLAN.md`.
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -493,6 +496,19 @@ The product track follows `MASTER-PLAN.md`.
       `scene-list.js` gains a Continuity panel (project picker + Run check + severity-chipped issue
       rows or a clean confirmation) and `api.checkContinuity`; backend 391 + frontend 267 test steps
       green — see `docs/storyboards.md`
+- [x] Score suggestion (MS-8, fourth Milestone 8 item — "suggest or generate matching score after a
+      cut is assembled"): `GET /api/v1/timelines/:id/score-suggestion` (read permission) runs
+      `suggestScore` (`backend/src/services/score_suggestion.ts`, pure + unit-tested, +17 backend
+      steps) — deterministic cut + storyboard-panel analysis (timeline length rounded to 5-second
+      steps 5–1800s, dominant time-of-day/lighting/mood with alphabetical tie-break, up to four
+      stated panel music cues, dialogue + existing-music presence) synthesized into a music prompt
+      with a human-readable `sources` list; `POST /api/v1/timelines/:id/score` (write permission,
+      400 without video items) accepts `{prompt?, model_id?}` and enqueues a normal `music`
+      generation job (candidates land on a fresh score asset for review + placement on the
+      timeline's music track). `timeline-detail.js` gains a **Suggest score** card (chips, cues,
+      editable prompt, Analyze cut / Generate score, job + asset links) and `api.getScoreSuggestion`
+      / `api.generateScore` (+2 frontend steps); backend 408 + frontend 269 test steps green — see
+      `docs/timelines.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -553,3 +569,5 @@ The product track follows `MASTER-PLAN.md`.
   route): Sun Aug 23 2026
 - Continuity analyzer (MS-8: deterministic continuity report endpoint + scene-list check panel): Sun
   Aug 23 2026
+- Score suggestion (MS-8: cut-aware music prompt synthesis + one-click score generation from the
+  timeline editor): Sun Aug 23 2026
