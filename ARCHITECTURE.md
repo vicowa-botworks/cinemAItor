@@ -64,7 +64,9 @@ only planned processing step:
 
 ```
 app-root (main router)
-├── app-header (navigation)
+├── app-sidebar (left navigation panel: vertical tab list, collapses to zero width
+│   │            (a shell hamburger button re-expands it), scrollable nav,
+│   │            auto-collapses when the viewport is < 1024 px)
 ├── login-form (v1 auth: login / bootstrap / self-register tabs; forgot-password
 │   │             link; unconfirmed-email login state with resend-confirmation button)
 ├── password-change-form (forced password change on first login for
