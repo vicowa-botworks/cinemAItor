@@ -15,8 +15,12 @@ leases, and model runtimes behind a common adapter interface.
 - **Adapter interface** (GEN-007): `backend/src/services/adapters.ts` defines
   `ModelAdapter.generate(input, hooks)`. The runner never touches runtimes directly. The **mock
   adapter** produces deterministic pseudo-output (seeded, per candidate) so development and tests
-  run without model binaries. Unknown backends fail the job with a clear error until an adapter is
-  registered.
+  run without model binaries. **local_cli** (GEN-009) runs a user-configured command per candidate
+  and **comfyui** (GEN-010) submits a workflow to a local ComfyUI server — both are driven by the
+  model's `default_settings` (see `docs/models.md` "Real adapters"). The runner resolves the job's
+  input asset files, merges `default_settings` into the job settings, and passes a per-job working
+  directory before invoking the adapter. Unknown backends fail the job with a clear error until an
+  adapter is registered.
 
 ## Endpoints
 
