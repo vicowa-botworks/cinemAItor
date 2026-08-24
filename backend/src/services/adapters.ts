@@ -1,3 +1,5 @@
+import { mediaTypeFor } from "../storage/media_types.ts";
+
 /**
  * Adapter interface (GEN-007): every model runtime exposes the same
  * generation contract. The core never talks to runtimes directly.
@@ -14,12 +16,23 @@ export interface AdapterHooks {
   isCancelled(): boolean;
 }
 
+export interface AdapterInputRef {
+  asset_id: string;
+  version_number: number;
+  /** Absolute path to the stored master file (resolved by the job runner). */
+  file_path: string;
+  format: string | null;
+  mime_type: string | null;
+}
+
 export interface GenerationAdapterInput {
   jobType: string;
   seed: string | null;
   settings: Record<string, unknown>;
-  inputs: { asset_id: string; version_number: number }[];
+  inputs: AdapterInputRef[];
   promptText: string | null;
+  /** Scratch directory the runner guarantees exists; adapters may create temp files here. */
+  workDir: string;
 }
 
 export interface GenerationAdapterResult {
@@ -56,13 +69,13 @@ const VIDEO_TASKS = ["image_to_video", "text_to_video"];
 const AUDIO_TASKS = ["audio", "music", "voice"];
 const SUBTITLE_TASKS = ["transcribe"];
 
-function candidateCount(settings: Record<string, unknown>): number {
+export function candidateCount(settings: Record<string, unknown>): number {
   const value = settings.candidates;
   if (typeof value !== "number" || !Number.isInteger(value)) return 1;
   return Math.min(Math.max(value, 1), 8);
 }
 
-function outputForTask(jobType: string): { extension: string; mime_type: string } {
+export function outputForTask(jobType: string): { extension: string; mime_type: string } {
   if (VIDEO_TASKS.includes(jobType)) return { extension: "mp4", mime_type: "video/mp4" };
   if (AUDIO_TASKS.includes(jobType)) {
     return { extension: "wav", mime_type: "audio/wav" };
@@ -209,8 +222,469 @@ export class MockAdapter implements ModelAdapter {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Local CLI adapter (GEN-009/010): runs a user-configured command per
+// candidate. The model's default_settings carry the invocation:
+//   command (string, required)   executable name or absolute path
+//   args (string[], optional)    argument templates; must include {output}
+//   timeout_seconds (number)     default 600
+//   env (string map, optional)   extra env vars (inherited from the server)
+//   output_extension (string)    default derived from the job type
+// Placeholders: {prompt} {seed} {candidate} {count} {output} {input:<i>}
+// ---------------------------------------------------------------------------
+
+export interface CliArgContext {
+  prompt: string;
+  seed: string;
+  candidate: number;
+  count: number;
+  inputPaths: string[];
+  output: string;
+}
+
+export function renderCliArgs(args: string[], ctx: CliArgContext): string[] {
+  return args.map((arg) =>
+    arg.replace(/\{([a-z]+:[a-z0-9]+|[a-z]+)\}/g, (match, key: string) => {
+      if (key === "prompt") return ctx.prompt;
+      if (key === "seed") return ctx.seed;
+      if (key === "candidate") return String(ctx.candidate);
+      if (key === "count") return String(ctx.count);
+      if (key === "output") return ctx.output;
+      if (key.startsWith("input:")) {
+        const i = Number(key.slice("input:".length));
+        const path = ctx.inputPaths[i];
+        if (path === undefined) {
+          throw new Error(
+            `Argument '${arg}' references input ${i} but the job has ${ctx.inputPaths.length} input(s)`,
+          );
+        }
+        return path;
+      }
+      return match;
+    })
+  );
+}
+
+function settingNumber(
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = settings[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, min), max);
+}
+
+async function runCli(
+  command: string,
+  args: string[],
+  timeoutSeconds: number,
+  extraEnv: Record<string, string> | undefined,
+  hooks: AdapterHooks,
+): Promise<void> {
+  let child: Deno.ChildProcess;
+  try {
+    child = new Deno.Command(command, {
+      args,
+      env: extraEnv ? { ...Deno.env.toObject(), ...extraEnv } : undefined,
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+  } catch (err) {
+    throw new Error(
+      `Failed to start CLI '${command}': ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const outputPromise = child.output();
+  const startedAt = Date.now();
+  // Bounded drain after a kill: SIGKILL kills the direct child, but any
+  // grandchild it spawned inherits the pipe fds and holds them open, so
+  // output() would otherwise wait for the grandchild to exit on its own.
+  // Wait a short grace period for the pipes to flush, then abandon them.
+  const killAndDrain = async (): Promise<void> => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Process may have already exited.
+    }
+    const grace = new Promise((resolve) => setTimeout(resolve, 2000));
+    const done = outputPromise.then(
+      () => "done" as const,
+      () => "done" as const,
+    );
+    // Attach a no-op handler so a late rejection can't go unhandled.
+    outputPromise.catch(() => {});
+    await Promise.race([done, grace]);
+  };
+  for (;;) {
+    if (hooks.isCancelled()) {
+      await killAndDrain();
+      throw new CancelledError();
+    }
+    if (Date.now() - startedAt > timeoutSeconds * 1000) {
+      await killAndDrain();
+      throw new Error(`CLI '${command}' timed out after ${timeoutSeconds}s`);
+    }
+    const tick = new Promise((resolve) => setTimeout(resolve, 100));
+    const done = outputPromise.then(
+      () => "done" as const,
+      () => "done" as const,
+    );
+    if (await Promise.race([done, tick]) === "done") break;
+  }
+  const output = await outputPromise;
+  if (!output.success) {
+    const stderr = new TextDecoder().decode(output.stderr).trim();
+    const stdout = new TextDecoder().decode(output.stdout).trim();
+    const tail = (stderr || stdout || "(no output)").slice(-1500);
+    throw new Error(`CLI '${command}' exited with code ${output.code}: ${tail}`);
+  }
+}
+
+export class LocalCliAdapter implements ModelAdapter {
+  readonly backend = "local_cli";
+
+  async generate(
+    input: GenerationAdapterInput,
+    hooks: AdapterHooks,
+  ): Promise<GenerationAdapterResult> {
+    const settings = input.settings;
+    const command = settings.command;
+    if (typeof command !== "string" || command.trim() === "") {
+      throw new Error(
+        "local_cli model requires a 'command' string in default_settings",
+      );
+    }
+    const rawArgs = Array.isArray(settings.args)
+      ? (settings.args as unknown[]).filter((a): a is string => typeof a === "string")
+      : [];
+    if (!rawArgs.some((a) => a.includes("{output}"))) {
+      throw new Error(
+        "local_cli model args must include an '{output}' placeholder for the result file",
+      );
+    }
+    const timeoutSeconds = settingNumber(settings, "timeout_seconds", 600, 1, 6 * 3600);
+    const rawEnv = settings.env;
+    const extraEnv = rawEnv && typeof rawEnv === "object" && !Array.isArray(rawEnv)
+      ? Object.fromEntries(
+        Object.entries(rawEnv as Record<string, unknown>)
+          .filter(([, v]) => typeof v === "string")
+          .map(([k, v]) => [k, v as string]),
+      )
+      : undefined;
+    const seedUsed = input.seed && input.seed !== "random" ? input.seed : randomSeed();
+    const count = candidateCount(settings);
+    const def = outputForTask(input.jobType);
+    const rawExt = settings.output_extension;
+    const ext = typeof rawExt === "string" && rawExt.trim() !== ""
+      ? rawExt.trim().replace(/^\./, "").toLowerCase()
+      : def.extension;
+
+    const candidates: CandidateFile[] = [];
+    for (let i = 0; i < count; i++) {
+      if (hooks.isCancelled()) throw new CancelledError();
+      const outPath = `${input.workDir}/.localcli-${crypto.randomUUID()}.${ext}`;
+      try {
+        const args = renderCliArgs(rawArgs, {
+          prompt: input.promptText ?? "",
+          seed: seedUsed,
+          candidate: i,
+          count,
+          inputPaths: input.inputs.map((ref) => ref.file_path),
+          output: outPath,
+        });
+        hooks.onProgress(
+          5 + (i / count) * 90,
+          `Running ${command} (candidate ${i + 1}/${count})`,
+        );
+        await runCli(command, args, timeoutSeconds, extraEnv, hooks);
+        const stat = await Deno.stat(outPath).catch(() => null);
+        if (!stat) {
+          throw new Error(`${command} finished but did not write an output file`);
+        }
+        const content = await Deno.readFile(outPath);
+        candidates.push({
+          content,
+          extension: ext,
+          mime_type: mediaTypeFor(outPath).mime ?? "application/octet-stream",
+        });
+        hooks.onProgress(5 + ((i + 1) / count) * 90, `Candidate ${i + 1}/${count} done`);
+      } finally {
+        await Deno.remove(outPath).catch(() => {});
+      }
+    }
+    hooks.onProgress(100, "Done");
+    return { candidates, seedUsed };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ComfyUI adapter: submits a workflow to a local ComfyUI server.
+// default_settings:
+//   endpoint (string, required)  e.g. http://127.0.0.1:8188
+//   workflow (object, required)  ComfyUI prompt graph (node map)
+//   timeout_seconds (number)     default 600
+// String placeholders in the workflow: {{prompt}}, {{seed}} (coerced to a
+// number when it is the whole value and numeric), {{input:<i>}} (uploaded
+// to the server first; the returned file name is substituted).
+// ---------------------------------------------------------------------------
+
+interface ComfyFileRef {
+  filename: string;
+  subfolder?: string;
+  type?: string;
+}
+
+function fetchWithTimeout(url: string, init: RequestInit = {}, ms = 20000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+function substituteWorkflow(
+  workflow: Record<string, unknown>,
+  ctx: { prompt: string; seed: string; uploads: Map<number, string> },
+): Record<string, unknown> {
+  const walk = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      if (value.trim() === "{{seed}}") {
+        const asNumber = Number(ctx.seed);
+        return Number.isFinite(asNumber) ? asNumber : ctx.seed;
+      }
+      return value
+        .replace(/\{\{\s*prompt\s*\}\}/g, ctx.prompt)
+        .replace(/\{\{\s*seed\s*\}\}/g, ctx.seed)
+        .replace(/\{\{\s*input:(\d+)\s*\}\}/g, (_m, i: string) => ctx.uploads.get(Number(i)) ?? _m);
+    }
+    if (Array.isArray(value)) return value.map(walk);
+    if (typeof value === "object" && value !== null) {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value)) out[k] = walk(v);
+      return out;
+    }
+    return value;
+  };
+  return walk(workflow) as Record<string, unknown>;
+}
+
+export class ComfyUIAdapter implements ModelAdapter {
+  readonly backend = "comfyui";
+
+  async generate(
+    input: GenerationAdapterInput,
+    hooks: AdapterHooks,
+  ): Promise<GenerationAdapterResult> {
+    const settings = input.settings;
+    const endpoint = typeof settings.endpoint === "string"
+      ? settings.endpoint.replace(/\/+$/, "")
+      : "";
+    if (!endpoint || !/^https?:\/\//.test(endpoint)) {
+      throw new Error(
+        "comfyui model requires an 'endpoint' http(s) URL in default_settings",
+      );
+    }
+    const workflow = settings.workflow;
+    if (
+      typeof workflow !== "object" || workflow === null || Array.isArray(workflow) ||
+      Object.keys(workflow).length === 0
+    ) {
+      throw new Error(
+        "comfyui model requires a non-empty 'workflow' object in default_settings",
+      );
+    }
+    const timeoutSeconds = settingNumber(settings, "timeout_seconds", 600, 1, 6 * 3600);
+    const seedUsed = input.seed && input.seed !== "random" ? input.seed : randomSeed();
+    const clientId = crypto.randomUUID();
+
+    const workflowJson = JSON.stringify(workflow);
+    const referencedInputs = [
+      ...new Set(
+        [...workflowJson.matchAll(/\{\{\s*input:(\d+)\s*\}\}/g)].map((m) => Number(m[1])),
+      ),
+    ].sort((a, b) => a - b);
+    for (const i of referencedInputs) {
+      if (i >= input.inputs.length) {
+        throw new Error(
+          `Workflow references input ${i} but the job has ${input.inputs.length} input(s)`,
+        );
+      }
+    }
+
+    const uploads = new Map<number, string>();
+    for (const i of referencedInputs) {
+      if (hooks.isCancelled()) throw new CancelledError();
+      const ref = input.inputs[i];
+      const filename = `cinemaitor-${crypto.randomUUID()}.${ref.format ?? "png"}`;
+      const bytes = await Deno.readFile(ref.file_path);
+      const form = new FormData();
+      form.append("image", new Blob([bytes]), filename);
+      form.append("overwrite", "true");
+      hooks.onProgress(10, `Uploading input ${i + 1}/${input.inputs.length} to ComfyUI`);
+      let uploadRes: Response;
+      try {
+        uploadRes = await fetchWithTimeout(`${endpoint}/upload/image`, {
+          method: "POST",
+          body: form,
+        });
+      } catch (err) {
+        throw new Error(
+          `ComfyUI unreachable at ${endpoint}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (!uploadRes.ok) {
+        throw new Error(`ComfyUI /upload/image failed (${uploadRes.status})`);
+      }
+      const body = (await uploadRes.json().catch(() => ({}))) as { name?: string };
+      if (!body.name) {
+        throw new Error("ComfyUI /upload/image returned no file name");
+      }
+      uploads.set(i, body.name);
+    }
+
+    const rendered = substituteWorkflow(workflow as Record<string, unknown>, {
+      prompt: input.promptText ?? "",
+      seed: seedUsed,
+      uploads,
+    });
+
+    hooks.onProgress(30, "Submitting workflow");
+    let promptRes: Response;
+    try {
+      promptRes = await fetchWithTimeout(`${endpoint}/prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: rendered, client_id: clientId }),
+      });
+    } catch (err) {
+      throw new Error(
+        `ComfyUI unreachable at ${endpoint}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!promptRes.ok) {
+      const text = await promptRes.text().catch(() => "");
+      throw new Error(`ComfyUI /prompt failed (${promptRes.status}): ${text.slice(0, 500)}`);
+    }
+    const promptBody = (await promptRes.json().catch(() => ({}))) as {
+      prompt_id?: string;
+      error?: unknown;
+      node_errors?: unknown;
+    };
+    if (!promptBody.prompt_id) {
+      throw new Error(
+        `ComfyUI /prompt rejected the workflow: ${
+          JSON.stringify(promptBody.error ?? promptBody.node_errors ?? "unknown error")
+            .slice(0, 500)
+        }`,
+      );
+    }
+    const promptId = promptBody.prompt_id;
+
+    const startedAt = Date.now();
+    let announced = false;
+    let entry: Record<string, unknown> | undefined;
+    for (;;) {
+      if (hooks.isCancelled()) {
+        await fetchWithTimeout(`${endpoint}/interrupt`, { method: "POST" }).catch(() => {});
+        throw new CancelledError();
+      }
+      if (Date.now() - startedAt > timeoutSeconds * 1000) {
+        await fetchWithTimeout(`${endpoint}/interrupt`, { method: "POST" }).catch(() => {});
+        throw new Error(
+          `ComfyUI prompt ${promptId} timed out after ${timeoutSeconds}s`,
+        );
+      }
+      if (!announced) {
+        hooks.onProgress(50, "Running on ComfyUI");
+        announced = true;
+      }
+      const res = await fetchWithTimeout(`${endpoint}/history/${promptId}`).catch(
+        () => null,
+      );
+      if (res && res.ok) {
+        const body = (await res.json().catch(() => ({}))) as Record<
+          string,
+          Record<string, unknown>
+        >;
+        if (body[promptId]) {
+          entry = body[promptId];
+          break;
+        }
+      }
+      await sleep(1000);
+    }
+
+    const status = entry?.status as
+      | { status_str?: string; messages?: { type: string; data: unknown }[] }
+      | undefined;
+    if (status?.status_str === "error") {
+      const detail = (status.messages ?? [])
+        .filter((m) => m.type === "execution_error")
+        .map((m) => {
+          const data = m.data as
+            | { exception_message?: string; feedback?: { message?: string }[] }
+            | undefined;
+          return data?.exception_message ??
+            data?.feedback?.[0]?.message ??
+            JSON.stringify(m.data);
+        })
+        .join("; ");
+      throw new Error(`ComfyUI execution error: ${detail.slice(0, 500) || "unknown"}`);
+    }
+
+    const files: ComfyFileRef[] = [];
+    const outputs = (entry?.outputs ?? {}) as Record<string, unknown>;
+    for (const nodeOutput of Object.values(outputs)) {
+      if (typeof nodeOutput !== "object" || nodeOutput === null) continue;
+      for (const key of ["images", "gifs", "videos"]) {
+        const list = (nodeOutput as Record<string, unknown>)[key];
+        if (!Array.isArray(list)) continue;
+        for (const item of list) {
+          if (
+            item && typeof item === "object" &&
+            typeof (item as ComfyFileRef).filename === "string"
+          ) {
+            files.push(item as ComfyFileRef);
+          }
+        }
+      }
+    }
+    if (files.length === 0) {
+      throw new Error("ComfyUI execution completed without image outputs");
+    }
+
+    hooks.onProgress(90, `Collecting ${files.length} output file(s)`);
+    const candidates: CandidateFile[] = [];
+    for (const file of files) {
+      const params = new URLSearchParams({
+        filename: file.filename,
+        subfolder: file.subfolder ?? "",
+        type: file.type ?? "output",
+      });
+      const res = await fetchWithTimeout(`${endpoint}/view?${params.toString()}`);
+      if (!res.ok) {
+        throw new Error(`ComfyUI /view failed for ${file.filename} (${res.status})`);
+      }
+      const content = new Uint8Array(await res.arrayBuffer());
+      const extension = file.filename.includes(".")
+        ? file.filename.split(".").pop()!.toLowerCase()
+        : "png";
+      candidates.push({
+        content,
+        extension,
+        mime_type: mediaTypeFor(file.filename).mime ?? "application/octet-stream",
+      });
+    }
+    hooks.onProgress(100, "Done");
+    return { candidates, seedUsed };
+  }
+}
+
 const adapters: Record<string, ModelAdapter> = {
   mock: new MockAdapter(),
+  local_cli: new LocalCliAdapter(),
+  comfyui: new ComfyUIAdapter(),
 };
 
 export function getAdapter(backend: string): ModelAdapter | undefined {

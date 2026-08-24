@@ -237,6 +237,14 @@ export class ModelManager extends LitElement {
       align-items: center;
     }
 
+    .model-settings {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: monospace;
+    }
+
     .model-actions {
       display: flex;
       gap: 8px;
@@ -508,6 +516,7 @@ export class ModelManager extends LitElement {
             ? html`<span>RAM ≥ ${this._fmtMb(m.ram_requirement_mb)}</span>`
             : null}
           ${m.source ? html`<span>source: ${m.source}</span>` : null}
+          ${this._renderSettings(m)}
         </div>
 
         ${m.health_error ? html`<div class="error">${m.health_error}</div>` : null}
@@ -592,6 +601,19 @@ export class ModelManager extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  _renderSettings(m) {
+    const s = m.default_settings;
+    if (!s || typeof s !== "object" || Object.keys(s).length === 0) return html``;
+    const label = typeof s.command === "string" && s.command
+      ? `cmd: ${s.command}`
+      : typeof s.endpoint === "string" && s.endpoint
+      ? `endpoint: ${s.endpoint}`
+      : null;
+    return label
+      ? html`<span class="model-settings" title=${JSON.stringify(s)}>${label}</span>`
+      : html``;
   }
 
   _onQueryInput(e) {

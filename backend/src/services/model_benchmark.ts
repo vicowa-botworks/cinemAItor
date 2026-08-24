@@ -13,7 +13,15 @@ import {
   updateJobProgress,
 } from "../db/jobs.ts";
 import { createBenchmarkResult, getModel, type Model, touchModelLastUsed } from "../db/models.ts";
+import { getContentStore } from "../storage/content_store.ts";
 import { CancelledError, getAdapter, randomSeed } from "./adapters.ts";
+
+/** Scratch dir for real backends to write temp output (guaranteed to exist). */
+async function getBenchmarkWorkDir(): Promise<string> {
+  const store = getContentStore();
+  await Deno.mkdir(store.layout.cache, { recursive: true });
+  return store.layout.cache;
+}
 
 /** Task types the v1 benchmark can run without an input asset: text/image and
  * audio generations. Image-to-image, image-to-video, and transcribe need a
@@ -126,6 +134,7 @@ export async function executeBenchmarkJob(job: GenerationJob): Promise<void> {
   };
 
   let totalCandidates = 0;
+  const benchmarkWorkDir = await getBenchmarkWorkDir();
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
     if (hooks.isCancelled()) throw new CancelledError();
@@ -135,9 +144,12 @@ export async function executeBenchmarkJob(job: GenerationJob): Promise<void> {
       {
         jobType: task,
         seed,
-        settings: { candidates },
+        // Model presets apply so real backends (local_cli/comfyui) run their
+        // configured tool; the benchmark candidate count still wins.
+        settings: { ...model.default_settings, candidates },
         inputs: [],
         promptText: BENCHMARK_PROMPTS[task],
+        workDir: benchmarkWorkDir,
       },
       {
         onProgress(progress: number, _message: string | null): void {

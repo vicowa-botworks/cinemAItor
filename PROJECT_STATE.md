@@ -8,20 +8,20 @@ mixer + ducking, audio cleanup (denoise/normalize), subtitle generation (voiceov
 the model benchmark and A/B + version comparison, skill system v1, project templates, advanced
 storage management, production hardening (auth rate limiting, chunked upload streaming), asset
 dependency tracking (AST-015, "Used in" + real delete warnings), and broken reference repair (Prompt
-Studio repair flow). Remaining deferred items: render farm and real model adapters (both explicitly
-out of MVP scope). Milestone 8 (Advanced Studio Features) is complete: 3D support (model import,
-in-browser three.js preview, and derived view export as `@`-references; see `docs/3d.md`), the
-script importer (SCN-015: paste a screenplay, preview the parsed Fountain-lite scenes, bulk-create
-them as draft scenes with prompts), the continuity analyzer (MS-8: `GET /projects/:id/continuity`, a
-deterministic read-only report over panels/scenes/shots with a scene-list UI panel), the score
-suggestion (MS-8: `GET /timelines/:id/score-suggestion` + `POST /timelines/:id/score` —
-deterministic cut + storyboard analysis synthesized into a music prompt, then a normal `music` job
-whose candidates land on a score asset; see `docs/timelines.md`) and advanced exports (MS-8:
-preset-driven video encoding with seeded archival `preset-master` and HDR `preset-hdr` presets,
-fx-pass re-encode routing for non-default encode profiles, an `ffmpeg -encoders` availability probe,
-and preset definition validation; see `docs/renders.md`). Every Milestone 8 exit criterion is now
-shipped; the only remaining deferred items are the render farm and real model adapters (both
-explicitly out of MVP scope).
+Studio repair flow), and the real model adapters (`local_cli` + `comfyui`, GEN-009/010 —
+`docs/models.md`). Remaining deferred item: the render farm (explicitly out of MVP scope). Milestone
+8 (Advanced Studio Features) is complete: 3D support (model import, in-browser three.js preview, and
+derived view export as `@`-references; see `docs/3d.md`), the script importer (SCN-015: paste a
+screenplay, preview the parsed Fountain-lite scenes, bulk-create them as draft scenes with prompts),
+the continuity analyzer (MS-8: `GET /projects/:id/continuity`, a deterministic read-only report over
+panels/scenes/shots with a scene-list UI panel), the score suggestion (MS-8:
+`GET /timelines/:id/score-suggestion` + `POST /timelines/:id/score` — deterministic cut + storyboard
+analysis synthesized into a music prompt, then a normal `music` job whose candidates land on a score
+asset; see `docs/timelines.md`) and advanced exports (MS-8: preset-driven video encoding with seeded
+archival `preset-master` and HDR `preset-hdr` presets, fx-pass re-encode routing for non-default
+encode profiles, an `ffmpeg -encoders` availability probe, and preset definition validation; see
+`docs/renders.md`). Every Milestone 8 exit criterion is now shipped; the only remaining deferred
+item is the render farm (explicitly out of MVP scope).
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -545,11 +545,27 @@ The product track follows `MASTER-PLAN.md`.
       in shape (its `_fmtMb(gpu.vram_mb)` now yields the correct number). +2 backend steps (unit
       parser + fake-`nvidia-smi`-on-PATH pipeline test, green without a GPU); backend 427 + frontend
       277 test steps green — see `docs/models.md` + `docs/diagnostics.md`
+- [x] Real model adapters (GEN-009/010, Milestone 3 follow-up): the `local_cli` and `comfyui`
+      backends in `services/adapters.ts` now run real generation — the job runner resolves the job's
+      input asset files, merges the model's `default_settings` into the job settings, and passes a
+      scratch working directory to the adapter (content-store cache area; adapters write UUID-named
+      temp files there). `local_cli` runs a user-configured `command` once per candidate with
+      `{prompt}` / `{seed}` / `{candidate}` / `{count}` / `{output}` / `{input:<i>}` placeholders
+      plus optional `env`, `timeout_seconds`, and `output_extension`; a non-zero exit fails the job
+      with the stderr tail, and a timeout SIGKILLs the child with a 2-second drain grace (orphaned
+      grandchildren can hold the pipes open, so `output()` is bounded instead of waiting for EOF).
+      `comfyui` uploads `{{input:<i>}}` references via `/upload/image`, submits the `workflow` graph
+      to `/prompt` with `{{prompt}}` / `{{seed}}` substitution, polls `/history/<prompt_id>` (1s
+      cadence, `execution_error` details surfaced), and collects every `images` / `gifs` / `videos`
+      output via `/view`; an unreachable endpoint, rejected prompt, or zero outputs fails the job,
+      and cancellation issues `POST /interrupt`. The model card UI renders the model's
+      `default_settings`; +17 backend steps (`backend/tests/real_adapters.test.ts`: fake CLI
+      scripts + a mock ComfyUI HTTP server, no real model needed); backend 444 + frontend 277 test
+      steps green — see `docs/models.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
 - [ ] Workstream 12 follow-up: render farm / multiple render runners
-- [ ] Milestone 3 follow-up: real model adapters (ComfyUI/local CLI)
 
 ### Known Issues
 

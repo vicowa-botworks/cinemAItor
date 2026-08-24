@@ -96,6 +96,7 @@ describe("job runner", () => {
       settings: { candidates: 2 },
       inputs: [],
       promptText: "a lighthouse",
+      workDir: "/tmp",
     };
     const a = await adapter.generate(input, {
       onProgress: () => {},
@@ -133,6 +134,7 @@ describe("job runner", () => {
             settings: {},
             inputs: [],
             promptText: null,
+            workDir: "/tmp",
           },
           { onProgress: () => {}, isCancelled: () => false },
         ),
@@ -254,7 +256,7 @@ describe("job runner", () => {
     const model = registerModel(ownerId, {
       name: "no-adapter",
       version: "1.0",
-      backend: "local_cli",
+      backend: "local_http",
       task_types: ["text_to_image"],
       enabled: true,
     });

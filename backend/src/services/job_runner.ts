@@ -34,7 +34,7 @@ import {
 import { setPanelPreview } from "../db/storyboards.ts";
 import { setShotGenerated } from "../db/scenes.ts";
 import { getContentStore } from "../storage/content_store.ts";
-import { CancelledError, getAdapter, randomSeed } from "./adapters.ts";
+import { type AdapterInputRef, CancelledError, getAdapter, randomSeed } from "./adapters.ts";
 import { generateProxyMedia, PROXY_OUTPUT, proxyKindFor } from "./media_proxy.ts";
 
 export interface JobRunnerOptions {
@@ -312,6 +312,31 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
     }
   }
 
+  /** Resolve a job's input asset versions to on-disk master files. */
+  async function resolveInputFiles(job: GenerationJob): Promise<AdapterInputRef[]> {
+    const refs: AdapterInputRef[] = [];
+    for (const ref of job.input_asset_versions) {
+      const version = getAssetVersionByNumber(ref.asset_id, ref.version_number);
+      if (!version || !version.file_path) {
+        throw new Error(
+          `Input asset version ${ref.asset_id}#${ref.version_number} no longer exists`,
+        );
+      }
+      await Deno.stat(version.file_path).catch(() => {
+        throw new Error(
+          `Input file for asset version ${ref.asset_id}#${ref.version_number} is missing from disk`,
+        );
+      });
+      refs.push({
+        ...ref,
+        file_path: version.file_path,
+        format: version.format,
+        mime_type: version.mime_type,
+      });
+    }
+    return refs;
+  }
+
   /** Run one claimed job to a terminal state. */
   async function executeJob(job: GenerationJob): Promise<void> {
     const jobId = job.id;
@@ -353,13 +378,22 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
         },
       };
 
+      const store = getContentStore();
+      await Deno.mkdir(store.layout.cache, { recursive: true });
+      const inputRefs = await resolveInputFiles(job);
+
+      // Model presets (default_settings) apply to every backend; job-level
+      // settings override them key by key.
+      const adapterSettings = { ...model.default_settings, ...job.settings };
+
       const result = await adapter.generate(
         {
           jobType: job.job_type,
           seed,
-          settings: job.settings,
-          inputs: job.input_asset_versions,
+          settings: adapterSettings,
+          inputs: inputRefs,
           promptText: job.prompt_text,
+          workDir: store.layout.cache,
         },
         hooks,
       );
