@@ -44,6 +44,8 @@ import {
   serviceUnavailable,
   unauthorized,
 } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -371,3 +373,150 @@ function waveformHandler(ctx: Context): Promise<void> {
     };
   }
 }
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/audio/assets": {
+    summary: "List accessible audio assets",
+    description: "Assets whose type is one of audio, music, sfx, voiceover, ambience.",
+    parameters: {
+      asset_type: {
+        schema: {
+          type: "string",
+          enum: ["audio", "music", "sfx", "voiceover", "ambience"],
+        },
+        description: "Restrict to one audio type",
+      },
+      project_id: { schema: { type: "string" } },
+      library_scope: {
+        schema: { type: "string", enum: ["global", "project"] },
+      },
+    },
+    responses: {
+      200: {
+        description: "Accessible audio assets",
+        schema: { type: "array", items: ref("Asset") },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "POST /api/v1/audio/generate": {
+    summary: "Generate music, voiceover or SFX from a prompt (AUD-009/010/011)",
+    description: "Targets a fresh audio asset and enqueues a generation job; the " +
+      "candidates are picked in the review workflow. kind maps to the " +
+      "job task music / voice / audio.",
+    requestBody: { schema: ref("AudioGenerateRequest") },
+    responses: {
+      202: {
+        description: "The queued job and its target asset",
+        schema: ref("AudioGenerateResult"),
+      },
+      ...errorResponses(400, 401, 404, 503),
+    },
+  },
+  "POST /api/v1/audio/upload": {
+    summary: "Upload an audio file (creates asset + first version)",
+    description: "Raw file bytes (wav, mp3, flac, ogg, m4a, aac) with headers: " +
+      "X-File-Name (required, percent-encoded), X-Asset-Type (percent-" +
+      "encoded, defaults to 'audio'), X-Display-Name, X-Project-Id, " +
+      "X-Upload-Notes — all percent-encoded. A slug is derived " +
+      "automatically (audio, audio_2, ...). ffprobe/ffmpeg analysis " +
+      "(duration, sample rate, channels, waveform) is best-effort.",
+    requestBody: {
+      description: "Raw audio bytes with X-File-Name header",
+      contentType: "application/octet-stream",
+      schema: { type: "string", format: "binary" },
+    },
+    responses: {
+      201: {
+        description: "The created asset, version and audio analysis",
+        schema: ref("AudioUploadResult"),
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "POST /api/v1/audio/assets/{id}/versions": {
+    summary: "Add a version to an audio asset",
+    description: "Either raw audio bytes (same header protocol as /audio/upload) or " +
+      "JSON registering a content store hash already present.",
+    requestBody: {
+      description: "Raw audio bytes, or JSON with content_hash (and optional notes)",
+      contentType: "application/octet-stream",
+      schema: { $ref: "#/components/schemas/AudioVersionCreate" },
+    },
+    responses: {
+      201: {
+        description: "The new version and its audio analysis",
+        schema: ref("AudioVersionResult"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "PATCH /api/v1/audio/assets/{id}/versions/{versionId}/adjustments": {
+    summary: "Set non-destructive trim/gain adjustments",
+    description: "Applied at render time; the stored media is never modified. " +
+      "trim.end must not exceed the known duration.",
+    requestBody: { schema: ref("AudioAdjustmentsRequest") },
+    responses: {
+      200: {
+        description: "The version with the stored adjustments",
+        schema: ref("AudioVersionResult"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/audio/assets/{id}/versions/{versionId}/cleanup": {
+    summary: "Queue audio cleanup (denoise / normalize, AUD-012)",
+    description: "Model-less audio_cleanup job (ffmpeg denoise + EBU R128 normalize, " +
+      "mock fallback). The source version stays untouched; the cleaned " +
+      "result lands as a new non-active version with cleanup provenance.",
+    requestBody: { schema: ref("AudioCleanupRequest") },
+    responses: {
+      202: {
+        description: "The queued cleanup job",
+        schema: ref("AudioCleanupResult"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/audio/assets/{id}/versions/{versionId}/subtitles": {
+    summary: "Generate SRT subtitles from the audio (AUD-014)",
+    description: "Enqueues a transcribe model job; the SRT candidates land as " +
+      "versions on a fresh global subtitle asset and flow through the " +
+      "normal review workflow.",
+    requestBody: { schema: ref("AudioSubtitleRequest") },
+    responses: {
+      202: {
+        description: "The queued transcription job",
+        schema: ref("AudioSubtitleResult"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "GET /api/v1/audio/assets/{id}/versions/{versionId}/waveform": {
+    summary: "200-bucket waveform peaks of a version",
+    description: "If the version was never analyzed and the file is still on disk, " +
+      "the analysis runs on demand before answering.",
+    responses: {
+      200: {
+        description: "The waveform",
+        schema: {
+          type: "object",
+          required: ["version_id", "waveform"],
+          properties: {
+            version_id: { type: "string" },
+            waveform: {
+              type: "object",
+              required: ["bucket_count", "peaks"],
+              properties: {
+                bucket_count: { type: "integer" },
+                peaks: { type: "array", items: { type: "number" } },
+              },
+            },
+            duration: { type: ["number", "null"], description: "Seconds" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404, 503),
+    },
+  },
+};

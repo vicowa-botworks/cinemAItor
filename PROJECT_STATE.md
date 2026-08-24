@@ -24,8 +24,11 @@ encode profiles, an `ffmpeg -encoders` availability probe, and preset definition
 (host/port/TLS/auth/From + base URL, test email), password reset by emailed single-use link,
 self-registration email confirmation (login gated with 403 `EMAIL_NOT_CONFIRMED`), and admin
 invitations with acceptance links — all degrading gracefully when no SMTP host is configured (see
-`docs/email.md`). Every Milestone 8 exit criterion is now shipped; the only remaining deferred item
-is the render farm (explicitly out of MVP scope).
+`docs/email.md`). And the API documentation is now generated, not hand-written: an OpenAPI 3.1
+document derived from the mounted routes and merged with per-endpoint `openApiOps` metadata, served
+at `GET /api/v1/openapi.json` with a Swagger UI at `GET /api/v1/docs`, kept in lockstep by a
+bidirectional coverage test (see `docs/openapi.md`). Every Milestone 8 exit criterion is now
+shipped; the only remaining deferred item is the render farm (explicitly out of MVP scope).
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -590,6 +593,20 @@ The product track follows `MASTER-PLAN.md`.
       fresh token of a kind revokes the previous one; failed sends roll the token/invitation back.
       `docs/email.md` covers the configuration and flows; +19 backend steps; backend 464 + frontend
       277 test steps green
+- [x] OpenAPI API documentation (generated, not hand-written): the OpenAPI 3.1 document is derived
+      from the mounted `@oak/router` routes at startup — paths, methods, path parameters, bearer
+      `security` (derived from the `authMiddleware` presence) and `x-rate-limited` /
+      `x-transport: websocket` flags — merged with per-endpoint `openApiOps` metadata declared next
+      to each route in `src/routes/` (summaries, request bodies, response schemas, query params,
+      `x-admin-only`, `deprecated`). Shared entity/request/response schemas live in
+      `src/openapi/schemas.ts` (104 schemas, all referenced); `buildOpenApiSpec()` throws when
+      routes and `openApiOps` drift apart in either direction. Served public at
+      `GET /api/v1/openapi.json` + Swagger UI at `GET /api/v1/docs` (pinned swagger-ui-dist 5.17.14
+      CDN, built once per process and cached). `backend/tests/openapi.test.ts` enforces the
+      invariants: bidirectional route↔ops lockstep, all `$ref`s resolve, no unreachable schemas,
+      unique operationIds (legacy `/api/*` routes carry a `Legacy` infix so they never collide with
+      their v1 twins), secured ops document 401; +10 backend steps; backend 474 + frontend 277 test
+      steps green. `docs/openapi.md` covers the conventions
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -657,3 +674,4 @@ The product track follows `MASTER-PLAN.md`.
   encoder probe, preset validation): Sun Aug 23 2026
 - Email system (SMTP configuration, password reset, email confirmation, admin invitations): Mon Aug
   24 2026
+- OpenAPI API documentation (generated spec + Swagger UI + coverage tests): Mon Aug 24 2026

@@ -10,6 +10,8 @@ import {
 } from "@cinemaItor/db/prompt_versions.ts";
 import { listReferencesForSource } from "@cinemaItor/db/references.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
   const body = ctx.request.body;
@@ -150,3 +152,86 @@ export const promptRouter = new Router()
       references: saved.references,
     };
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "POST /api/v1/prompts": {
+    summary: "Save a new prompt version",
+    description: "Stores an immutable version for the given scope and resolves any " +
+      "@asset references found in the content. Saving unchanged content " +
+      "returns the existing version with 200 and duplicate=true.",
+    requestBody: { schema: ref("PromptSaveRequest") },
+    responses: {
+      200: {
+        description: "Unchanged content — the existing version",
+        schema: ref("PromptSaved"),
+      },
+      201: {
+        description: "The new version",
+        schema: ref("PromptSaved"),
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/prompts/{scope_type}/{scope_id}": {
+    summary: "List the prompt versions of a scope",
+    parameters: {
+      scope_type: {
+        schema: {
+          type: "string",
+          enum: [
+            "generic",
+            "prompt",
+            "scene",
+            "shot",
+            "storyboard_panel",
+          ],
+        },
+      },
+      scope_id: { schema: { type: "string" } },
+    },
+    responses: {
+      200: {
+        description: "Versions, newest first",
+        schema: { type: "array", items: ref("PromptVersion") },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/prompts/{scope_type}/{scope_id}/latest": {
+    summary: "The latest prompt version of a scope",
+    responses: {
+      200: {
+        description: "The latest version with its resolved references",
+        schema: ref("PromptDetail"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/prompts/{id}": {
+    summary: "One prompt version by id",
+    responses: {
+      200: {
+        description: "The version with its resolved references",
+        schema: ref("PromptDetail"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/prompts/{id}/restore": {
+    summary: "Restore an older prompt version",
+    description: "Creates a new version whose content is the given version's content. " +
+      "If the content is already the latest, returns the existing version " +
+      "with 200 and duplicate=true.",
+    responses: {
+      200: {
+        description: "Already the latest — the existing version",
+        schema: ref("PromptSaved"),
+      },
+      201: {
+        description: "The restored (new) version",
+        schema: ref("PromptSaved"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+};

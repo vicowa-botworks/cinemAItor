@@ -33,6 +33,8 @@ import {
 } from "@cinemaItor/services/email_flows.ts";
 import { isMailAvailable } from "@cinemaItor/services/mail.ts";
 import { SmtpError } from "@cinemaItor/services/smtp.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -393,3 +395,148 @@ export const router = new Router()
   .post("/api/auth/register", authRateLimitMiddleware, handleRegister)
   .post("/api/auth/login", authRateLimitMiddleware, handleLogin)
   .get("/api/auth/me", authMiddleware, handleMe);
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "POST /api/v1/auth/bootstrap": {
+    summary: "Create the first (admin) user",
+    description: "Only available while no user exists. Creates the account, issues a " +
+      "session token, and marks the instance as initialized.",
+    requestBody: { schema: ref("BootstrapRequest") },
+    responses: {
+      201: {
+        description: "Session token and the created user",
+        schema: ref("SessionIssued"),
+      },
+      ...errorResponses(400, 409, 429),
+    },
+  },
+  "POST /api/v1/auth/login": {
+    summary: "Sign in with email and password",
+    requestBody: { schema: ref("LoginRequest") },
+    responses: {
+      200: {
+        description: "Session token and the user",
+        schema: ref("SessionIssued"),
+      },
+      ...errorResponses(400, 401, 403, 429),
+    },
+  },
+  "POST /api/v1/auth/logout": {
+    summary: "Revoke the current session",
+    responses: {
+      204: { description: "Session revoked" },
+      ...errorResponses(401),
+    },
+  },
+  "PUT /api/v1/auth/password": {
+    summary: "Change the current user's password",
+    description: "Verifies the current password, stores the new hash, and clears the " +
+      "must_change_password flag.",
+    requestBody: { schema: ref("PasswordChangeRequest") },
+    responses: {
+      200: { description: "The updated user", schema: ref("User") },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/auth/me": {
+    summary: "The authenticated user",
+    responses: {
+      200: { description: "The current user", schema: ref("User") },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/auth/setup-status": {
+    summary: "Whether the instance is initialized and registration is open",
+    responses: {
+      200: {
+        description: "Setup state",
+        schema: ref("SetupStatus"),
+      },
+    },
+  },
+  "POST /api/v1/auth/password-reset/request": {
+    summary: "Request a password reset email",
+    description: "Always answers 202 (no account enumeration). A single-use, 1-hour " +
+      "reset link is mailed only when the account exists and SMTP is " +
+      "configured.",
+    requestBody: { schema: ref("EmailRequest") },
+    responses: {
+      202: {
+        description:
+          "Accepted (the email may or may not exist; the body is identical in both cases)",
+        schema: ref("Message"),
+      },
+      ...errorResponses(400, 429, 503),
+    },
+  },
+  "POST /api/v1/auth/password-reset/confirm": {
+    summary: "Set a new password from a reset token",
+    description: "Single-use token; completing the reset also confirms the email " +
+      "(proving mailbox ownership) and revokes all of the account's " +
+      "sessions.",
+    requestBody: { schema: ref("PasswordResetConfirmRequest") },
+    responses: {
+      200: { description: "Password updated", schema: ref("Message") },
+      ...errorResponses(400, 429),
+    },
+  },
+  "POST /api/v1/auth/email-confirmation/confirm": {
+    summary: "Confirm an email address from a confirmation token",
+    requestBody: { schema: ref("TokenRequest") },
+    responses: {
+      200: { description: "Email confirmed", schema: ref("Message") },
+      ...errorResponses(400, 429),
+    },
+  },
+  "POST /api/v1/auth/email-confirmation/resend": {
+    summary: "Resend an email confirmation link",
+    description: "Always answers 202. A new link invalidates the previous one.",
+    requestBody: { schema: ref("EmailRequest") },
+    responses: {
+      202: {
+        description:
+          "Accepted (the account may or may not exist; the body is identical in both cases)",
+        schema: ref("Message"),
+      },
+      ...errorResponses(400, 429, 503),
+    },
+  },
+  "POST /api/auth/register": {
+    summary: "Self-register (legacy endpoint)",
+    description: "Legacy v0 endpoint, identical to the v1 flows. When SMTP is " +
+      "configured and confirmation is enabled, the account starts " +
+      "unconfirmed (no token is issued until the link is opened); " +
+      "otherwise a session token is returned immediately. Gated by the " +
+      "registration_enabled setting.",
+    deprecated: true,
+    requestBody: { schema: ref("BootstrapRequest") },
+    responses: {
+      201: {
+        description:
+          "Session token and user (when no confirmation is required), or user + message (when the confirmation email was sent)",
+        schema: ref("SessionIssued"),
+      },
+      ...errorResponses(400, 403, 409, 429, 503),
+    },
+  },
+  "POST /api/auth/login": {
+    summary: "Sign in (legacy endpoint)",
+    deprecated: true,
+    requestBody: { schema: ref("LoginRequest") },
+    responses: {
+      200: {
+        description: "Session token and the user",
+        schema: ref("SessionIssued"),
+      },
+      ...errorResponses(400, 401, 403, 429),
+    },
+  },
+  "GET /api/auth/me": {
+    summary: "The authenticated user (legacy endpoint)",
+    deprecated: true,
+    responses: {
+      200: { description: "The current user", schema: ref("User") },
+      ...errorResponses(401, 404),
+    },
+  },
+};

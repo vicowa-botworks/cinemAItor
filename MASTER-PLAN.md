@@ -3408,7 +3408,10 @@ A feature is complete when:
 Maintain these documents as the implementation progresses:
 
 - `docs/architecture.md`
-- `docs/api.md`
+- `docs/api.md` — replaced by the generated OpenAPI document: `GET /api/v1/openapi.json` (Swagger UI
+  at `GET /api/v1/docs`); conventions in `docs/openapi.md`. The spec is derived from the mounted
+  routes + per-endpoint `openApiOps` metadata and kept in lockstep by
+  `backend/tests/openapi.test.ts`, so no manually maintained API reference is needed.
 - `docs/data-model.md`
 - `docs/deployment.md`
 - `docs/security.md`

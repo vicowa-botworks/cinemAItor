@@ -25,6 +25,8 @@ import { listPanels, listStoryboards } from "@cinemaItor/db/storyboards.ts";
 import { batchGenerateScene, generateScene } from "@cinemaItor/services/creative_generation.ts";
 import { analyzeContinuity, type ContinuityInput } from "@cinemaItor/services/continuity.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function loadContinuityInput(projectId: string, userId: number): ContinuityInput {
   const boards = listStoryboards(userId, { project_id: projectId });
@@ -300,3 +302,251 @@ export const sceneRouter = new Router()
     ctx.response.status = 202;
     ctx.response.body = result;
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/scenes": {
+    summary: "List accessible scenes",
+    parameters: {
+      project_id: { schema: { type: "string" } },
+      storyboard_id: { schema: { type: "string" } },
+    },
+    responses: {
+      200: {
+        description: "The scenes",
+        schema: { type: "array", items: ref("Scene") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/scenes": {
+    summary: "Create a scene",
+    requestBody: { schema: ref("SceneInput") },
+    responses: {
+      201: {
+        description: "The scene with its prompt",
+        schema: ref("SceneWithPrompt"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "POST /api/v1/projects/{id}/scenes/from-script": {
+    summary: "Bulk-create draft scenes from a parsed script (SCN-015)",
+    description: "Accepts pre-parsed screenplay scenes (see the Fountain-lite " +
+      "parser in the frontend) and creates them as draft scenes with " +
+      "prompts. At most 200 entries.",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["scenes"],
+        properties: {
+          scenes: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["name"],
+              properties: {
+                name: { type: "string" },
+                description: { type: "string" },
+                prompt: { type: "string" },
+                notes: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The created scenes with prompts",
+        schema: {
+          type: "object",
+          required: ["created"],
+          properties: {
+            created: {
+              type: "array",
+              items: { $ref: "#/components/schemas/SceneWithPrompt" },
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/projects/{id}/continuity": {
+    summary: "Project continuity report (MS-8)",
+    description: "Deterministic read-only analysis over the project's panels, " +
+      "scenes and shots: link mismatches, time-of-day/lighting jumps, " +
+      "stale clips, duration mismatches, unlinked panels.",
+    responses: {
+      200: {
+        description: "The continuity report",
+        schema: {
+          type: "object",
+          required: ["project_id", "generated_at", "issue_count", "issues"],
+          properties: {
+            project_id: { type: "string" },
+            generated_at: { type: "string" },
+            issue_count: { type: "integer" },
+            issues: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "rule",
+                  "severity",
+                  "object_type",
+                  "object_id",
+                  "object_label",
+                  "message",
+                ],
+                properties: {
+                  rule: { type: "string" },
+                  severity: { type: "string", enum: ["error", "warning", "info"] },
+                  object_type: { type: "string", enum: ["panel", "scene", "shot"] },
+                  object_id: { type: "string" },
+                  object_label: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/scenes/{id}": {
+    summary: "Get a scene with its shots and prompts",
+    responses: {
+      200: {
+        description: "The scene and its shots",
+        schema: {
+          type: "object",
+          required: ["scene", "shots"],
+          properties: {
+            scene: { $ref: "#/components/schemas/SceneWithPrompt" },
+            shots: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ShotWithPrompt" },
+            },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "PATCH /api/v1/scenes/{id}": {
+    summary: "Update a scene",
+    requestBody: { schema: ref("SceneInput") },
+    responses: {
+      200: {
+        description: "The scene with its prompt",
+        schema: ref("SceneWithPrompt"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/scenes/{id}": {
+    summary: "Delete a scene",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/scenes/{id}/shots": {
+    summary: "List a scene's shots (with prompts)",
+    responses: {
+      200: {
+        description: "The shots, ordered",
+        schema: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ShotWithPrompt" },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/scenes/{id}/shots": {
+    summary: "Create a shot",
+    requestBody: { schema: ref("ShotInput") },
+    responses: {
+      201: {
+        description: "The shot with its prompt",
+        schema: ref("ShotWithPrompt"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "PATCH /api/v1/scenes/{id}/shots/{shotId}": {
+    summary: "Update a shot",
+    requestBody: { schema: ref("ShotInput") },
+    responses: {
+      200: {
+        description: "The shot with its prompt",
+        schema: ref("ShotWithPrompt"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/scenes/{id}/shots/{shotId}": {
+    summary: "Delete a shot",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/scenes/{id}/generate": {
+    summary: "Generate one clip for a scene (i2v/t2v, job queue)",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          model_id: { type: "string" },
+          seed: { type: "string" },
+          settings: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    responses: {
+      202: {
+        description: "The queued job and its target",
+        schema: ref("CreativeGenerateResult"),
+      },
+      ...errorResponses(400, 401, 404, 503),
+    },
+  },
+  "POST /api/v1/scenes/{id}/batch-generate": {
+    summary: "Generate clips for all of a scene's shots (job queue)",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          model_id: { type: "string" },
+          seed: { type: "string" },
+          settings: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    responses: {
+      202: {
+        description: "The queued jobs and their targets",
+        schema: ref("CreativeBatchGenerateResult"),
+      },
+      ...errorResponses(400, 401, 404, 503),
+    },
+  },
+};

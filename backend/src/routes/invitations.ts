@@ -24,6 +24,8 @@ import {
   notFound,
   unauthorized,
 } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -202,3 +204,69 @@ export const router = new Router()
     authRateLimitMiddleware,
     handleAcceptInvitation,
   );
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/invitations": {
+    summary: "List all invitations",
+    description: "Status is derived: 'revoked' > 'accepted' > 'expired' (past " +
+      "expires_at) > 'pending'.",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "All invitations",
+        schema: {
+          type: "object",
+          required: ["invitations"],
+          properties: {
+            invitations: { type: "array", items: ref("Invitation") },
+          },
+        },
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "POST /api/v1/invitations": {
+    summary: "Send an invitation email",
+    description: "Issues a 7-day single-use link and emails it. Re-inviting an " +
+      "address with a pending invitation reissues a fresh link. 503 when " +
+      "SMTP is not configured.",
+    adminOnly: true,
+    requestBody: { schema: ref("InvitationCreateRequest") },
+    responses: {
+      201: {
+        description: "The invitation and delivery result",
+        schema: {
+          type: "object",
+          required: ["invitation"],
+          properties: {
+            invitation: { $ref: "#/components/schemas/InvitationCreated" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 409, 503),
+    },
+  },
+  "DELETE /api/v1/invitations/{id}": {
+    summary: "Revoke a pending invitation",
+    adminOnly: true,
+    responses: {
+      204: { description: "Invitation revoked" },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/invitations/accept": {
+    summary: "Accept an invitation (public link flow)",
+    description: "The invitee follows the link from the email and chooses a " +
+      "password. Creates a confirmed account and a session in one step. " +
+      "Tokens are single-use: an already-used, revoked, or expired " +
+      "invitation is rejected, and an existing account conflicts.",
+    requestBody: { schema: ref("InvitationAcceptRequest") },
+    responses: {
+      201: {
+        description: "Session token and the created user",
+        schema: ref("SessionIssued"),
+      },
+      ...errorResponses(400, 409, 429),
+    },
+  },
+};

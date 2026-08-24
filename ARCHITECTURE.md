@@ -338,9 +338,26 @@ server.ts (entry point)
    │   │   verified), reporting dangling links and missing/corrupt media
   │   ├── Logger sink mirrors warn/error into the durable `diagnostics` table (DIA-003)
   │   └── (see docs/diagnostics.md)
-   └── Legacy auth routes (/api/auth/register, /api/auth/login, /api/auth/me —
-       multi-user test helper; the /api/movies demo routes were removed in phase 7)
+  ├── OpenAPI routes (public; generated API documentation — see docs/openapi.md)
+  │   ├── GET /api/v1/openapi.json (the generated OpenAPI 3.1 document)
+  │   └── GET /api/v1/docs (Swagger UI)
+  └── Legacy auth routes (/api/auth/register, /api/auth/login, /api/auth/me —
+        multi-user test helper; the /api/movies demo routes were removed in phase 7)
 ```
+
+**OpenAPI layer (generated API documentation):**
+
+- `src/openapi/spec.ts`: introspects the mounted `@oak/router` routes (paths, methods, path
+  parameters, auth/rate-limit middleware) and merges them with the per-endpoint `openApiOps`
+  metadata declared in each route file; throws when the two sides drift
+- `src/openapi/registry.ts`: every mounted router + its `openApiOps` (single source of truth for the
+  route set)
+- `src/openapi/schemas.ts`: the shared `SCHEMAS` component schemas (entities, request/ response
+  shapes, the `Error` envelope) — every schema must be referenced by an op
+- `src/openapi/types.ts`: `OperationMeta` + helpers (`ref()`, `errorResponses()`)
+- `src/routes/openapi.ts`: serves the cached spec (JSON) + Swagger UI
+- `backend/tests/openapi.test.ts`: bidirectional route↔ops coverage, $ref resolution,
+  unreachable-schema, operationId-uniqueness and endpoint tests
 
 **Database layer:**
 

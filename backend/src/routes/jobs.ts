@@ -21,6 +21,8 @@ import {
 } from "@cinemaItor/db/assets.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import { getUserById } from "@cinemaItor/db/schema.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 import { verifyToken } from "@cinemaItor/services/jwt.ts";
 import { isSessionValid } from "@cinemaItor/services/sessions.ts";
 import { subscribeJobEvents } from "@cinemaItor/services/job_events.ts";
@@ -276,3 +278,128 @@ export const jobRouter = new Router()
     if (!job) throw notFound("Job not found");
     ctx.response.body = listJobEvents(id);
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /ws/v1/jobs": {
+    summary: "Job event stream (WebSocket)",
+    description: "Not a plain HTTP GET: upgrade to a WebSocket with the bearer " +
+      "token as a `?token=` query parameter (browsers cannot set the " +
+      "Authorization header on a socket). The server pushes job progress " +
+      "and status frames plus render progress; the client is read-only.",
+    responses: {
+      200: {
+        description: "WebSocket upgrade. Frames are JSON: job + render progress/status events",
+      },
+      401: {
+        description: "Missing or invalid token in the query string",
+        schema: ref("Error"),
+      },
+      400: {
+        description: "Not a WebSocket upgrade request",
+        schema: ref("Error"),
+      },
+    },
+  },
+  "GET /api/v1/jobs": {
+    summary: "List generation jobs",
+    parameters: {
+      status: {
+        schema: {
+          type: "string",
+          enum: [
+            "queued",
+            "running",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+          ],
+        },
+      },
+      project_id: { schema: { type: "string" } },
+      model_id: { schema: { type: "string" } },
+      job_type: {
+        schema: {
+          type: "string",
+          enum: [
+            "text_to_image",
+            "image_to_image",
+            "image_to_video",
+            "text_to_video",
+            "audio",
+            "music",
+            "voice",
+            "transcribe",
+            "proxy",
+            "audio_cleanup",
+          ],
+        },
+      },
+      limit: { schema: { type: "integer", minimum: 1 } },
+    },
+    responses: {
+      200: {
+        description: "Jobs, newest first",
+        schema: { type: "array", items: ref("Job") },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "POST /api/v1/jobs": {
+    summary: "Queue a model generation job",
+    description: "The model must exist, be enabled, and support the job_type. " +
+      "prompt_text is required for non-image tasks. The runner resolves " +
+      "inputs and merges the model's default settings.",
+    requestBody: { schema: ref("JobCreateRequest") },
+    responses: {
+      201: {
+        description: "The queued job",
+        schema: {
+          type: "object",
+          required: ["job"],
+          properties: { job: { $ref: "#/components/schemas/Job" } },
+        },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/jobs/{id}": {
+    summary: "Get one job",
+    responses: {
+      200: { description: "The job", schema: ref("Job") },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/jobs/{id}/cancel": {
+    summary: "Cancel a queued or running job",
+    description: "Queued jobs are cancelled immediately; running jobs move to " +
+      "cancelling and settle on the next progress poll.",
+    responses: {
+      200: {
+        description: "The job after the cancel request",
+        schema: ref("Job"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "POST /api/v1/jobs/{id}/retry": {
+    summary: "Re-queue a terminal job",
+    responses: {
+      200: {
+        description: "The job after the retry",
+        schema: ref("Job"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/jobs/{id}/events": {
+    summary: "List a job's event log",
+    responses: {
+      200: {
+        description: "Events, oldest first",
+        schema: { type: "array", items: ref("JobEvent") },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+};

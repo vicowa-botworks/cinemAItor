@@ -27,6 +27,8 @@ import { checkModelHealth } from "@cinemaItor/services/model_health.ts";
 import { requestBenchmark } from "@cinemaItor/services/model_benchmark.ts";
 import { detectHardware, modelRequirementWarnings } from "@cinemaItor/services/hardware.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -302,3 +304,244 @@ export const modelRouter = new Router()
     if (!getModel(id)) throw notFound("Model not found");
     ctx.response.body = { benchmarks: listBenchmarkResults(id) };
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/models": {
+    summary: "List models in the registry",
+    parameters: {
+      enabled: {
+        schema: { type: "boolean" },
+        description: "true/false to filter by enabled state",
+      },
+      task_type: { schema: { type: "string" } },
+      query: { schema: { type: "string" }, description: "Match name / id" },
+    },
+    responses: {
+      200: {
+        description: "The models",
+        schema: { type: "array", items: ref("Model") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/models": {
+    summary: "Register a model (admin)",
+    adminOnly: true,
+    requestBody: { schema: ref("ModelCreateRequest") },
+    responses: {
+      201: { description: "The registered model", schema: ref("Model") },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "GET /api/v1/models/hardware": {
+    summary: "Hardware report + requirement warnings",
+    description: "Detects CPU/RAM/GPU/OS and checks every enabled model's " +
+      "requirements against it (VRAM/RAM warnings).",
+    responses: {
+      200: {
+        description: "Hardware and warnings",
+        schema: {
+          type: "object",
+          required: ["hardware", "warnings"],
+          properties: {
+            hardware: { $ref: "#/components/schemas/HardwareInfo" },
+            warnings: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["model_id", "model_name", "warning"],
+                properties: {
+                  model_id: { type: "string" },
+                  model_name: { type: "string" },
+                  warning: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "GET /api/v1/models/{id}": {
+    summary: "Get one model",
+    responses: {
+      200: { description: "The model", schema: ref("Model") },
+      ...errorResponses(401, 404),
+    },
+  },
+  "PATCH /api/v1/models/{id}": {
+    summary: "Update a model (admin)",
+    adminOnly: true,
+    requestBody: { schema: ref("ModelUpdateRequest") },
+    responses: {
+      200: {
+        description: "The updated model",
+        schema: ref("Model"),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "DELETE /api/v1/models/{id}": {
+    summary: "Remove a model and its files (admin)",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          required: ["deleted", "id"],
+          properties: {
+            deleted: { type: "boolean" },
+            id: { type: "string" },
+          },
+        },
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "POST /api/v1/models/{id}/install": {
+    summary: "Install a model's files (admin)",
+    adminOnly: true,
+    description: "Installs from the model's source_path or repository_url. Network " +
+      "sources (repository_url) require explicit consent: true " +
+      "(MOD-013). Mock backends record the model hash without files.",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          source_path: { type: "string" },
+          repository_url: { type: "string" },
+          consent: {
+            type: "boolean",
+            description: "Required true for network sources",
+          },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The installed model and install result",
+        schema: {
+          type: "object",
+          required: ["model", "install"],
+          properties: {
+            model: { $ref: "#/components/schemas/Model" },
+            install: {
+              type: "object",
+              required: ["fileHash", "fileBytes"],
+              properties: {
+                fileHash: { type: "string" },
+                fileBytes: { type: "integer" },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "POST /api/v1/models/{id}/verify": {
+    summary: "Verify a model's file checksum (SHA-256)",
+    description: "Re-hashes the stored file and compares it to the recorded hash. " +
+      "If the file is valid but the model has no hash yet, the hash is " +
+      "recorded.",
+    responses: {
+      200: {
+        description: "Verification result and the model",
+        schema: {
+          type: "object",
+          required: ["valid", "fileHash", "message", "model"],
+          properties: {
+            valid: { type: "boolean" },
+            fileHash: { type: "string" },
+            expectedHash: { type: ["string", "null"] },
+            message: { type: "string" },
+            model: { $ref: "#/components/schemas/Model" },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/models/{id}/health-check": {
+    summary: "Run a model health check and record the result",
+    responses: {
+      200: {
+        description: "Health result and the updated model",
+        schema: {
+          type: "object",
+          required: ["status", "message", "model"],
+          properties: {
+            status: { type: "string", enum: ["ok", "error"] },
+            message: { type: ["string", "null"] },
+            model: { $ref: "#/components/schemas/Model" },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/models/{id}/benchmark": {
+    summary: "Queue a benchmark run (any authenticated user)",
+    description: "Measurement only — no creative outputs. Uses deterministic per-" +
+      "task prompts with 2 candidates each; rows land in " +
+      "model_benchmarks. The model must be enabled and installed.",
+    responses: {
+      202: {
+        description: "The benchmark job and the tasks it covers",
+        schema: {
+          type: "object",
+          required: ["job_id", "tasks", "seed"],
+          properties: {
+            job_id: { type: "string" },
+            tasks: { type: "array", items: { type: "string" } },
+            seed: { type: "string" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/models/{id}/benchmarks": {
+    summary: "List benchmark results for a model (newest first)",
+    responses: {
+      200: {
+        description: "The benchmark rows (last 20)",
+        schema: {
+          type: "object",
+          required: ["benchmarks"],
+          properties: {
+            benchmarks: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "model_id",
+                  "task_type",
+                  "benchmarked_at",
+                  "duration_ms",
+                  "candidate_count",
+                  "output_bytes",
+                ],
+                properties: {
+                  id: { type: "string" },
+                  model_id: { type: "string" },
+                  task_type: { type: "string" },
+                  benchmarked_at: { type: "string" },
+                  duration_ms: { type: "number" },
+                  candidate_count: { type: "integer" },
+                  output_bytes: { type: "integer" },
+                  seed: { type: ["string", "null"] },
+                  job_id: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+};

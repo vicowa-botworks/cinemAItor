@@ -11,6 +11,8 @@ import {
   saveResolvedReferences,
 } from "@cinemaItor/db/references.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
   const body = ctx.request.body;
@@ -176,3 +178,86 @@ export const referenceRouter = new Router()
     if (!updated) throw notFound("Reference not found");
     ctx.response.body = updated;
   });
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "POST /api/v1/references/parse": {
+    summary: "Resolve @asset tokens in text",
+    description: "Parses the text for @slug (optionally @slug:vN) reference tokens and " +
+      "resolves each against the caller's accessible assets. With a " +
+      "persist target the resolved references are stored against that " +
+      "scope (e.g. a scene or shot) and the response tokens carry their " +
+      "ids.",
+    requestBody: { schema: ref("ReferenceParseRequest") },
+    responses: {
+      200: {
+        description: "The resolved tokens and unresolved-token warnings",
+        schema: {
+          type: "object",
+          required: ["tokens", "warnings"],
+          properties: {
+            tokens: { type: "array", items: ref("ReferenceToken") },
+            warnings: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/references/audit": {
+    summary: "Audit stored references",
+    description: "Lists stored reference rows, optionally filtered by source, asset, " +
+      "or status.",
+    parameters: {
+      source_type: {
+        schema: {
+          type: "string",
+          enum: ["prompt", "scene", "shot", "storyboard_panel"],
+        },
+        description: "Only references from this source type",
+      },
+      source_id: {
+        schema: { type: "string" },
+        description: "Only references from this source object",
+      },
+      asset_id: {
+        schema: { type: "string" },
+        description: "Only references pointing at this asset",
+      },
+      status: {
+        schema: {
+          type: "string",
+          enum: ["resolved", "missing", "ambiguous"],
+        },
+        description: "Only references with this status",
+      },
+    },
+    responses: {
+      200: {
+        description: "Matching reference rows",
+        schema: { type: "array", items: ref("Reference") },
+      },
+      ...errorResponses(400, 401),
+    },
+  },
+  "GET /api/v1/references/{id}": {
+    summary: "One stored reference",
+    responses: {
+      200: {
+        description: "The reference row",
+        schema: ref("Reference"),
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/references/{id}/replace": {
+    summary: "Retarget a reference to another asset (broken-reference repair)",
+    requestBody: { schema: ref("ReferenceReplaceRequest") },
+    responses: {
+      200: {
+        description: "The updated reference row",
+        schema: ref("Reference"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+};

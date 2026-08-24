@@ -17,6 +17,8 @@ import {
 } from "@cinemaItor/db/storyboards.ts";
 import { generatePanelPreview } from "@cinemaItor/services/creative_generation.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
+import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
+import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -218,3 +220,162 @@ export const storyboardRouter = new Router()
       ctx.response.body = result;
     },
   );
+
+export const openApiOps: Record<string, OperationMeta> = {
+  "GET /api/v1/storyboards": {
+    summary: "List accessible storyboards",
+    parameters: {
+      project_id: { schema: { type: "string" } },
+    },
+    responses: {
+      200: {
+        description: "The storyboards",
+        schema: { type: "array", items: ref("Storyboard") },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "POST /api/v1/storyboards": {
+    summary: "Create a storyboard",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["project_id", "name"],
+        properties: {
+          project_id: { type: "string" },
+          name: { type: "string" },
+          status: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      201: {
+        description: "The storyboard",
+        schema: ref("Storyboard"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "GET /api/v1/storyboards/{id}": {
+    summary: "Get a storyboard with its panels and prompts",
+    responses: {
+      200: {
+        description: "The storyboard and its panels (each with its prompt)",
+        schema: {
+          type: "object",
+          required: ["storyboard", "panels"],
+          properties: {
+            storyboard: { $ref: "#/components/schemas/Storyboard" },
+            panels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PanelWithPrompt" },
+            },
+          },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "PATCH /api/v1/storyboards/{id}": {
+    summary: "Update a storyboard",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          status: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "The updated storyboard",
+        schema: ref("Storyboard"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/storyboards/{id}": {
+    summary: "Delete a storyboard",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "GET /api/v1/storyboards/{id}/panels": {
+    summary: "List a storyboard's panels (with prompts)",
+    responses: {
+      200: {
+        description: "The panels, ordered",
+        schema: {
+          type: "array",
+          items: { $ref: "#/components/schemas/PanelWithPrompt" },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/storyboards/{id}/panels": {
+    summary: "Create a panel",
+    requestBody: { schema: ref("PanelInput") },
+    responses: {
+      201: {
+        description: "The panel with its prompt",
+        schema: ref("PanelWithPrompt"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "PATCH /api/v1/storyboards/{id}/panels/{panelId}": {
+    summary: "Update a panel",
+    requestBody: { schema: ref("PanelInput") },
+    responses: {
+      200: {
+        description: "The panel with its prompt",
+        schema: ref("PanelWithPrompt"),
+      },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  "DELETE /api/v1/storyboards/{id}/panels/{panelId}": {
+    summary: "Delete a panel",
+    responses: {
+      200: {
+        description: "Deletion confirmation",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/storyboards/{id}/panels/{panelId}/generate-preview": {
+    summary: "Generate a t2i preview for a panel (job queue)",
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          model_id: { type: "string" },
+          seed: { type: "string" },
+          settings: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    responses: {
+      202: {
+        description: "The queued job and its target",
+        schema: ref("CreativeGenerateResult"),
+      },
+      ...errorResponses(400, 401, 404, 503),
+    },
+  },
+};
