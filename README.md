@@ -13,7 +13,7 @@ AI-assisted movie creation platform. Plan, write, and generate movies with AI.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/cinemAItor.git
+git clone https://github.com/vicowa-botworks/cinemAItor.git
 cd cinemAItor
 
 # Install dependencies (Deno resolves on first run, but this locks versions)
@@ -119,11 +119,15 @@ deno task start
 cinemAItor/
 ├── backend/              # Deno backend
 │   ├── src/
-│   │   ├── server.ts     # Entry point
-│   │   ├── routes/       # API route handlers
-│   │   ├── db/           # Database layer
+│   │   ├── server.ts     # Entry point (router + middleware wiring)
+│   │   ├── routes/       # API route handlers (19 routers)
+│   │   ├── db/           # Repositories + permission checks
+│   │   ├── db/migrations/  # Ordered, idempotent SQL migrations
+│   │   ├── services/     # Business logic (jobs, adapters, rendering, …)
+│   │   ├── storage/      # Content-addressed media store
 │   │   └── middleware/   # Auth middleware
-│   └── tests/            # Backend tests
+│   └── tests/            # Backend tests (incl. HTTP-level acceptance flow)
+├── docs/                 # Per-domain API + behavior documentation
 ├── docker/               # Container entrypoint supervisor (production)
 ├── Dockerfile            # Single-image deployment (backend + frontend + ffmpeg)
 ├── docker-compose.yml    # One-command start with a persistent data volume
@@ -134,34 +138,51 @@ cinemAItor/
 │   │   ├── server.js     # Static file server (Deno, dev only)
 │   │   ├── components/   # Web components
 │   │   └── styles/       # Global styles
-│   ├── tests/            # Frontend tests
+│   ├── tests/            # Frontend tests (pure modules + API client)
 │   └── index.html
 └── .github/workflows/    # CI pipeline
 ```
 
-## API Endpoints
+## API
 
-### Authentication
+The v1 API lives under `/api/v1/*`. All authenticated endpoints require a `Bearer <token>` header
+(tokens come from `/api/v1/auth/bootstrap` or `/api/v1/auth/login`). Authorization is layered: the
+`admin` role bypasses all checks, creators hold implicit admin over their own projects/assets, and
+`project_permissions` / `asset_permissions` rows otherwise decide (`read` < `write` < `admin`).
+Per-domain behavior, request/response shapes, and examples are documented in [`docs/`](docs/).
 
-| Method | Endpoint             | Description       | Auth Required |
-| ------ | -------------------- | ----------------- | ------------- |
-| POST   | `/api/auth/register` | Register new user | No            |
-| POST   | `/api/auth/login`    | Login             | No            |
-| GET    | `/api/auth/me`       | Get current user  | Yes           |
+| Domain       | Base path(s)                                                                                               | `docs/`          |
+| ------------ | ---------------------------------------------------------------------------------------------------------- | ---------------- |
+| Health       | `/api/v1/health`                                                                                           | —                |
+| Auth         | `/api/v1/auth/*` (bootstrap, login, logout, me, setup-status, password)                                    | `email.md`       |
+| Users        | `/api/v1/users/*` (admin; list/create/patch/delete, registration settings)                                 | —                |
+| Invitations  | `/api/v1/invitations/*` (admin email invites) + public accept/confirm/reset routes                         | `email.md`       |
+| Projects     | `/api/v1/projects/*` (CRUD, template on create)                                                            | `projects.md`    |
+| Templates    | `/api/v1/templates` (read-only starting structures)                                                        | `projects.md`    |
+| Assets       | `/api/v1/assets/*` (CRUD, raw-bytes upload, versions/restore, previews, proxies, dependencies)             | `assets.md`      |
+| Audio        | `/api/v1/audio/*` (generation, adjustments, cleanup, subtitles, waveform)                                  | `audio.md`       |
+| Models       | `/api/v1/models/*` (registry, install/verify/remove, health, benchmark, hardware)                          | `models.md`      |
+| Jobs         | `/api/v1/jobs/*` + WebSocket `/ws/v1/jobs`                                                                 | `jobs.md`        |
+| Storyboards  | `/api/v1/storyboards/*` (+ ordered panels)                                                                 | `storyboards.md` |
+| Scenes/Shots | `/api/v1/scenes/*` (+ `/scenes/:id/shots/*`), `projects/:id/scenes/from-script`, `projects/:id/continuity` | `storyboards.md` |
+| Review       | `/api/v1/review/*` (candidates, approve/reject/shortlist)                                                  | `review.md`      |
+| Skills       | `/api/v1/skills/*` (versioned definitions + runs)                                                          | `skills.md`      |
+| Timelines    | `/api/v1/timelines/*` (tracks, items, markers, snapshots, atomic state restore, score)                     | `timelines.md`   |
+| Rendering    | `/api/v1/render-presets`, `/api/v1/renders/*`, `/api/v1/exports`                                           | `renders.md`     |
+| Diagnostics  | `/api/v1/diagnostics/*` (hardware, storage, logs, backups, cleanup)                                        | `diagnostics.md` |
+| Prompts      | `/api/v1/prompts/*` (versioned history + restore)                                                          | `references.md`  |
+| References   | `/api/v1/references/*` (parse, audit, replace)                                                             | `references.md`  |
 
-### Movies
+Legacy routes: `/api/auth/register|login|me` remain as a multi-user test helper (self-registration
+gated by an admin toggle); the v0 `/api/movies` demo routes were removed.
 
-| Method | Endpoint                 | Description     | Auth Required |
-| ------ | ------------------------ | --------------- | ------------- |
-| GET    | `/api/movies`            | List all movies | Yes           |
-| GET    | `/api/movies/:id`        | Get a movie     | Yes           |
-| POST   | `/api/movies`            | Create a movie  | Yes           |
-| PUT    | `/api/movies/:id`        | Update a movie  | Yes           |
-| DELETE | `/api/movies/:id`        | Delete a movie  | Yes           |
-| GET    | `/api/movies/:id/scenes` | List scenes     | Yes           |
-| POST   | `/api/movies/:id/scenes` | Add a scene     | Yes           |
+## Testing
 
-All authenticated endpoints require a `Bearer <token>` header.
+- `deno task test` — backend + frontend. The backend suite includes an HTTP-level MVP acceptance
+  flow (`backend/tests/mvp_acceptance.test.ts`) that drives the full studio journey over live routes
+  (auth → media → jobs → timeline → render/export → backup/restore).
+- Browser-level E2E (Playwright/Cypress) is not implemented; frontend tests cover the pure modules
+  and the API client.
 
 ## License
 
