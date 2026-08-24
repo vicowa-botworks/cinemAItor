@@ -249,10 +249,15 @@ server.ts (entry point)
   │   │   tracks), item duplicate, duration recompute, markers; media-kind matching on item
   │   │   create/update/restore (video tracks need video assets, audio tracks need audio assets)
    │   ├── Full-state snapshots with restore
-   │   ├── Atomic full-state restore `POST /:id/state` (duration/settings/tracks/items/markers in
-   │   │   one transaction; per-row validation like the item routes; duplicate ids rejected) —
-   │   │   backs the editor's undo/redo
-   │   └── (see docs/timelines.md)
+    │   ├── Atomic full-state restore `POST /:id/state` (duration/settings/tracks/items/markers in
+    │   │   one transaction; per-row validation like the item routes; duplicate ids rejected) —
+    │   │   backs the editor's undo/redo
+    │   ├── Score suggestion (MS-8): `GET /:id/score-suggestion` — deterministic cut + storyboard-panel
+    │   │   analysis (duration in 5s steps, dominant time-of-day/lighting/mood, music cues, dialogue
+    │   │   /existing-music presence) synthesized into a music prompt (services/score_suggestion.ts,
+    │   │   pure, unit-tested); `POST /:id/score` accepts `{prompt?, model_id?}` and enqueues a normal
+    │   │   `music` job (candidates on a fresh score asset; 400 without video items)
+    │   └── (see docs/timelines.md)
   ├── Render routes (/api/v1/render-presets, /api/v1/renders/*, /api/v1/exports,
   │   auth middleware, project-permission gated; preset writes admin-only)
   │   ├── Durable render queue (leases, stale recovery) + in-process render runner

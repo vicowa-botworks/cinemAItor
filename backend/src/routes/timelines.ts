@@ -29,6 +29,7 @@ import {
   replaceTimelineState,
   restoreSnapshot,
   type SnapshotData,
+  type Timeline,
   type TimelineItem,
   type TimelineMarker,
   type Track,
@@ -41,7 +42,11 @@ import {
   validatePlacement,
   validateTextOverlay,
   validateVersionForTrack,
+  VIDEO_TRACK_TYPES,
 } from "@cinemaItor/db/timelines.ts";
+import { listPanels, listStoryboards } from "@cinemaItor/db/storyboards.ts";
+import { generateAudio } from "@cinemaItor/services/creative_generation.ts";
+import { type ScoreInput, suggestScore } from "@cinemaItor/services/score_suggestion.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 
 function requireUserId(ctx: Context): number {
@@ -663,4 +668,94 @@ export const timelineRouter = new Router()
       );
       ctx.response.body = timelineDetail(timelineId, userId);
     },
+  )
+  // -----------------------------------------------------------------------
+  // Score suggestion (MS-8): deterministic analysis of the assembled cut
+  // into a synthesized music prompt; POST enqueues a music generation job.
+  // -----------------------------------------------------------------------
+  .get(
+    "/api/v1/timelines/:id/score-suggestion",
+    authMiddleware,
+    (ctx: Context, _next: Next) => {
+      const userId = requireUserId(ctx);
+      const timelineId = param(ctx as ParamsContext, "id");
+      const timeline = requireTimeline(timelineId, userId, "read");
+      const suggestion = suggestScore(loadScoreInput(timeline, userId));
+      ctx.response.body = {
+        timeline_id: timeline.id,
+        project_id: timeline.project_id,
+        suggestion,
+      };
+    },
+  )
+  .post(
+    "/api/v1/timelines/:id/score",
+    authMiddleware,
+    async (ctx: Context, _next: Next) => {
+      const userId = requireUserId(ctx);
+      const timelineId = param(ctx as ParamsContext, "id");
+      const timeline = requireTimeline(timelineId, userId, "write");
+      const input = loadScoreInput(timeline, userId);
+      if (input.video_item_count === 0) {
+        throw badRequest(
+          "Timeline has no video items — assemble a cut before suggesting a score",
+        );
+      }
+      const suggestion = suggestScore(input);
+      const body = await readOptionalBody(ctx);
+      const prompt = optionalString(body, "prompt") ?? suggestion.prompt;
+      const modelId = optionalString(body, "model_id");
+      const job = generateAudio(userId, {
+        kind: "music",
+        prompt,
+        project_id: timeline.project_id,
+        model_id: modelId,
+      });
+      ctx.response.status = 202;
+      ctx.response.body = {
+        timeline_id: timeline.id,
+        suggestion,
+        job,
+      };
+    },
   );
+
+/** Cut inputs for the score suggestion: timeline items by track kind + the
+ * project's storyboard panels (mood / lighting / time of day / music cues). */
+function loadScoreInput(timeline: Timeline, userId: number): ScoreInput {
+  const tracksById = new Map(
+    listTracks(timeline.id, userId).map((t: Track) => [t.id, t]),
+  );
+  let videoItemCount = 0;
+  let musicItemCount = 0;
+  let dialogueItemCount = 0;
+  for (const item of listItems(timeline.id, userId)) {
+    const track = tracksById.get(item.track_id);
+    if (!track || track.muted) continue;
+    const trackType = track.track_type;
+    if (VIDEO_TRACK_TYPES.includes(trackType as (typeof VIDEO_TRACK_TYPES)[number])) {
+      videoItemCount += 1;
+    } else if (trackType === "music") {
+      musicItemCount += 1;
+    } else if (trackType === "dialogue") {
+      dialogueItemCount += 1;
+    }
+  }
+  const boards = listStoryboards(userId, { project_id: timeline.project_id });
+  const panels = boards.flatMap((board) =>
+    listPanels(board.id, userId).map((p) => ({
+      panel_order: p.panel_order,
+      time_of_day: p.time_of_day,
+      lighting: p.lighting,
+      mood: p.mood,
+      music_cue: p.music_cue,
+    }))
+  );
+  return {
+    timeline_duration: timeline.duration,
+    video_item_count: videoItemCount,
+    music_item_count: musicItemCount,
+    dialogue_item_count: dialogueItemCount,
+    panels,
+  };
+}

@@ -137,6 +137,36 @@ pushes the pre-change state, and the header Undo/Redo buttons (plus `Ctrl+Z` / `
 outside text fields) send the stored state back through the state endpoint; a failed restore rolls
 the step back onto the stack it came from.
 
+## Score suggestion (after the cut is assembled)
+
+MS-8: "suggest or generate matching score after a cut is assembled". A deterministic, read-only
+analysis of the cut plus the project's storyboard produces a suggested music prompt; generating then
+enqueues a normal `music` job whose candidates land on a fresh score asset for review and timeline
+placement (the timeline's existing `music` track kind is where it goes). This complements the seeded
+`sys-tense-score` skill, which generates scores from scene-level inputs without looking at the cut.
+
+`GET /timelines/:id/score-suggestion` (read permission) returns the analysis:
+
+- **Cut facts** — `duration_seconds` (the cut length rounded up to whole five-second steps, 5–1800),
+  item counts (video/dialogue/music), `has_dialogue`/`has_existing_music` (which shape the prompt's
+  "leaves space for dialogue" / "complements the existing score" wording).
+- **Storyboard facts** — over all of the project's storyboard panels, the dominant (mode,
+  alphabetical tie-break) non-empty `time_of_day`, `lighting` and `mood`, plus up to four distinct
+  non-empty panel music cues (sorted).
+- **`prompt`** — the synthesized one-paragraph music prompt, built only from observed facts (missing
+  facts are omitted, never fabricated).
+- **`sources`** — which inputs actually contributed to the prompt.
+
+`POST /timelines/:id/score` (write permission, 400 if the timeline has no video items) accepts
+`{prompt?, model_id?}` — the prompt defaults to the freshly computed suggestion — and returns `202`
+with the same `suggestion` plus the generation job (`job_id`, `job_type`, `asset_id`, `model_id`),
+identical in shape to the audio-generation endpoint (AUD-009).
+
+Timeline editor UI: the **Suggest score** header button opens the Score suggestion card — chips for
+the cut duration / time of day / lighting / mood and the collected music cues, the `sources` list,
+an editable prompt textarea, and **Analyze cut** / **Generate score** actions. A queued job shows
+links to the score asset (where candidates land for review) and the job monitor.
+
 ## Endpoints
 
 | Method | Endpoint                                              | Description                                                                                                                             |
@@ -160,3 +190,5 @@ the step back onto the stack it came from.
 | POST   | `/api/v1/timelines/:id/snapshots`                     | Create snapshot `{name, notes?}`                                                                                                        |
 | GET    | `/api/v1/timelines/:id/snapshots`                     | List snapshots (newest first)                                                                                                           |
 | POST   | `/api/v1/timelines/:id/snapshots/:snapshotId/restore` | Restore snapshot (returns full detail)                                                                                                  |
+| GET    | `/api/v1/timelines/:id/score-suggestion`              | Deterministic cut + storyboard analysis → suggested music prompt (read permission)                                                      |
+| POST   | `/api/v1/timelines/:id/score`                         | Generate a score from the cut: `{prompt?, model_id?}` → `202` with the suggestion + `music` generation job (400 if no video items)      |

@@ -192,6 +192,12 @@ export class TimelineDetail extends LitElement {
       color: var(--color-text-muted);
     }
 
+    .card .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
     /* --- canvas --- */
 
     .canvas {
@@ -622,6 +628,12 @@ export class TimelineDetail extends LitElement {
     renderJob: { state: true },
     renderError: { state: true },
     renderBusy: { state: true },
+    showScore: { state: true },
+    score: { state: true },
+    scorePrompt: { state: true },
+    scoreBusy: { state: true },
+    scoreResult: { state: true },
+    scoreError: { state: true },
   };
 
   constructor() {
@@ -672,6 +684,12 @@ export class TimelineDetail extends LitElement {
     this.renderJob = null;
     this.renderError = "";
     this.renderBusy = false;
+    this.showScore = false;
+    this.score = null;
+    this.scorePrompt = "";
+    this.scoreBusy = false;
+    this.scoreResult = null;
+    this.scoreError = "";
     this._renderTimer = null;
     this._drag = null;
     this._unsubscribeEvents = null;
@@ -1600,6 +1618,112 @@ export class TimelineDetail extends LitElement {
 
   // --- render ---
 
+  _toggleScore() {
+    this.showScore = !this.showScore;
+    this.scoreError = "";
+    if (this.showScore && !this.score) this._loadScoreSuggestion();
+  }
+
+  async _loadScoreSuggestion() {
+    this.scoreBusy = true;
+    this.scoreError = "";
+    try {
+      const res = await api.getScoreSuggestion(this.timelineId);
+      this.score = res.suggestion;
+      if (!this.scorePrompt.trim()) this.scorePrompt = res.suggestion.prompt;
+    } catch (err) {
+      this.scoreError = err.message ?? "Failed to analyze the cut.";
+    } finally {
+      this.scoreBusy = false;
+    }
+  }
+
+  async _generateScore() {
+    const prompt = this.scorePrompt.trim();
+    if (!prompt) return;
+    this.scoreBusy = true;
+    this.scoreError = "";
+    this.scoreResult = null;
+    try {
+      const res = await api.generateScore(this.timelineId, { prompt });
+      this.scoreResult = res.job;
+      this.score = res.suggestion;
+    } catch (err) {
+      this.scoreError = err.message ?? "Score generation failed.";
+    } finally {
+      this.scoreBusy = false;
+    }
+  }
+
+  _renderScoreCard() {
+    const s = this.score;
+    return html`
+      <div class="card">
+        <div class="card-title">Score suggestion</div>
+        <div class="notice" style="margin:0;">
+          Analyzes this cut (timeline length, dialogue presence) plus the
+          project's storyboard panels (time of day, lighting, mood, music cues)
+          to synthesize a music prompt. Edit it below, then generate —
+          candidates land on a new score asset for review.
+        </div>
+        ${this.scoreError ? html`<div class="error">${this.scoreError}</div>` : null}
+        ${s
+          ? html`
+            <div>
+              ${[
+                `${s.duration_seconds}s`,
+                s.time_of_day,
+                s.lighting,
+                s.mood,
+              ]
+                .filter(Boolean)
+                .map((t) => html`<span class="chip">${t}</span>`)}
+            </div>
+            ${s.music_cues.length
+              ? html`<div><span class="chip">cues: ${s.music_cues.join(", ")}</span></div>`
+              : null}
+            <div class="notice" style="margin:0;">
+              Sources: ${s.sources.join(", ")}
+            </div>
+            <textarea
+              class="score-prompt"
+              ?disabled=${this.scoreBusy}
+              .value=${this.scorePrompt}
+              @input=${(e) => (this.scorePrompt = e.target.value)}></textarea>
+          `
+          : null}
+        ${this.scoreResult
+          ? html`
+            <div class="notice" style="margin:0;">
+              <strong>Score job queued</strong> — job
+              ${this.scoreResult.job_id.slice(0, 8)} on model
+              ${this.scoreResult.model_id}.
+              <a
+                href="#/asset/${encodeURIComponent(this.scoreResult.asset_id)}"
+                target="_blank">View the score asset (candidates land here
+                for review)</a> ·
+              <a href="#/jobs" target="_blank">Track it in Jobs</a>
+            </div>
+          `
+          : null}
+        <div class="actions">
+          <button
+            class="btn-small"
+            ?disabled=${this.scoreBusy}
+            @click=${this._loadScoreSuggestion}>
+            ${this.score ? "Re-analyze cut" : this.scoreBusy ? "Analyzing…" : "Analyze cut"}
+          </button>
+          <button
+            class="btn-small"
+            ?disabled=${this.scoreBusy || !this.scorePrompt.trim()}
+            @click=${this._generateScore}>
+            ${this.scoreBusy && !this.scoreResult ? "Queuing…" : "Generate score"}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
   render() {
     if (this.loading && !this.timeline) {
       return html`<div class="empty-note">Loading timeline...</div>`;
@@ -1663,6 +1787,12 @@ export class TimelineDetail extends LitElement {
           </button>
           <button
             class="btn-small"
+            ?disabled=${this.busy || this.scoreBusy}
+            @click=${this._toggleScore}>
+            ${this.showScore ? "Hide score" : "Suggest score"}
+          </button>
+          <button
+            class="btn-small"
             ?disabled=${this.busy}
             @click=${this._deleteTimeline}>
             Delete
@@ -1678,6 +1808,8 @@ export class TimelineDetail extends LitElement {
               .projectId=${this.timeline.project_id ?? null}></audio-dialog>
           `
           : null}
+
+        ${this.showScore ? this._renderScoreCard() : null}
 
         <timeline-preview
           .tracks=${this.tracks}
