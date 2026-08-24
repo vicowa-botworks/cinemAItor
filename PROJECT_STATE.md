@@ -19,8 +19,9 @@ deterministic cut + storyboard analysis synthesized into a music prompt, then a 
 whose candidates land on a score asset; see `docs/timelines.md`) and advanced exports (MS-8:
 preset-driven video encoding with seeded archival `preset-master` and HDR `preset-hdr` presets,
 fx-pass re-encode routing for non-default encode profiles, an `ffmpeg -encoders` availability probe,
-and preset definition validation; see `docs/renders.md`). Remaining MS-8 items are tracked in
-`MASTER-PLAN.md`.
+and preset definition validation; see `docs/renders.md`). Every Milestone 8 exit criterion is now
+shipped; the only remaining deferred items are the render farm and real model adapters (both
+explicitly out of MVP scope).
 
 The product track follows `MASTER-PLAN.md`.
 
@@ -469,6 +470,13 @@ The product track follows `MASTER-PLAN.md`.
       audited path for re-pointing rows on saved versions. Pure span-rewrite helper
       `replaceReferenceToken` in `frontend/src/reference-repair.js` (unit-tested, +9 frontend
       steps); all 365 backend + 228 frontend test steps green
+- [x] User management (admin provisioning): `/api/v1/users/*` (admin-only) — create users with a
+      default password + optional `must_change_password`, role promote/demote, activate/deactivate,
+      password reset, soft delete (last-active-admin lockout guard, no self-deactivate/delete);
+      `PUT /api/v1/auth/password` for the forced change flow (`password-change-form` routes
+      `#/change-password` right after login for flagged accounts) and the self-registration toggle
+      (`GET/PATCH /users/settings`, enforced on register) with the admin `user-manager` component
+      (`#/users`). +12 backend + 8 frontend test steps
 - [x] 3D support (first Milestone 8 item): `model` asset type with registered media types
       (glb/gltf/obj + fbx/usd/usdz/stl stored without preview), raw-bytes upload now accepts an
       optional percent-encoded `X-Technical-Metadata` JSON header, a `model-viewer` web component
@@ -586,3 +594,7 @@ The product track follows `MASTER-PLAN.md`.
   Aug 23 2026
 - Score suggestion (MS-8: cut-aware music prompt synthesis + one-click score generation from the
   timeline editor): Sun Aug 23 2026
+- User management (admin provisioning, forced password change, self-registration toggle): Sun Aug 23
+  2026
+- Advanced exports (MS-8, final item: preset-driven encoding, `preset-master`/`preset-hdr` seeds,
+  encoder probe, preset validation): Sun Aug 23 2026
