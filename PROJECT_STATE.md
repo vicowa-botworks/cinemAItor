@@ -1,4 +1,4 @@
-# Project State - CinemaItor
+# Project State - CinemAItor
 
 ## Current Status: Milestone 7 complete — Professional Workflow Expansion (every scope item
 

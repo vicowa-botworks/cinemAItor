@@ -464,13 +464,13 @@ describe("timeline editor", () => {
     const sub = createItem(ownerId, tl.id, {
       track_id: subTrack.id,
       asset_version_id: null,
-      text: "Welcome to CinemaItor",
+      text: "Welcome to CinemAItor",
       text_style: { font_size: 32, position: "top", margin: 10 },
       start_time: 0,
       end_time: 2,
     });
     assertEquals(sub.asset_version_id, null);
-    assertEquals(sub.item_text, "Welcome to CinemaItor");
+    assertEquals(sub.item_text, "Welcome to CinemAItor");
     assertEquals(sub.text_style?.font_size, 32);
 
     // Text on a media track is rejected.

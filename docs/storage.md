@@ -1,6 +1,6 @@
 # Storage
 
-CinemaItor stores media files on disk and stores metadata in SQLite.
+CinemAItor stores media files on disk and stores metadata in SQLite.
 
 ## Layout
 

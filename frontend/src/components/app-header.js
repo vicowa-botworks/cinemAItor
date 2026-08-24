@@ -119,7 +119,7 @@ export class AppHeader extends LitElement {
     return html`
       <header>
         <div class="header-content">
-          <div class="logo" @click=${this._goHome}>CinemaItor</div>
+          <div class="logo" @click=${this._goHome}>CinemAItor</div>
           <nav class="nav">
             ${this.isLoggedIn
               ? html`
