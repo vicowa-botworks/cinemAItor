@@ -65,7 +65,12 @@ only planned processing step:
 ```
 app-root (main router)
 ├── app-header (navigation)
-├── login-form (v1 auth: login / bootstrap)
+├── login-form (v1 auth: login / bootstrap; setup tab hidden once a user exists)
+├── password-change-form (forced password change on first login for
+│   │             admin-provisioned accounts with must_change_password)
+├── user-manager (admin-only user management: add/promote/demote/activate/
+│   │             deactivate/reset-password/delete users + self-registration
+│   │             toggle, #/users)
 ├── project-list (project dashboard)
 │   ├── project-card (individual project)
 │   └── project-form (create; template picker pre-creates a starting timeline)
@@ -169,7 +174,16 @@ server.ts (entry point)
 │   ├── POST /bootstrap (first user, becomes admin)
 │   ├── POST /login
 │   ├── POST /logout
-│   └── GET /me
+│   ├── GET /me
+│   ├── GET /setup-status (public; `{registered}` — hides the first-user setup UI)
+│   └── PUT /password (auth; change own password, clears must_change_password)
+├── User routes (/api/v1/users/*, auth middleware, admin-only)
+│   ├── GET / (list), POST / (create with default password, optional
+│   │   must_change_password flag + role),
+│   │   PATCH /:id (role / is_active / must_change_password / password reset /
+│   │   display_name; last-active-admin lockout guard, no self-deactivate/delete),
+│   │   DELETE /:id (soft — is_active=0, sessions die in auth middleware)
+│   └── GET/PATCH /settings (self-registration toggle; enforced on register)
 ├── Project routes (/api/v1/projects/*, auth middleware)
 │   ├── GET / (list accessible)
 │   ├── POST / (create; optional template_id materializes a starting timeline)
@@ -348,6 +362,13 @@ Login:
 Logout:
   1. Session row is revoked (jti)
 
+Forced password change (admin-provisioned accounts):
+  1. Admin creates a user with a default password + must_change_password
+  2. Login succeeds as usual; the API response carries must_change_password
+  3. The frontend routes to #/change-password (current + new password)
+  4. PUT /api/v1/auth/password verifies the old password, stores the new hash,
+     and clears the flag
+
 Authenticated Request:
   1. Client sends Bearer token in Authorization header
   2. Auth middleware verifies JWT signature and expiry
@@ -364,6 +385,8 @@ Authenticated Request:
 - `password_hash` (TEXT) - format: `base64url(salt):base64url(hash)`
 - `display_name` (TEXT)
 - `role` (TEXT, default: 'user')
+- `must_change_password` (INTEGER, default: 0) - set on admin-provisioned accounts when the admin
+  wants the password changed at first login
 - `created_at`, `updated_at` (TEXT, datetime)
 
 **Legacy demo tables (unused):** The `movies`, `scenes` (movie scenes), and v0 `prompts` tables were
@@ -380,6 +403,8 @@ gone; the tables remain for backward compatibility of existing databases. v1 pro
   client IP + endpoint; `AUTH_RATE_LIMIT_MAX` default 20/`AUTH_RATE_LIMIT_WINDOW_SECONDS` default
   60s) guards bootstrap/login/register (v1 + legacy) and rejects excess attempts with `429` +
   `Retry-After`
+- **Self-registration**: the legacy `POST /api/auth/register` endpoint is gated by the
+  `registration_enabled` app setting (admin toggle under `#/users`; on by default)
 - **SQL**: All queries use parameterized statements (no string concatenation)
 - **CORS**: Restricted to `http://localhost:8124` in development
 - **Data isolation**: All v1 queries are permission-gated (see Authorization above), enforced in the

@@ -1,4 +1,4 @@
--- Migration 0021: advanced export presets (MS-8: advanced exports)
+-- Migration 0022: advanced export presets (MS-8: advanced exports)
 --
 -- Two more seeded presets for the render pipeline:
 --   preset-master  archival-quality h264 master (CRF 17, slow preset)

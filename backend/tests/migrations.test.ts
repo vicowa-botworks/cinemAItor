@@ -85,7 +85,8 @@ describe("migrations", () => {
         "0018_project_templates.sql",
         "0019_skill_system.sql",
         "0020_model_benchmarks.sql",
-        "0021_advanced_presets.sql",
+        "0021_user_management.sql",
+        "0022_advanced_presets.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -111,13 +112,14 @@ describe("migrations", () => {
         "0018_project_templates.sql",
         "0019_skill_system.sql",
         "0020_model_benchmarks.sql",
-        "0021_advanced_presets.sql",
+        "0021_user_management.sql",
+        "0022_advanced_presets.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        21,
+        22,
       );
     } finally {
       db.close();
@@ -149,7 +151,8 @@ describe("migrations", () => {
       "0018_project_templates.sql",
       "0019_skill_system.sql",
       "0020_model_benchmarks.sql",
-      "0021_advanced_presets.sql",
+      "0021_user_management.sql",
+      "0022_advanced_presets.sql",
     ]);
   });
 

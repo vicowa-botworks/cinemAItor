@@ -7,7 +7,7 @@ logs, output validation and export provenance (Workstream 12, Milestone 6 part 2
 
 - **Render presets** (`render_presets`) capture output settings: `name`, `kind` (`draft` or
   `final`), `output_format`, `resolution`, `frame_rate`, `codec`, `audio_codec`, `bitrate` plus
-  free-form `settings` JSON. Five defaults are seeded (migration 0010 + 0021): `preset-draft`
+  free-form `settings` JSON. Five defaults are seeded (migration 0010 + 0022): `preset-draft`
   720p30, `preset-final` 1080p60, `preset-audio` wav, `preset-master` (archival-quality h264: CRF
   17, `slow` preset, yuv420p) and `preset-hdr` (HEVC HLG 10-bit wide-gamut: CRF 20, `slow`,
   yuv420p10le with BT.2020 primaries / arib-std-b67 transfer / bt2020nc matrix — needs `libx265` in

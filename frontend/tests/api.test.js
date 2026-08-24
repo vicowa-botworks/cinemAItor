@@ -79,6 +79,58 @@ describe("ApiClient", () => {
       await api.getMe();
       assertEquals(captured[0].url, "/api/v1/auth/me");
     });
+
+    it("getAuthSetupStatus requests /api/v1/auth/setup-status", async () => {
+      await api.getAuthSetupStatus();
+      assertEquals(captured[0].url, "/api/v1/auth/setup-status");
+    });
+
+    it("changePassword puts to /api/v1/auth/password", async () => {
+      await api.changePassword("old-pass-1", "new-pass-123");
+      assertEquals(captured[0].url, "/api/v1/auth/password");
+      assertEquals(captured[0].options.method, "PUT");
+      const body = JSON.parse(captured[0].options.body);
+      assertEquals(body.current_password, "old-pass-1");
+      assertEquals(body.new_password, "new-pass-123");
+    });
+  });
+
+  describe("v1 user management endpoints", () => {
+    it("listUsers requests /api/v1/users", async () => {
+      await api.listUsers();
+      assertEquals(captured[0].url, "/api/v1/users");
+    });
+
+    it("createUser posts to /api/v1/users", async () => {
+      await api.createUser({ email: "a@b.c", password: "x" });
+      assertEquals(captured[0].url, "/api/v1/users");
+      assertEquals(captured[0].options.method, "POST");
+      assertEquals(JSON.parse(captured[0].options.body).email, "a@b.c");
+    });
+
+    it("updateUser patches /api/v1/users/:id", async () => {
+      await api.updateUser("7", { role: "admin" });
+      assertEquals(captured[0].url, "/api/v1/users/7");
+      assertEquals(captured[0].options.method, "PATCH");
+    });
+
+    it("deleteUser deletes /api/v1/users/:id", async () => {
+      await api.deleteUser("7");
+      assertEquals(captured[0].url, "/api/v1/users/7");
+      assertEquals(captured[0].options.method, "DELETE");
+    });
+
+    it("user settings get/patch /api/v1/users/settings", async () => {
+      await api.getUserSettings();
+      assertEquals(captured[0].url, "/api/v1/users/settings");
+      await api.updateUserSettings({ registration_enabled: false });
+      assertEquals(captured[1].url, "/api/v1/users/settings");
+      assertEquals(captured[1].options.method, "PATCH");
+      assertEquals(
+        JSON.parse(captured[1].options.body).registration_enabled,
+        false,
+      );
+    });
   });
 
   describe("v1 project endpoints", () => {
