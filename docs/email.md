@@ -21,7 +21,9 @@ Admins configure SMTP under `#/users` (the **Email (SMTP)** card). Settings are 
 | `email_confirmation_required` | When `true` (default), self-registered accounts must open the confirmation link before their first login.                                                                                |
 
 **Send test email** sends a plain-text test to the acting admin's own address (or an explicit `to`).
-Without SMTP configured the test endpoint returns `503`.
+Without SMTP configured the test endpoint returns `503`. In the user-manager UI the button stays
+disabled — with an explanatory tooltip — until an SMTP host has actually been saved: the test always
+runs against the stored configuration, not the (possibly unsaved) form values.
 
 ## Endpoints
 

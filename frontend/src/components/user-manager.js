@@ -555,6 +555,7 @@ export class UserManager extends LitElement {
       `;
     }
 
+    const smtpSaved = Boolean(this.emailSettings?.smtp_host);
     return html`
       <h1>User management</h1>
 
@@ -687,9 +688,13 @@ export class UserManager extends LitElement {
           <div class="actions" style="margin-top: 12px;">
             <button type="submit" class="btn" ?disabled=${this.busy}>Save
               settings</button>
-            <button type="button" class="btn btn-secondary"
-              ?disabled=${this.busy || !this.emailForm.smtp_host}
-              @click=${this._sendTestEmail}>Send test email</button>
+            <span title=${smtpSaved
+              ? undefined
+              : "Save the SMTP settings first — the test is sent with the stored configuration."}>
+              <button type="button" class="btn btn-secondary"
+                ?disabled=${this.busy || !smtpSaved}
+                @click=${this._sendTestEmail}>Send test email</button>
+            </span>
             <button type="button" class="btn btn-danger"
               ?disabled=${this.busy} @click=${this._clearSmtpPassword}>Clear
               stored password</button>
