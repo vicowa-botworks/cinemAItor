@@ -10,6 +10,7 @@ const NAV_ROUTES = {
   "/jobs": ["/jobs"],
   "/timelines": ["/timelines", "/timeline/"],
   "/diagnostics": ["/diagnostics"],
+  "/users": ["/users"],
   "/login": ["/login"],
 };
 
@@ -87,12 +88,14 @@ export class AppHeader extends LitElement {
   static properties = {
     userName: {},
     isLoggedIn: {},
+    userRole: {},
   };
 
   constructor() {
     super();
     this.userName = "";
     this.isLoggedIn = false;
+    this.userRole = "";
     this._onHashChange = () => this.requestUpdate();
   }
 
@@ -106,9 +109,10 @@ export class AppHeader extends LitElement {
     window.removeEventListener("hashchange", this._onHashChange);
   }
 
-  setUserData(name, loggedIn) {
+  setUserData(name, loggedIn, role = "") {
     this.userName = name;
     this.isLoggedIn = loggedIn;
+    this.userRole = role;
   }
 
   render() {
@@ -147,6 +151,11 @@ export class AppHeader extends LitElement {
                 <a href="#/diagnostics" class="${this._isActive(
                   "/diagnostics",
                 )}">Diagnostics</a>
+                ${this.userRole === "admin"
+                  ? html`
+                    <a href="#/users" class="${this._isActive("/users")}">Users</a>
+                  `
+                  : ""}
                 <div class="user-info">
                   <span class="user-name">${this.userName}</span>
                   <button class="btn-logout" @click=${this
