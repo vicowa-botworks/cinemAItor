@@ -674,6 +674,26 @@ class ApiClient {
     });
   }
 
+  searchHuggingFace({ q = "", filter = "", limit = 12 } = {}) {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (filter) params.set("filter", filter);
+    if (limit) params.set("limit", String(limit));
+    const query = params.toString();
+    return this.request(`/models/huggingface/search${query ? `?${query}` : ""}`);
+  }
+
+  getHuggingFaceRepo(repoId) {
+    return this.request(`/models/huggingface/${encodeURIComponent(repoId)}`);
+  }
+
+  registerModelFromHuggingFace(payload) {
+    return this.request("/models/from-huggingface", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   // --- v1 jobs ---
 
   listJobs(filter = {}) {

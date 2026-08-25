@@ -15,19 +15,22 @@ task mapping, hardware detection, and requirement warnings.
 
 ## Endpoints
 
-| Method | Endpoint                          | Description                                                    |
-| ------ | --------------------------------- | -------------------------------------------------------------- |
-| GET    | `/api/v1/models`                  | List (filter: `enabled`, `task_type`, `query`)                 |
-| POST   | `/api/v1/models`                  | Register metadata (admin)                                      |
-| GET    | `/api/v1/models/hardware`         | Detected hardware + requirement warnings for enabled models    |
-| GET    | `/api/v1/models/:id`              | One model                                                      |
-| PATCH  | `/api/v1/models/:id`              | Update metadata / enable / disable (admin)                     |
-| DELETE | `/api/v1/models/:id`              | Remove model + installed files (admin)                         |
-| POST   | `/api/v1/models/:id/install`      | Install artifact (admin); network sources need `consent: true` |
-| POST   | `/api/v1/models/:id/verify`       | SHA-256 checksum of installed file vs stored hash              |
-| POST   | `/api/v1/models/:id/health-check` | Install state, checksum, runtime availability                  |
-| POST   | `/api/v1/models/:id/benchmark`    | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)      |
-| GET    | `/api/v1/models/:id/benchmarks`   | Benchmark results, newest first (latest 20)                    |
+| Method | Endpoint                             | Description                                                    |
+| ------ | ------------------------------------ | -------------------------------------------------------------- |
+| GET    | `/api/v1/models`                     | List (filter: `enabled`, `task_type`, `query`)                 |
+| POST   | `/api/v1/models`                     | Register metadata (admin)                                      |
+| GET    | `/api/v1/models/hardware`            | Detected hardware + requirement warnings for enabled models    |
+| GET    | `/api/v1/models/huggingface/search`  | Search the public HuggingFace catalog (`?q=&filter=&limit=`)   |
+| GET    | `/api/v1/models/huggingface/:repoId` | Repo metadata + root file listing (`:repoId` = `owner%2Fname`) |
+| POST   | `/api/v1/models/from-huggingface`    | Register a model straight from an HF repo (admin)              |
+| GET    | `/api/v1/models/:id`                 | One model                                                      |
+| PATCH  | `/api/v1/models/:id`                 | Update metadata / enable / disable (admin)                     |
+| DELETE | `/api/v1/models/:id`                 | Remove model + installed files (admin)                         |
+| POST   | `/api/v1/models/:id/install`         | Install artifact (admin); network sources need `consent: true` |
+| POST   | `/api/v1/models/:id/verify`          | SHA-256 checksum of installed file vs stored hash              |
+| POST   | `/api/v1/models/:id/health-check`    | Install state, checksum, runtime availability                  |
+| POST   | `/api/v1/models/:id/benchmark`       | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)      |
+| GET    | `/api/v1/models/:id/benchmarks`      | Benchmark results, newest first (latest 20)                    |
 
 Read endpoints and benchmarks accept any authenticated user (both are measurements only, no assets
 are written); mutations (register/patch/delete/install) require the admin role. Everything is
@@ -55,6 +58,32 @@ Refresh), toggling a registration form that calls `POST /api/v1/models`:
 The server validates the backend, source, and task types against the same allowlists and answers
 `400` with the allowed values on mismatch; duplicate registrations are allowed (models are
 distinguished by id/name/version metadata).
+
+## Browsing HuggingFace
+
+The model-manager page also has a **Browse HuggingFace** panel (all authenticated users can search;
+registering is admin-only). It is a server-side proxy of the **public** HuggingFace REST API —
+`https://huggingface.co/api`, no token, public repos only, 15 s timeout:
+
+- `GET /api/v1/models/huggingface/search?q=&filter=&limit=` — search repo ids; `filter` is the HF
+  pipeline tag (e.g. `text-to-image`); limit 1–50 (default 12). The response normalizes each repo to
+  `{id, likes, downloads, pipeline_tag, tags, license}` (license parsed from the `license:*` tag).
+- `GET /api/v1/models/huggingface/:repoId` — `:repoId` is the percent-encoded `owner/name` (the
+  router decodes it). Returns `{repo: …, files: [{path, size, type}]}` from `/tree/main` (root
+  level, directory entries filtered out).
+- `POST /api/v1/models/from-huggingface` (admin) —
+  `{repo_id, file?, backend?, task_types?, name?,
+  version?, min_vram_mb?, dependencies?, known_limitations?}`.
+  The server picks the weight file (explicit `file`, or the largest file among
+  `.safetensors`/`.gguf`/`.ckpt`/`.bin` in the root listing) and registers a model row with
+  `source: "url"` and `repository_url` set to the `resolve/main` URL of that file — the normal
+  install flow then downloads it from there (consent-gated, as with any URL source). The model id is
+  the slugified last repo segment (`stabilityai/sdxl-base` → `sdxl_base`); if that id is already
+  registered the call answers `409` (use the manual form to register the repo under a different id).
+  Weights are **not** downloaded by this call.
+
+Errors: `400` bad repo id / no usable weight file / unknown `file`, `404` unknown repo, `409` model
+id already registered, `502` HuggingFace unreachable or timed out.
 
 ## Behavior
 
