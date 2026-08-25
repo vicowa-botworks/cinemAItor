@@ -9,6 +9,7 @@ import {
   getModel,
   listBenchmarkResults,
   listModels,
+  MODEL_BACKENDS,
   MODEL_SOURCES,
   registerModel,
   type RegisterModelInput,
@@ -26,6 +27,14 @@ import {
 import { checkModelHealth } from "@cinemaItor/services/model_health.ts";
 import { requestBenchmark } from "@cinemaItor/services/model_benchmark.ts";
 import { detectHardware, modelRequirementWarnings } from "@cinemaItor/services/hardware.ts";
+import {
+  getHuggingFaceRepo,
+  pickWeightFile,
+  resolveFileUrl,
+  searchHuggingFaceModels,
+  slugifyModelId,
+  validateRepoId,
+} from "@cinemaItor/services/huggingface.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
 import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
@@ -54,7 +63,7 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
 }
 
 interface ParamContext extends AuthedContext {
-  params: { id?: string };
+  params: { id?: string; repoId?: string };
 }
 
 function requireIdParam(ctx: ParamContext): string {
@@ -178,6 +187,53 @@ export const modelRouter = new Router()
       )
     ).flat();
     ctx.response.body = { hardware, warnings };
+  })
+  .get("/api/v1/models/huggingface/search", authMiddleware, async (ctx, _next) => {
+    requireUserId(ctx);
+    const params = (ctx.request.url as unknown as URL).searchParams;
+    const query = params.get("q") ?? "";
+    const filter = params.get("filter");
+    const limitRaw = params.get("limit");
+    const limit = limitRaw === null ? 12 : Math.min(50, Math.max(1, Number(limitRaw) || 12));
+    const results = await searchHuggingFaceModels(query.trim(), filter, limit);
+    ctx.response.body = { results };
+  })
+  .get("/api/v1/models/huggingface/:repoId", authMiddleware, async (ctx, _next) => {
+    requireUserId(ctx);
+    const repoId = ((ctx as ParamContext).params.repoId ?? "").trim();
+    validateRepoId(repoId);
+    ctx.response.body = await getHuggingFaceRepo(repoId);
+  })
+  .post("/api/v1/models/from-huggingface", authMiddleware, async (ctx, _next) => {
+    const userId = requireAdmin(ctx);
+    const body = await readJsonBody(ctx);
+    const repoId = optionalString(body, "repo_id");
+    if (!repoId) throw badRequest("repo_id is required");
+    validateRepoId(repoId);
+    const file = optionalString(body, "file");
+    const info = await getHuggingFaceRepo(repoId);
+    const weightFile = pickWeightFile(info.files, file);
+    const id = slugifyModelId(repoId);
+    const backend = optionalString(body, "backend") ?? "local_cli";
+    if (!MODEL_BACKENDS.includes(backend as (typeof MODEL_BACKENDS)[number])) {
+      throw badRequest(`backend must be one of: ${MODEL_BACKENDS.join(", ")}`, "backend");
+    }
+    const input: RegisterModelInput = {
+      id,
+      name: optionalString(body, "name") ?? repoId,
+      version: optionalString(body, "version") ?? "1.0",
+      backend: backend as RegisterModelInput["backend"],
+      source: "url",
+      repository_url: resolveFileUrl(repoId, weightFile),
+      license: info.repo.license ?? undefined,
+      vram_requirement_mb: optionalInt(body, "min_vram_mb"),
+      dependencies: stringArray(body, "dependencies"),
+      known_limitations: stringArray(body, "known_limitations"),
+      task_types: stringArray(body, "task_types"),
+    };
+    const model = registerModel(userId, input);
+    ctx.response.status = 201;
+    ctx.response.body = { model, file: weightFile, repo: info.repo };
   })
   .get("/api/v1/models/:id", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
@@ -361,6 +417,66 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(401),
+    },
+  },
+  "GET /api/v1/models/huggingface/search": {
+    summary: "Search public HuggingFace model repos",
+    description: "Server-side proxy of the public HuggingFace API " +
+      "(`https://huggingface.co/api/models`).",
+    parameters: {
+      q: { schema: { type: "string" }, description: "Free-text search (empty → popular)" },
+      filter: {
+        schema: { type: "string" },
+        description: "Pipeline tag filter, e.g. text-to-image",
+      },
+      limit: { schema: { type: "integer", minimum: 1, maximum: 50 } },
+    },
+    responses: {
+      200: {
+        description: "Matching repos",
+        schema: {
+          type: "object",
+          required: ["results"],
+          properties: { results: { $ref: "#/components/schemas/HuggingFaceRepos" } },
+        },
+      },
+      ...errorResponses(401, 502),
+    },
+  },
+  "GET /api/v1/models/huggingface/{repoId}": {
+    summary: "HuggingFace repo metadata + file listing",
+    description: "Repo id is the percent-encoded `owner/name` (e.g. " +
+      "`stabilityai%2Fsd-xl`). Files are the root-level `/tree/main` entries with sizes.",
+    responses: {
+      200: {
+        description: "Repo metadata and files",
+        schema: ref("HuggingFaceRepo"),
+      },
+      ...errorResponses(400, 401, 404, 502),
+    },
+  },
+  "POST /api/v1/models/from-huggingface": {
+    summary: "Register a model row from a HuggingFace repo (admin)",
+    description: "Picks the weight file (explicit `file` or the largest " +
+      ".safetensors/.gguf/.ckpt/.bin) and registers the model with `source: url` and the " +
+      "resolve URL as `repository_url`. Weights are NOT downloaded — install afterwards " +
+      "with POST /api/v1/models/{id}/install and consent: true.",
+    adminOnly: true,
+    requestBody: { schema: ref("HuggingFaceRegisterRequest") },
+    responses: {
+      201: {
+        description: "The registered model + picked file + repo summary",
+        schema: {
+          type: "object",
+          required: ["model", "file", "repo"],
+          properties: {
+            model: { $ref: "#/components/schemas/Model" },
+            file: { type: "string" },
+            repo: { $ref: "#/components/schemas/HuggingFaceRepoSummary" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404, 409, 502),
     },
   },
   "GET /api/v1/models/{id}": {

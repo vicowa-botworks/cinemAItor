@@ -2677,6 +2677,60 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       timeoutSeconds: { type: "integer" },
     },
   },
+  HuggingFaceRepoSummary: {
+    type: "object",
+    required: ["id", "likes", "downloads", "pipeline_tag", "tags", "license"],
+    properties: {
+      id: { type: "string", description: "`owner/name` repo id" },
+      likes: { type: "integer" },
+      downloads: { type: "integer" },
+      pipeline_tag: { type: ["string", "null"] },
+      tags: { type: "array", items: { type: "string" } },
+      license: { type: ["string", "null"] },
+    },
+  },
+  HuggingFaceRepoFile: {
+    type: "object",
+    required: ["path", "size", "type"],
+    properties: {
+      path: { type: "string" },
+      size: { type: "integer", description: "Bytes" },
+      type: { type: "string", enum: ["file", "directory"] },
+    },
+  },
+  HuggingFaceRepos: {
+    type: "array",
+    items: { $ref: "#/components/schemas/HuggingFaceRepoSummary" },
+  },
+  HuggingFaceRepo: {
+    type: "object",
+    required: ["repo", "files"],
+    properties: {
+      repo: { $ref: "#/components/schemas/HuggingFaceRepoSummary" },
+      files: {
+        type: "array",
+        items: { $ref: "#/components/schemas/HuggingFaceRepoFile" },
+      },
+    },
+  },
+  HuggingFaceRegisterRequest: {
+    type: "object",
+    required: ["repo_id"],
+    properties: {
+      repo_id: { type: "string", description: "`owner/name` HuggingFace repo" },
+      file: {
+        type: "string",
+        description: "Explicit weight file path (default: largest weight file)",
+      },
+      backend: { type: "string", description: "Default: local_cli" },
+      task_types: { type: "array", items: { type: "string" } },
+      name: { type: "string", description: "Default: the repo id" },
+      version: { type: "string", description: "Default: 1.0" },
+      min_vram_mb: { type: "integer" },
+      dependencies: { type: "array", items: { type: "string" } },
+      known_limitations: { type: "array", items: { type: "string" } },
+    },
+  },
 };
 
 /** Tag descriptions shown in Swagger UI's tag list. */

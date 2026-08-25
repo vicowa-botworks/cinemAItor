@@ -121,17 +121,19 @@ public repos only):
 
 | Method | Endpoint                             | Description                                                                                                                  |
 | ------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/models/huggingface/search`  | `?q=&filter=&limit=` (limit 1–50, default 12) → `{results: [{id, likes, downloads, pipeline_tag, tags, license}]}`           |
-| GET    | `/api/v1/models/huggingface/:repoId` | `{repo: {…same fields…}, files: [{path, size, type}]}` from `/tree/main` (root level)                                        |
-| POST   | `/api/v1/models/from-huggingface`    | Admin. `{repo_id, file?, backend?, task_types?, name?, version?, min_vram_mb?, dependencies?, known_limitations?, consent?}` |
+| GET    | `/api/v1/models/huggingface/search`  | `?q=&filter=&limit=` (limit 1–50, default 12; `filter` = HF pipeline tag) → `{results: [{id, likes, downloads, pipeline_tag, tags, license}]}` |
+| GET    | `/api/v1/models/huggingface/:repoId` | `:repoId` is the percent-encoded `owner/name` → `{repo: {…same fields…}, files: [{path, size, type}]}` from `/tree/main` (root level, files only) |
+| POST   | `/api/v1/models/from-huggingface`    | Admin. `{repo_id, file?, backend?, task_types?, name?, version?, min_vram_mb?, dependencies?, known_limitations?}` → `{model, file, repo}` |
 
 `from-huggingface` fetches the file listing, picks the weight file (explicit `file` or heuristic:
 largest file among `.safetensors`, `.gguf`, `.ckpt`, `.bin`), and registers a model row with
-`source: "url"`, `file_url` = `https://huggingface.co/<repo>/resolve/main/<file>`, `repository_url`
-= the repo page. `model_id` is the slugified last repo segment (suffixed to stay unique). Weights
-are **not** downloaded — use the normal `POST /:id/install` (`consent: true`) afterwards. Errors:
-`400` no usable weight file / bad repo id, `404` unknown repo, `409` id already registered, `502` HF
-unreachable.
+`source: "url"` and `repository_url` = `https://huggingface.co/<repo>/resolve/main/<file>` (the
+install flow reads `repository_url` as the download URL). `model_id` is the slugified last repo
+segment; a taken id answers `409` instead of suffixing. `name` defaults to the repo id, `version`
+to `1.0`, `backend` to `local_cli`, `license` comes from the repo's tags. Weights are **not**
+downloaded — use the normal `POST /:id/install` (`consent: true`) afterwards. Errors: `400` no
+usable weight file / bad repo id / unknown `file`, `404` unknown repo, `409` id already
+registered, `502` HF unreachable (incl. 15 s timeout).
 
 ## Model Copilot (agent)
 

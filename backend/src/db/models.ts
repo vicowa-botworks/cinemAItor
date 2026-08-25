@@ -1,5 +1,5 @@
 import { getDb } from "./database.ts";
-import { badRequest } from "../errors.ts";
+import { badRequest, conflict } from "../errors.ts";
 
 export const MODEL_BACKENDS = ["mock", "local_cli", "comfyui", "local_http"] as const;
 export type ModelBackend = (typeof MODEL_BACKENDS)[number];
@@ -54,6 +54,8 @@ export interface RegisterModelInput {
   name: string;
   version: string;
   backend: ModelBackend;
+  /** Explicit model id (defaults to a UUID). */
+  id?: string;
   source?: ModelSource;
   repository_url?: string;
   source_path?: string;
@@ -265,7 +267,22 @@ export function registerModel(
   const taskTypes = validateTaskTypes(input.task_types, "task_types");
 
   const db = getDb();
-  const id = crypto.randomUUID();
+  let id: string;
+  if (input.id !== undefined) {
+    if (!/^[a-z0-9][a-z0-9_-]{0,99}$/.test(input.id)) {
+      throw badRequest(
+        "id must be 1-100 chars of lowercase letters, digits, '_' or '-' " +
+          "and start alphanumeric",
+        "id",
+      );
+    }
+    if (getModel(input.id)) {
+      throw conflict(`A model with id '${input.id}' is already registered`, "id");
+    }
+    id = input.id;
+  } else {
+    id = crypto.randomUUID();
+  }
   const now = nowIso();
   const insert = db.prepare(
     `INSERT INTO models (

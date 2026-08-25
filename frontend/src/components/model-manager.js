@@ -14,6 +14,25 @@ const TASK_TYPES = [
 
 const BACKENDS = ["mock", "local_cli", "comfyui", "local_http"];
 
+const HF_FILTERS = [
+  ["", "All"],
+  ["text-to-image", "Text to image"],
+  ["image-to-video", "Image to video"],
+  ["text-to-video", "Text to video"],
+  ["text-to-speech", "Text to speech"],
+  ["text-to-audio", "Text to audio"],
+  ["any-to-any", "Any to any"],
+];
+
+const EMPTY_HF_FORM = {
+  name: "",
+  version: "",
+  backend: "local_cli",
+  file: "",
+  tasks: [],
+  vram_requirement_mb: "",
+};
+
 const SOURCES = ["local", "url", "mock"];
 
 const EMPTY_REG_FORM = {
@@ -499,6 +518,139 @@ export class ModelManager extends LitElement {
       opacity: 0.55;
       cursor: not-allowed;
     }
+
+    .hf-search {
+      display: flex;
+      gap: 10px;
+      margin: 12px 0;
+      flex-wrap: wrap;
+    }
+
+    .hf-search input[type="search"] {
+      flex: 1;
+      min-width: 200px;
+      padding: 8px 10px;
+      background: var(--color-input-bg, #1e1e28);
+      color: var(--color-text, #e5e5ef);
+      border: 1px solid var(--color-border, #34344a);
+      border-radius: 6px;
+    }
+
+    .hf-search select {
+      padding: 8px 10px;
+      background: var(--color-input-bg, #1e1e28);
+      color: var(--color-text, #e5e5ef);
+      border: 1px solid var(--color-border, #34344a);
+      border-radius: 6px;
+    }
+
+    .hf-results {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin: 10px 0;
+    }
+
+    .hf-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--color-border, #34344a);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .hf-row:hover {
+      border-color: var(--color-accent, #7c6cf0);
+    }
+
+    .hf-row.active {
+      border-color: var(--color-accent, #7c6cf0);
+      background: rgba(124, 108, 240, 0.08);
+    }
+
+    .hf-row-id {
+      font-weight: 500;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hf-row-meta {
+      color: var(--color-text-muted, #9a9ab0);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .hf-repo {
+      margin-top: 16px;
+      border-top: 1px solid var(--color-border, #34344a);
+      padding-top: 12px;
+    }
+
+    .hf-repo h4 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    .hf-files {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 220px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      border: 1px solid var(--color-border, #34344a);
+      border-radius: 6px;
+      padding: 6px;
+    }
+
+    .hf-file {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .hf-file.active {
+      background: rgba(124, 108, 240, 0.12);
+    }
+
+    .hf-file-path {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: monospace;
+    }
+
+    .hf-file-size {
+      color: var(--color-text-muted, #9a9ab0);
+      font-size: 12px;
+    }
+
+    .hf-tasks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .hf-task {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
   `;
 
   static properties = {
@@ -524,6 +676,16 @@ export class ModelManager extends LitElement {
     showRegister: { state: true },
     regBusy: { state: true },
     regForm: { state: true },
+    hfQuery: { state: true },
+    hfFilter: { state: true },
+    hfResults: { state: true },
+    hfSearching: { state: true },
+    hfError: { state: true },
+    hfRepo: { state: true },
+    hfLoadingRepo: { state: true },
+    hfForm: { state: true },
+    hfBusy: { state: true },
+    hfNotice: { state: true },
   };
 
   constructor() {
@@ -550,6 +712,16 @@ export class ModelManager extends LitElement {
     this.showRegister = false;
     this.regBusy = false;
     this.regForm = { ...EMPTY_REG_FORM };
+    this.hfQuery = "";
+    this.hfFilter = "";
+    this.hfResults = null;
+    this.hfSearching = false;
+    this.hfError = "";
+    this.hfRepo = null;
+    this.hfLoadingRepo = false;
+    this.hfForm = { ...EMPTY_HF_FORM };
+    this.hfBusy = false;
+    this.hfNotice = null;
     this._queryTimer = null;
   }
 
@@ -733,6 +905,8 @@ export class ModelManager extends LitElement {
             ? html`<p class="admin-note">Only admins can change the LLM settings.</p>`
             : null}
         </div>
+
+        ${this._renderHfPanel()}
 
         <div class="panel">
           <div class="filters">
@@ -978,6 +1152,259 @@ export class ModelManager extends LitElement {
         </form>
       </div>
     `;
+  }
+
+  _renderHfPanel() {
+    const form = this.hfForm;
+    const setForm = (key) => (e) => {
+      const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+      this.hfForm = { ...this.hfForm, [key]: value };
+    };
+    const toggleHfTask = (task) => () => {
+      const tasks = form.tasks.includes(task)
+        ? form.tasks.filter((t) => t !== task)
+        : [...form.tasks, task];
+      this.hfForm = { ...this.hfForm, tasks };
+    };
+    return html`
+      <div class="panel">
+        <div class="llm-head">
+          <h3>Browse HuggingFace</h3>
+          <span class="chip">catalog</span>
+        </div>
+        <p class="admin-note">
+          Search the public HuggingFace model catalog, inspect a repo's files and
+          register it straight into the registry. Registration only creates the
+          model row — weights are downloaded later by the (consent-gated) install
+          action.
+        </p>
+        <form
+          class="hf-search"
+          @submit=${(e) => {
+            e.preventDefault();
+            this._hfSearch();
+          }}>
+          <input
+            type="search"
+            placeholder="Search models, e.g. sdxl, wan, flux..."
+            .value=${this.hfQuery}
+            @input=${(e) => (this.hfQuery = e.target.value)} />
+          <select
+            .value=${this.hfFilter}
+            @change=${(e) => (this.hfFilter = e.target.value)}>
+            ${HF_FILTERS.map(
+              ([value, label]) => html`<option value=${value}>${label}</option>`,
+            )}
+          </select>
+          <button
+            type="submit"
+            class="btn"
+            ?disabled=${this.hfSearching}>
+            ${this.hfSearching ? "Searching..." : "Search"}
+          </button>
+        </form>
+        ${this.hfError ? html`<div class="error">${this.hfError}</div>` : null}
+        ${this.hfNotice
+          ? html`<div class="notice ${this.hfNotice.kind}">${this.hfNotice.text}</div>`
+          : null}
+
+        ${this.hfResults
+          ? html`
+            <div class="hf-results">
+              ${this.hfResults.map(
+                (r) =>
+                  html`
+                    <div
+                      class="hf-row ${this.hfRepo?.repo.id === r.id ? "active" : ""}"
+                      @click=${() => this._hfSelectRepo(r.id)}>
+                      <span class="hf-row-id">${r.id}</span>
+                      ${r.pipeline_tag ? html`<span class="chip">${r.pipeline_tag}</span>` : null}
+                      <span class="hf-row-meta">
+                        ♥ ${r.likes} · ↓ ${r.downloads.toLocaleString()}
+                        ${r.license ? html`· ${r.license}` : ""}
+                      </span>
+                    </div>
+                  `,
+              )}
+            </div>
+          `
+          : null}
+
+        ${this.hfLoadingRepo ? html`<div class="empty">Loading repo...</div>` : null}
+        ${this.hfRepo
+          ? html`
+            <div class="hf-repo">
+              <h4>${this.hfRepo.repo.id}</h4>
+              <div class="hf-files">
+                ${this.hfRepo.files.map(
+                  (f) =>
+                    html`
+                      <label class="hf-file ${form.file === f.path ? "active" : ""}">
+                        <input
+                          type="radio"
+                          name="hf-file"
+                          value=${f.path}
+                          .checked=${form.file === f.path}
+                          @change=${() => {
+                            this.hfForm = { ...this.hfForm, file: f.path };
+                          }} />
+                        <span class="hf-file-path">${f.path}</span>
+                        <span class="hf-file-size">${this._fmtBytes(f.size)}</span>
+                      </label>
+                    `,
+                )}
+              </div>
+              <div class="reg-grid">
+                <div class="reg-field">
+                  <label for="hf-name">Name</label>
+                  <input
+                    id="hf-name"
+                    type="text"
+                    placeholder=${this.hfRepo.repo.id}
+                    .value=${form.name}
+                    @input=${setForm("name")} />
+                </div>
+                <div class="reg-field">
+                  <label for="hf-version">Version</label>
+                  <input
+                    id="hf-version"
+                    type="text"
+                    placeholder="1.0"
+                    .value=${form.version}
+                    @input=${setForm("version")} />
+                </div>
+                <div class="reg-field">
+                  <label for="hf-backend">Backend</label>
+                  <select
+                    id="hf-backend"
+                    .value=${form.backend}
+                    @change=${setForm("backend")}>
+                    ${BACKENDS.map(
+                      (b) => html`<option value=${b}>${b}</option>`,
+                    )}
+                  </select>
+                </div>
+                <div class="reg-field">
+                  <label for="hf-vram">Min VRAM (MB)</label>
+                  <input
+                    id="hf-vram"
+                    type="number"
+                    min="0"
+                    placeholder="optional"
+                    .value=${form.vram_requirement_mb}
+                    @input=${setForm("vram_requirement_mb")} />
+                </div>
+              </div>
+              <div class="hf-tasks">
+                ${TASK_TYPES.map(
+                  (t) =>
+                    html`
+                      <label class="hf-task">
+                        <input
+                          type="checkbox"
+                          .checked=${form.tasks.includes(t)}
+                          @change=${toggleHfTask(t)} />
+                        ${t}
+                      </label>
+                    `,
+                )}
+              </div>
+              <div class="reg-actions">
+                ${this.isAdmin
+                  ? html`
+                    <button
+                      class="btn"
+                      ?disabled=${this.hfBusy || !form.file}
+                      @click=${this._hfRegister}>
+                      ${this.hfBusy ? "Registering..." : "Register model"}
+                    </button>
+                  `
+                  : html`
+                    <span class="admin-note" title="Only admins can register models">
+                      Register is admin-only
+                    </span>
+                  `}
+              </div>
+            </div>
+          `
+          : null}
+      </div>
+    `;
+  }
+
+  async _hfSearch() {
+    this.hfSearching = true;
+    this.hfError = "";
+    this.hfNotice = null;
+    try {
+      const res = await api.searchHuggingFace({
+        q: this.hfQuery.trim(),
+        filter: this.hfFilter,
+        limit: 12,
+      });
+      this.hfResults = res.results ?? [];
+      this.hfRepo = null;
+      if (this.hfResults.length === 0) {
+        this.hfNotice = { kind: "ok", text: "No repos matched." };
+      }
+    } catch (err) {
+      this.hfError = err?.message ?? "HuggingFace search failed";
+    } finally {
+      this.hfSearching = false;
+    }
+  }
+
+  async _hfSelectRepo(repoId) {
+    if (this.hfRepo?.repo.id === repoId) return;
+    this.hfLoadingRepo = true;
+    this.hfError = "";
+    this.hfNotice = null;
+    try {
+      const res = await api.getHuggingFaceRepo(repoId);
+      this.hfRepo = res;
+      const weight = res.files.find((f) => /\.(safetensors|gguf|ckpt|bin)$/i.test(f.path));
+      this.hfForm = {
+        ...EMPTY_HF_FORM,
+        file: weight ? weight.path : "",
+        name: res.repo.id,
+      };
+    } catch (err) {
+      this.hfError = err?.message ?? "Could not load the repo";
+    } finally {
+      this.hfLoadingRepo = false;
+    }
+  }
+
+  async _hfRegister() {
+    const form = this.hfForm;
+    if (!this.hfRepo || !form.file) return;
+    this.hfBusy = true;
+    this.hfError = "";
+    this.hfNotice = null;
+    const payload = {
+      repo_id: this.hfRepo.repo.id,
+      file: form.file,
+      backend: form.backend,
+    };
+    if (form.name.trim()) payload.name = form.name.trim();
+    if (form.version.trim()) payload.version = form.version.trim();
+    if (form.tasks.length > 0) payload.task_types = form.tasks;
+    if (form.vram_requirement_mb !== "") {
+      payload.min_vram_mb = Number(form.vram_requirement_mb);
+    }
+    try {
+      const res = await api.registerModelFromHuggingFace(payload);
+      this.hfNotice = {
+        kind: "ok",
+        text: `Registered "${res.model.name}" (id: ${res.model.id}, file: ${res.file}). ` +
+          "Use its Install action to download the weights.",
+      };
+      await this._loadAll();
+    } catch (err) {
+      this.hfError = err?.message ?? "Registration failed";
+    } finally {
+      this.hfBusy = false;
+    }
   }
 
   _renderModel(m) {
