@@ -56,7 +56,9 @@ export interface HealthCheckOptions {
 /**
  * Model health check (MOD-007): install state, file integrity, backend
  * runtime availability (CLI deps or HTTP endpoint). The mock backend is a
- * simulated runtime and is healthy without files.
+ * simulated runtime and is healthy without files. Remote backends (comfyui,
+ * local_http) do not require a local model file — the endpoint probe is the
+ * runtime check; a local file is verified when one is present.
  */
 export async function checkModelHealth(
   layout: StorageLayout,
@@ -70,12 +72,17 @@ export async function checkModelHealth(
     return { status: "ok", message: "Mock backend: simulated runtime, no local checks" };
   }
 
+  // Remote backends run on a server; no local model file is expected (the
+  // checkpoint lives on the remote). A local file is still verified when one
+  // is present.
+  const remoteBackend = model.backend === "comfyui" || model.backend === "local_http";
   const file = modelFile(layout, model.id);
-  if (!(await fileExists(file))) {
+  const filePresent = await fileExists(file);
+  if (!filePresent && !remoteBackend) {
     return { status: "error", message: "Model is not installed (file missing)" };
   }
 
-  if (model.file_hash) {
+  if (filePresent && model.file_hash) {
     const verify = await verifyModelFile(layout, model.id, model.file_hash);
     if (!verify.valid) {
       return { status: "error", message: verify.message };
@@ -91,7 +98,7 @@ export async function checkModelHealth(
     return { status: "ok", message: "File verified and CLI runtime available" };
   }
 
-  if (model.backend === "comfyui" || model.backend === "local_http") {
+  if (remoteBackend) {
     const endpoint = model.default_settings?.endpoint;
     if (typeof endpoint === "string" && endpoint) {
       if (!(await endpointProbe.reachable(endpoint))) {
@@ -100,11 +107,18 @@ export async function checkModelHealth(
           message: `Backend unreachable at ${endpoint}`,
         };
       }
-      return { status: "ok", message: `File verified and backend reachable at ${endpoint}` };
+      return {
+        status: "ok",
+        message: filePresent
+          ? `File verified and backend reachable at ${endpoint}`
+          : `Backend reachable at ${endpoint} (remote runtime, no local file required)`,
+      };
     }
     return {
       status: "ok",
-      message: "File verified (no HTTP endpoint configured for probe)",
+      message: filePresent
+        ? "File verified (no HTTP endpoint configured for probe)"
+        : "No local file and no HTTP endpoint configured for probe",
     };
   }
 
