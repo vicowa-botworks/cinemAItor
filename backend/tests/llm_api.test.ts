@@ -437,6 +437,295 @@ describe("llm api", () => {
     });
   });
 
+  describe("assist", () => {
+    async function registerTestModel(
+      overrides: Record<string, unknown> = {},
+    ): Promise<{ id: string }> {
+      const res = await post("/api/v1/models", {
+        name: "Test T2V",
+        version: "1.0",
+        backend: "mock",
+        task_types: ["text_to_video"],
+        enabled: true,
+        ...overrides,
+      }, adminToken);
+      assertEquals(res.status, 201);
+      return (await res.json()) as { id: string };
+    }
+
+    async function registerAssistSkill(
+      overrides: Record<string, unknown> = {},
+    ): Promise<{ id: string }> {
+      const res = await post("/api/v1/skills", {
+        id: "t2v-tips",
+        definition: {
+          name: "T2V tips",
+          version: "1",
+          steps: [{ type: "sfx", prompt: "placeholder step" }],
+          assistant: {
+            model_task_types: ["text_to_video"],
+            guidance: "Use motion verbs and camera language.",
+            examples: [{ prompt: "A crane shot over a rainy street", notes: "works" }],
+            ...overrides,
+          },
+        },
+      }, adminToken);
+      assertEquals(res.status, 201);
+      return (await res.json()) as { id: string };
+    }
+
+    function lastSystemPrompt(): string {
+      const messages = state.lastBody?.messages as Array<{
+        role: string;
+        content: string;
+      }>;
+      assertEquals(messages.length, 2);
+      assertEquals(messages[0].role, "system");
+      return messages[0].content;
+    }
+
+    it("requires authentication", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "write_script",
+          context: "A heist in space.",
+        });
+        assertEquals(res.status, 401);
+      });
+    });
+
+    it("503 when the LLM is not configured", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "write_script",
+          context: "A heist in space.",
+        }, adminToken);
+        assertEquals(res.status, 503);
+        const body = (await res.json()) as { error: { code: string } };
+        assertEquals(body.error.code, "LLM_NOT_CONFIGURED");
+      });
+    });
+
+    it("validates purpose, context and options", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const bad: Array<Record<string, unknown>> = [
+          { purpose: "write_song", context: "x" },
+          { purpose: "write_script" },
+          { purpose: "write_script", context: "   " },
+          { purpose: "write_script", context: 42 },
+          { purpose: "write_script", context: "x".repeat(32_001) },
+          { purpose: "write_script", context: "x", model_id: "m1" },
+          { purpose: "write_script", context: "x", skill_id: "s1" },
+          { purpose: "write_script", context: "x", max_tokens: 0 },
+          { purpose: "write_script", context: "x", model_id: "" },
+        ];
+        for (const body of bad) {
+          const res = await post("/api/v1/llm/assist", body, adminToken);
+          assertEquals(res.status, 400, JSON.stringify(body).slice(0, 80));
+        }
+      });
+    });
+
+    it("rejects unknown or disabled models and skills without an assistant block", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const res = await post("/api/v1/skills", {
+          id: "plain-skill",
+          definition: {
+            name: "Plain",
+            version: "1",
+            steps: [{ type: "sfx", prompt: "placeholder step" }],
+          },
+        }, adminToken);
+        assertEquals(res.status, 201);
+
+        const disabled = await registerTestModel({ name: "Disabled T2V", enabled: false });
+        const cases: Array<Record<string, unknown>> = [
+          { purpose: "enhance_prompt", context: "a cat", model_id: "does-not-exist" },
+          { purpose: "enhance_prompt", context: "a cat", model_id: disabled.id },
+          { purpose: "enhance_prompt", context: "a cat", skill_id: "nope" },
+          { purpose: "enhance_prompt", context: "a cat", skill_id: "plain-skill" },
+        ];
+        for (const body of cases) {
+          const res = await post("/api/v1/llm/assist", body, adminToken);
+          assertEquals(res.status, 400, JSON.stringify(body));
+        }
+      });
+    });
+
+    it("rejects model+skill pairs with no overlapping task types", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const model = await registerTestModel();
+        const skill = await registerAssistSkill({
+          model_task_types: ["text_to_image"],
+        });
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "a cat",
+          model_id: model.id,
+          skill_id: skill.id,
+        }, adminToken);
+        assertEquals(res.status, 400);
+        const body = (await res.json()) as { error: { message: string } };
+        assert(body.error.message.includes("overlap"));
+      });
+    });
+
+    it("write_script: returns the purpose and content, composes the system prompt", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        state.reply = "INT. SPACE STATION - NIGHT\n\nA crew plans a heist.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "write_script",
+          context: "A heist in space, keep it to three scenes.",
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const body = (await res.json()) as { purpose: string; content: string };
+        assertEquals(body.purpose, "write_script");
+        assertEquals(body.content, "INT. SPACE STATION - NIGHT\n\nA crew plans a heist.");
+        const system = lastSystemPrompt();
+        assert(system.includes("Fountain-lite"));
+        const messages = state.lastBody?.messages as Array<{ content: string }>;
+        assertEquals(messages[1].content, "A heist in space, keep it to three scenes.");
+      });
+    });
+
+    it("design_scene: fixed answer shape in the system prompt", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        state.reply = "## Overview\n\nA quiet scene.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "design_scene",
+          context: "The hero finds the letter.",
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const system = lastSystemPrompt();
+        for (
+          const heading of [
+            "## Overview",
+            "## Mood & Tone",
+            "## Shots",
+            "## Lighting",
+            "## Time of day",
+            "## Dialogue",
+          ]
+        ) {
+          assert(system.includes(heading), heading);
+        }
+      });
+    });
+
+    it("enhance_prompt: injects the model metadata into the system prompt", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const model = await registerTestModel({
+          name: "MotionDiff v2",
+          version: "2.1",
+          known_limitations: ["max 8 seconds"],
+          default_settings: { fps: 24, resolution: "1280x720" },
+        });
+        state.reply = "A cinematic crane shot of a rainy street.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "a cat on a roof",
+          model_id: model.id,
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const body = (await res.json()) as { purpose: string; content: string };
+        assertEquals(body.purpose, "enhance_prompt");
+        const system = lastSystemPrompt();
+        assert(system.includes("MotionDiff v2"));
+        assert(system.includes("text_to_video"));
+        assert(system.includes("max 8 seconds"));
+        assert(system.includes("fps"));
+      });
+    });
+
+    it("enhance_prompt: injects the skill assistant block", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const skill = await registerAssistSkill();
+        state.reply = "A crane shot over a rainy street at night.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "a cat on a roof",
+          skill_id: skill.id,
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const system = lastSystemPrompt();
+        assert(system.includes("Use motion verbs and camera language."));
+        assert(system.includes("A crane shot over a rainy street"));
+        assert(system.includes("(why: works)"));
+      });
+    });
+
+    it("enhance_prompt: re-appends @references the model drops", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        state.reply = "A cinematic shot of a rainy street at night.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "A rainy street with @hero_red_jacket walking, behind @alley_cat",
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const body = (await res.json()) as { content: string };
+        assert(body.content.includes("@hero_red_jacket"));
+        assert(body.content.includes("@alley_cat"));
+        assert(body.content.trimEnd().endsWith("@hero_red_jacket @alley_cat"));
+      });
+    });
+
+    it("enhance_prompt: keeps content untouched when all references survive", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        state.reply = "A rainy street at night, @hero_red_jacket walks past @alley_cat.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "A rainy street with @hero_red_jacket, behind @alley_cat",
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const body = (await res.json()) as { content: string };
+        assertEquals(body.content, state.reply);
+      });
+    });
+
+    it("forwards max_tokens and maps endpoint failures", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "write_script",
+          context: "A heist in space.",
+          max_tokens: 400,
+        }, adminToken);
+        assertEquals(res.status, 200);
+        assertEquals(state.lastBody?.max_tokens, 400);
+
+        state.status = 500;
+        const failed = await post("/api/v1/llm/assist", {
+          purpose: "write_script",
+          context: "A heist in space.",
+        }, adminToken);
+        assertEquals(failed.status, 502);
+        const body = (await failed.json()) as { error: { code: string } };
+        assertEquals(body.error.code, "LLM_BAD_RESPONSE");
+      });
+    });
+  });
+
   it("health check still works with the llm router mounted", async () => {
     await withServer(async (base) => {
       const health = await fetchWithRetry(`${base}/api/v1/health`);

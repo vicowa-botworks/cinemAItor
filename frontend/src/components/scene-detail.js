@@ -2,6 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
 import "./audio-dialog.js";
+import "./ai-assist-dialog.js";
 
 const SCENE_STATUSES = [
   "draft",
@@ -285,6 +286,10 @@ export class SceneDetail extends LitElement {
     sceneClip: { state: true },
     showAudioGen: { state: true },
     busy: { state: true },
+    assistOpen: { state: true },
+    assistPurpose: { state: true },
+    assistInitial: { state: true },
+    assistTarget: { state: true },
   };
 
   constructor() {
@@ -303,6 +308,10 @@ export class SceneDetail extends LitElement {
     this.sceneClip = null;
     this.showAudioGen = false;
     this.busy = false;
+    this.assistOpen = false;
+    this.assistPurpose = "design_scene";
+    this.assistInitial = "";
+    this.assistTarget = "scene";
     this._sceneId = null;
     this._modelChoice = "";
     this._seed = "";
@@ -459,7 +468,29 @@ export class SceneDetail extends LitElement {
                     .value=${s.prompt?.content ?? ""}
                     @change=${(e) => this._savePrompt(e.target.value)}>
       ${s.prompt?.content ?? ""}</textarea>
+                  <button
+                    class="btn-small"
+                    ?disabled=${this.busy}
+                    @click=${() => {
+                      this.assistPurpose = "design_scene";
+                      this.assistTarget = "scene";
+                      this.assistInitial = s.prompt?.content ??
+                        `Scene: ${s.name ?? ""} (${s.status ?? ""})`;
+                      this.assistOpen = true;
+                    }}>
+                    Design scene with AI
+                  </button>
                 </div>
+                ${this.assistOpen && this.assistTarget === "scene"
+                  ? html`
+                    <ai-assist-dialog
+                      purpose=${this.assistPurpose}
+                      .initial-context=${this.assistInitial}
+                      insert-label="Use as scene prompt"
+                      @insert=${this._onAssistInsert}
+                      @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+                  `
+                  : null}
                 ${s.prompt?.warnings?.length
                   ? html`<div class="warnings">
                 ${s.prompt.warnings.map((w) => html`<div>${w}</div>`)}
@@ -587,7 +618,28 @@ export class SceneDetail extends LitElement {
                   .value=${String(d.prompt ?? "")}
                   @input=${(e) => this._setShotField("prompt", e.target.value)}>
             ${String(d.prompt ?? "")}</textarea>
+                <button
+                  class="btn-small"
+                  ?disabled=${this.busy || !String(d.prompt ?? "").trim()}
+                  @click=${() => {
+                    this.assistPurpose = "enhance_prompt";
+                    this.assistTarget = "shot";
+                    this.assistInitial = String(d.prompt ?? "");
+                    this.assistOpen = true;
+                  }}>
+                  Enhance with AI
+                </button>
               </div>
+              ${this.assistOpen && this.assistTarget === "shot"
+                ? html`
+                  <ai-assist-dialog
+                    purpose=${this.assistPurpose}
+                    .initial-context=${this.assistInitial}
+                    insert-label="Use as shot prompt"
+                    @insert=${this._onAssistInsert}
+                    @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+                `
+                : null}
               <div class="field">
                 <label>Duration (s)</label>
                 <input
@@ -779,6 +831,17 @@ export class SceneDetail extends LitElement {
       await api.updateScene(this._sceneId, patch);
     } catch (err) {
       this.error = err.message || "Failed to save scene.";
+    }
+  }
+
+  _onAssistInsert(e) {
+    const content = e.detail.content;
+    this.assistOpen = false;
+    if (this.assistTarget === "shot") {
+      this._setShotField("prompt", content);
+      this.notice = "Shot prompt updated — save the shot to keep it.";
+    } else {
+      void this._savePrompt(content);
     }
   }
 

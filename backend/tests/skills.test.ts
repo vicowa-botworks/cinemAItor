@@ -153,6 +153,80 @@ describe("skills (db)", () => {
     }
   });
 
+  it("parses the optional assistant block", () => {
+    const def = parseSkillDefinition(defOverrides({
+      assistant: {
+        model_task_types: ["text_to_video", "text_to_image"],
+        guidance: " Use motion verbs. ",
+        examples: [{ prompt: " A crane shot. ", notes: " works " }],
+      },
+    }));
+    assertEquals(def.assistant, {
+      model_task_types: ["text_to_video", "text_to_image"],
+      guidance: "Use motion verbs.",
+      examples: [{ prompt: "A crane shot.", notes: "works" }],
+    });
+    // Absent block stays null-ish (undefined) and is not required.
+    assertEquals(parseSkillDefinition(defOverrides({})).assistant, null);
+    // Guidance only, no task types, is valid.
+    const guidanceOnly = parseSkillDefinition(defOverrides({
+      assistant: { guidance: "Be specific." },
+    }));
+    assertEquals(guidanceOnly.assistant?.model_task_types, []);
+
+    const bad: unknown[] = [
+      defOverrides({ assistant: "nope" }),
+      defOverrides({ assistant: {} }),
+      defOverrides({ assistant: { guidance: 7 } }),
+      defOverrides({ assistant: { guidance: "x".repeat(4001) } }),
+      defOverrides({ assistant: { model_task_types: [] } }),
+      defOverrides({ assistant: { model_task_types: ["dance"] } }),
+      defOverrides({ assistant: { examples: "nope" } }),
+      defOverrides({ assistant: { examples: [{ prompt: "" }] } }),
+      defOverrides({ assistant: { examples: [{ prompt: "x".repeat(2001) }] } }),
+      defOverrides({ assistant: { examples: [{ prompt: "p", notes: "x".repeat(501) }] } }),
+      defOverrides({
+        assistant: {
+          examples: Array.from({ length: 9 }, () => ({ prompt: "p" })),
+        },
+      }),
+    ];
+    for (const raw of bad) {
+      assertThrows(() => parseSkillDefinition(raw), Error);
+    }
+  });
+
+  it("persists the assistant block through create and version snapshots", () => {
+    const skill = createSkill(
+      "assistant-skill",
+      parseSkillDefinition(defOverrides({
+        assistant: {
+          model_task_types: ["text_to_video"],
+          guidance: "Camera language matters.",
+          examples: [{ prompt: "Slow dolly in.", notes: "tension" }],
+        },
+      })),
+      ownerId,
+    );
+    assertEquals(
+      getSkill(skill.id)?.definition.assistant?.guidance,
+      "Camera language matters.",
+    );
+
+    updateSkill(
+      skill.id,
+      parseSkillDefinition(defOverrides({
+        name: "Tense Score v2",
+        assistant: { guidance: "Updated guidance." },
+      })),
+      ownerId,
+    );
+    const versions = listSkillVersions(skill.id);
+    const shapes = versions.map((v) => v.definition.assistant?.guidance);
+    assert(shapes.includes("Camera language matters."));
+    assert(shapes.includes("Updated guidance."));
+  });
+
   it("resolves inputs with defaults, required checks and type checks", () => {
     const def = parseSkillDefinition(TENSE_DEF);
     assertEquals(resolveSkillInputs(def, undefined), { mood: "tense", duration: 30 });

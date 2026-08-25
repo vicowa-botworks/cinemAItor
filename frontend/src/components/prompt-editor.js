@@ -1,6 +1,7 @@
-import { css, html, LitElement } from "lit";
+import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
 import { replaceReferenceToken } from "../reference-repair.js";
+import "./ai-assist-dialog.js";
 
 const SCOPE_TYPES = ["generic", "prompt", "scene", "shot", "storyboard_panel"];
 
@@ -356,6 +357,7 @@ export class PromptEditor extends LitElement {
     repairQuery: { state: true },
     repairAssets: { state: true },
     repairLoading: { state: true },
+    assistOpen: { state: true },
   };
 
   constructor() {
@@ -381,6 +383,7 @@ export class PromptEditor extends LitElement {
     this.repairQuery = "";
     this.repairAssets = [];
     this.repairLoading = false;
+    this.assistOpen = false;
     this._parseTimer = null;
     this._pickerTimer = null;
     this._repairTimer = null;
@@ -475,7 +478,26 @@ export class PromptEditor extends LitElement {
                 @click=${this._togglePicker}>
                 Insert @asset
               </button>
+              <button
+                class="btn btn-secondary"
+                ?disabled=${!this.content.trim()}
+                title=${this.content.trim()
+                  ? "Rewrite the prompt with the configured LLM"
+                  : "Type a prompt first"}
+                @click=${() => (this.assistOpen = true)}>
+                Enhance with AI
+              </button>
             </div>
+            ${this.assistOpen
+              ? html`
+                <ai-assist-dialog
+                  purpose="enhance_prompt"
+                  .initial-context=${this.content}
+                  insert-label="Use as prompt"
+                  @insert=${this._onAssistInsert}
+                  @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+              `
+              : nothing}
             ${this.saveMsg
               ? html`<div class="notice ${this.saveMsg.kind}">${this.saveMsg.text}</div>`
               : null}
@@ -673,6 +695,14 @@ export class PromptEditor extends LitElement {
     this.viewingVersion = null;
     this.saveMsg = null;
     this._closeRepair();
+    this._scheduleParse();
+  }
+
+  _onAssistInsert(e) {
+    this.content = e.detail.content;
+    this.viewingVersion = null;
+    this.saveMsg = null;
+    this.assistOpen = false;
     this._scheduleParse();
   }
 
