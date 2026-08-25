@@ -33,6 +33,29 @@ Read endpoints and benchmarks accept any authenticated user (both are measuremen
 are written); mutations (register/patch/delete/install) require the admin role. Everything is
 written to `audit_logs` (entity type `model`).
 
+## Registering models
+
+The model-manager page (`#/models`) shows a **Register model** button for admin users (next to
+Refresh), toggling a registration form that calls `POST /api/v1/models`:
+
+- **Required**: `name`, `version`, `backend` (`mock`, `local_cli`, `comfyui`, or `local_http` — see
+  the adapter tables below for the `default_settings` each backend expects; `local_http` has no
+  adapter yet, so jobs for such models fail).
+- **Task types**: multi-select of `text_to_image`, `image_to_image`, `image_to_video`,
+  `text_to_video`, `audio`, `music`, `voice`, `transcribe` — the model is offered for the generation
+  features of the checked tasks.
+- **Source** (optional): `local` (with `source_path`), `url` (with `repository_url`; installs from
+  URL sources require the consent prompt), or `mock`.
+- **Requirements** (optional): `vram_requirement_mb` / `ram_requirement_mb` — drive the hardware
+  requirement warnings.
+- **Advanced** (optional): `dependencies` (comma-separated in the form, validated against `PATH` by
+  `local_cli` health checks), `default_settings` (a JSON object, parsed client-side before submit),
+  and the enabled flag (a model can be registered disabled and enabled later).
+
+The server validates the backend, source, and task types against the same allowlists and answers
+`400` with the allowed values on mismatch; duplicate registrations are allowed (models are
+distinguished by id/name/version metadata).
+
 ## Behavior
 
 - **Install**: copies/downloads the source into the store, computes SHA-256, stores `file_hash` +

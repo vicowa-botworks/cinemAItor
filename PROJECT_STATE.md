@@ -620,6 +620,17 @@ The product track follows `MASTER-PLAN.md`.
       points. +1 backend step (fake-`nvidia-smi`-on-PATH regression test emulating the 590+ field
       rejection, green without a GPU); backend 475 + frontend 277 test steps green — see
       `docs/models.md`
+- [x] Model registration UI: the models page had the `POST /api/v1/models` endpoint and the
+      `api.registerModel` client but no way to call them — even as admin there was no form to add a
+      model. `model-manager` now shows an admin-only **Register model** button (next to Refresh)
+      that toggles a registration panel: required `name` / `version` / `backend` (mock, local_cli,
+      comfyui, local_http), task-type multi-select (now including `transcribe`, which was also
+      missing from the task filter dropdown), optional source (`local` + path, `url` + repository
+      URL, or `mock`), license, VRAM/RAM requirements, and an Advanced section with `dependencies`,
+      `default_settings` (JSON object, parsed + validated client-side before submit), and the
+      enabled flag. The server's allowlist validation is unchanged; the task-type list in the
+      component now matches `MODEL_TASK_TYPES` exactly. Frontend-only — no new backend code;
+      `api.registerModel` already had API test coverage
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -690,3 +701,5 @@ The product track follows `MASTER-PLAN.md`.
 - GPU detection on nvidia-smi 590+ (split query + `-q` CUDA fallback; `--allow-run` on
   `dev:backend`/`start`): Tue Aug 25 2026
 - OpenAPI API documentation (generated spec + Swagger UI + coverage tests): Mon Aug 24 2026
+- Model registration UI (admin-only form on the models page; `transcribe` added to task types): Tue
+  Aug 25 2026

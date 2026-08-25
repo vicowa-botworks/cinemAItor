@@ -117,7 +117,7 @@ app-root (main router)
 │   │                 unit-tested)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, per-model benchmark run + results
-│   │              table (WS 14), admin-gated install/enable/remove)
+│   │              table (WS 14), admin-gated registration form + install/enable/remove)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
