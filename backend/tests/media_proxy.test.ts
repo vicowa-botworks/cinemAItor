@@ -66,12 +66,12 @@ describe("media_proxy", () => {
   });
 
   describe("generateProxyMedia (mock fallback)", () => {
-    const dir = "/tmp/opencode/media-proxy-test";
+    let dir = "";
     let src = "";
     let out = "";
 
     beforeEach(async () => {
-      await Deno.mkdir(dir, { recursive: true });
+      dir = await Deno.makeTempDir({ prefix: "media-proxy-test-" });
       src = `${dir}/src.wav`;
       out = `${dir}/proxy.bin`;
       await Deno.writeFile(src, new Uint8Array([1, 2, 3]));

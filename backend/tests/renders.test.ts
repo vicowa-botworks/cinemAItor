@@ -83,6 +83,20 @@ function baseItem(): RenderInputItem {
   };
 }
 
+// assertEquals on large byte buffers falls back to a quadratic LCS diff on
+// mismatch (multi-GB allocations); compare byte-by-byte instead.
+function assertSameBytes(actual: Uint8Array, expected: Uint8Array): void {
+  assertEquals(actual.length, expected.length);
+  let diffAt = -1;
+  for (let i = 0; i < actual.length; i++) {
+    if (actual[i] !== expected[i]) {
+      diffAt = i;
+      break;
+    }
+  }
+  assertEquals(diffAt, -1, `first byte mismatch at index ${diffAt}`);
+}
+
 describe("renders", () => {
   beforeEach(async () => {
     Deno.env.set("JWT_SECRET", "test-jwt-secret-for-ci-only");
@@ -238,11 +252,14 @@ describe("renders", () => {
   });
 
   it("mock renders are content-addressed on the preset encode profile", async () => {
+    // Unique per-process output path: a hardcoded /tmp file would be
+    // shared between parallel test processes.
+    const outPath = `${await Deno.makeTempDir({ prefix: "renders-out-" })}/out.mp4`;
     const presets = Object.fromEntries(listPresets().map((p) => [p.id, p]));
     const engine = new MockRenderEngine();
     const hooks = { onProgress: () => {}, isCancelled: () => false };
     const plan = (preset: RenderPreset): RenderPlan => ({
-      output_path: "/tmp/fx-out.mp4",
+      output_path: outPath,
       filename: "out.mp4",
       format: "mp4",
       preset,
@@ -251,16 +268,16 @@ describe("renders", () => {
       total_duration: 5,
     });
     await engine.render(plan(presets["preset-final"]), hooks);
-    const finalBytes = await Deno.readFile("/tmp/fx-out.mp4");
-    Deno.removeSync("/tmp/fx-out.mp4");
+    const finalBytes = await Deno.readFile(outPath);
+    Deno.removeSync(outPath);
     await engine.render(plan(presets["preset-master"]), hooks);
-    const masterBytes = await Deno.readFile("/tmp/fx-out.mp4");
-    Deno.removeSync("/tmp/fx-out.mp4");
+    const masterBytes = await Deno.readFile(outPath);
+    Deno.removeSync(outPath);
     assertNotEquals(finalBytes, masterBytes);
     // Same preset again: byte-identical (deterministic).
     await engine.render(plan(presets["preset-master"]), hooks);
-    assertEquals(await Deno.readFile("/tmp/fx-out.mp4"), masterBytes);
-    Deno.removeSync("/tmp/fx-out.mp4");
+    assertSameBytes(await Deno.readFile(outPath), masterBytes);
+    Deno.removeSync(outPath);
     // The profile string itself is stable and distinct per preset.
     assertNotEquals(
       presetEncodeProfile(presets["preset-final"]),
@@ -471,6 +488,9 @@ describe("renders", () => {
   });
 
   it("applies per-item fx (transition / fades / color grade) at render time", async () => {
+    // Unique per-process output path: a hardcoded /tmp file would be
+    // shared between parallel test processes.
+    const outPath = `${await Deno.makeTempDir({ prefix: "renders-fx-" })}/fx-out.mp4`;
     const noopHooks = { onProgress: () => {}, isCancelled: () => false };
     const base = {
       file_path: "/tmp/media.mp4",
@@ -487,7 +507,7 @@ describe("renders", () => {
       items: RenderInputItem[],
       text_overlays: RenderTextOverlay[] = [],
     ): RenderPlan => ({
-      output_path: "/tmp/fx-out.mp4",
+      output_path: outPath,
       filename: "fx-out.mp4",
       format: "mp4",
       preset: null,
@@ -502,8 +522,8 @@ describe("renders", () => {
       { ...base, start_time: 2, end_time: 4 },
     ]);
     await engine.render(planNoFx, noopHooks);
-    const noFx = await Deno.readFile("/tmp/fx-out.mp4");
-    Deno.removeSync("/tmp/fx-out.mp4");
+    const noFx = await Deno.readFile(outPath);
+    Deno.removeSync(outPath);
 
     const planFx = planFor([
       { ...base },
@@ -517,14 +537,14 @@ describe("renders", () => {
       },
     ]);
     await engine.render(planFx, noopHooks);
-    const withFx = await Deno.readFile("/tmp/fx-out.mp4");
-    Deno.removeSync("/tmp/fx-out.mp4");
+    const withFx = await Deno.readFile(outPath);
+    Deno.removeSync(outPath);
     assertNotEquals(noFx, withFx);
 
     // Same fx plan again: identical bytes (deterministic).
     await engine.render(planFx, noopHooks);
-    assertEquals(await Deno.readFile("/tmp/fx-out.mp4"), withFx);
-    Deno.removeSync("/tmp/fx-out.mp4");
+    assertSameBytes(await Deno.readFile(outPath), withFx);
+    Deno.removeSync(outPath);
 
     // ffmpeg fx command: xfade for transitions, eq/fade chain for the grade.
     const fxArgs = buildFxArgs(planFx.items, [], "/tmp/out.mp4");
@@ -547,16 +567,16 @@ describe("renders", () => {
       style: { position: "bottom", font_size: 32 },
     };
     await engine.render(planFor(planFx.items, [overlay]), noopHooks);
-    const withOverlay = await Deno.readFile("/tmp/fx-out.mp4");
-    Deno.removeSync("/tmp/fx-out.mp4");
+    const withOverlay = await Deno.readFile(outPath);
+    Deno.removeSync(outPath);
     assertNotEquals(withFx, withOverlay);
 
     // Draft/final source selection is part of the mock seed: the same items
     // rendered from proxies produce different bytes than from the masters.
     const itemsProxy = planFx.items.map((i) => ({ ...i, source: "proxy" as const }));
     await engine.render(planFor(itemsProxy), noopHooks);
-    const fromProxy = await Deno.readFile("/tmp/fx-out.mp4");
-    Deno.removeSync("/tmp/fx-out.mp4");
+    const fromProxy = await Deno.readFile(outPath);
+    Deno.removeSync(outPath);
     assertNotEquals(withFx, fromProxy);
 
     // ffmpeg fx command draws text overlays in a final drawtext stage.

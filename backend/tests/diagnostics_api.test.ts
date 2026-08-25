@@ -3,13 +3,16 @@ import { assert, assertEquals, assertExists } from "@std/assert";
 import { join } from "@std/path";
 import { freshMemoryDb, withServer } from "./helpers/http.ts";
 import { getDb } from "../src/db/database.ts";
+import { createAssetVersion } from "../src/db/assets.ts";
 import { addDiagnostic } from "../src/db/diagnostics.ts";
 import { getContentStore, resetContentStore } from "../src/storage/content_store.ts";
+import { mediaTypeFor } from "../src/storage/media_types.ts";
 
 let appData: string;
 let ownerToken = "";
 let memberToken = "";
 let projectId = "";
+let ownerId = 0;
 let assetId = "";
 let versionId = "";
 
@@ -67,7 +70,9 @@ describe("diagnostics endpoints", () => {
         },
       });
       assertEquals(boot.status, 201);
-      ownerToken = (boot.body as { token: string }).token;
+      const bootBody = boot.body as { token: string; user: { id: number } };
+      ownerToken = bootBody.token;
+      ownerId = bootBody.user.id;
 
       const member = await req(base, "/api/auth/register", {
         method: "POST",
@@ -108,13 +113,18 @@ describe("diagnostics endpoints", () => {
       assertEquals(asset.status, 201);
       assetId = (asset.body as { id: string }).id;
 
-      const version = await req(base, `/api/v1/assets/${assetId}/versions`, {
-        method: "POST",
-        token: ownerToken,
-        body: { content_hash: stored.hash },
-      });
-      assertEquals(version.status, 201);
-      versionId = (version.body as { id: string }).id;
+      // Create the version via the repository instead of the API route:
+      // the route also queues a proxy job, whose runner (mock engine when
+      // ffmpeg is absent) stores an extra content-store blob and races the
+      // media-count assertions in the tests below.
+      const versionType = mediaTypeFor(stored.path);
+      versionId = createAssetVersion(assetId, ownerId, {
+        content_hash: stored.hash,
+        file_path: stored.path,
+        format: versionType.format,
+        mime_type: versionType.mime,
+        file_size: stored.size,
+      }).id;
 
       // Point the version at a file that does not exist.
       getDb()

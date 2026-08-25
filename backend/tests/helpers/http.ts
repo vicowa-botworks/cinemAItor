@@ -46,5 +46,9 @@ export async function withServer<T>(
     // Oak 17 has no public shutdown(); aborting the signal releases the
     // underlying listener so the test process can exit cleanly.
     abort.abort();
+    // Stop this app's job/render runners so a later test (fresh in-memory
+    // DB, new temp app data) is not touched by a leaked polling tick.
+    await serverApp.jobRunner?.stop();
+    await serverApp.renderRunner?.stop();
   }
 }
