@@ -34,17 +34,17 @@ require admin; reading settings requires admin; every authenticated user can rea
 
 ## Endpoints
 
-| Method | Endpoint                                  | Access        | Description                                                                    |
-| ------ | ----------------------------------------- | ------------- | ------------------------------------------------------------------------------ |
-| GET    | `/api/v1/llm/settings`                    | admin         | Current settings (key masked) + `enabled` + `configured`                       |
-| PUT    | `/api/v1/llm/settings`                    | admin         | Partial update (see table above)                                               |
-| GET    | `/api/v1/llm/status`                      | authenticated | `{configured: boolean}` — enabled + has base URL + has model name              |
-| POST   | `/api/v1/llm/test`                        | admin         | Minimal completion; `200 {ok: true, latency_ms, model}` or a mapped error      |
-| POST   | `/api/v1/llm/chat`                        | authenticated | One-shot chat `{messages, model?, temperature?, max_tokens?}`                  |
-| POST   | `/api/v1/llm/assist`                      | authenticated | `{purpose, context, model_id?, skill_id?, max_tokens?}` → `{purpose, content}` |
-| POST   | `/api/v1/llm/agent`                       | authenticated | Model Copilot: `{message, history?}` → `{content, proposals[]}`                |
-| POST   | `/api/v1/llm/agent/proposals/:id/approve` | admin         | Execute a pending mutating-tool proposal → `{ok, output}`                      |
-| POST   | `/api/v1/llm/agent/proposals/:id/reject`  | admin         | Reject a pending proposal → `{ok: true}`                                       |
+| Method | Endpoint                            | Access        | Description                                                                                        |
+| ------ | ----------------------------------- | ------------- | -------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/llm/settings`              | admin         | Current settings (key masked) + `enabled` + `configured`                                           |
+| PUT    | `/api/v1/llm/settings`              | admin         | Partial update (see table above)                                                                   |
+| GET    | `/api/v1/llm/status`                | authenticated | `{configured: boolean}` — enabled + has base URL + has model name                                  |
+| POST   | `/api/v1/llm/test`                  | admin         | Minimal completion; `200 {ok: true, latency_ms, model}` or a mapped error                          |
+| POST   | `/api/v1/llm/chat`                  | authenticated | One-shot chat `{messages, model?, temperature?, max_tokens?}`                                      |
+| POST   | `/api/v1/llm/assist`                | authenticated | `{purpose, context, model_id?, skill_id?, max_tokens?}` → `{purpose, content}`                     |
+| POST   | `/api/v1/llm/agent`                 | authenticated | Model Copilot: `{history, model?}` → `{reply, model, iterations, truncated, steps[], proposals[]}` |
+| POST   | `/api/v1/llm/proposals/:id/approve` | admin         | Execute a pending mutating-tool proposal → `{proposal, result}`                                    |
+| POST   | `/api/v1/llm/proposals/:id/reject`  | admin         | Reject a pending proposal → `{proposal}`                                                           |
 
 ### Error mapping (chat / test / assist / agent)
 
@@ -141,6 +141,14 @@ usable weight file / bad repo id / unknown `file`, `404` unknown repo, `409` id 
 `history`). The LLM is told it is the cinemaItor model copilot and handed the tools in OpenAI
 function-calling form.
 
+**Request:** `{history: [{role: "user" | "assistant", content: string}...], model?}` — at least one
+message, each content trimmed to 20 000 chars; `model` overrides the configured model name.
+
+**Response:** `{reply, model, iterations, truncated, steps, proposals}` where `steps` is one entry
+per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, proposal_id?}` — and
+`proposals` is the list of proposals created in this turn (empty when the turn only read data).
+`truncated` is true when the loop stopped at the iteration cap without a final reply.
+
 **Read-only tools (auto-execute):**
 
 - `list_models` `{task_type?}`
@@ -159,8 +167,14 @@ function-calling form.
 - `remove_model` `{model_id}`
 
 When the model calls a mutating tool, the harness creates a **proposal**
-(`{id, tool, args, created_at, expires_at}` — in-memory, 1 h TTL, never persisted) and appends a
-tool message telling the model the action awaits user approval. Non-admin users only receive
-read-only tools in the schema. Approve re-checks admin + validation and executes the stored call;
-reject closes it. Both answer `404` for unknown/expired proposals and `409` when the proposal is no
-longer pending.
+(`{id, tool, args, status, created_at, expires_at}` — in-memory, 1 h TTL, never persisted) and
+appends a tool message telling the model the action awaits user approval. Non-admin users only
+receive read-only tools in the schema (a stray mutating call still fails the step, it is not
+executed).
+
+- `POST /api/v1/llm/proposals/:id/approve` — re-checks admin + validation and executes the stored
+  call, answering `{proposal, result}` (the executed proposal with its result attached).
+- `POST /api/v1/llm/proposals/:id/reject` — closes it, answering `{proposal}`.
+
+Both answer `404` for unknown/expired proposals, `403` for non-admins, and `409` when the proposal
+is no longer pending.

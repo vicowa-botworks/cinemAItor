@@ -1,4 +1,10 @@
 import { AppError, badRequest, ERROR_CODES, notFound } from "../errors.ts";
+import {
+  type Model,
+  MODEL_BACKENDS,
+  registerModel,
+  type RegisterModelInput,
+} from "../db/models.ts";
 
 /** Public HuggingFace REST API root (metadata only; public repos need no token). */
 export const HF_API_BASE = "https://huggingface.co/api";
@@ -211,4 +217,49 @@ export function slugifyModelId(repoId: string): string {
   const slug = last.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   if (!slug) throw badRequest(`Repo name '${last}' yields an empty model id`, "repo_id");
   return slug.slice(0, 40).replace(/_+$/g, "");
+}
+
+export interface RegisterFromHfOptions {
+  file?: string;
+  backend?: string;
+  name?: string;
+  version?: string;
+  task_types?: string[];
+  min_vram_mb?: number;
+  dependencies?: string[];
+  known_limitations?: string[];
+}
+
+/**
+ * Shared auto-registration from a HuggingFace repo (the route handler and the
+ * model-copilot `register_model_from_huggingface` tool both go through this):
+ * pick the weight file and register a `source: url` model row pointing at the
+ * resolve URL. Weights are NOT downloaded.
+ */
+export async function registerModelFromHuggingFace(
+  userId: number,
+  repoId: string,
+  options: RegisterFromHfOptions = {},
+): Promise<{ model: Model; file: string; repo: HfRepoSummary }> {
+  validateRepoId(repoId);
+  const info = await getHuggingFaceRepo(repoId);
+  const weightFile = pickWeightFile(info.files, options.file);
+  const backend = options.backend ?? "local_cli";
+  if (!MODEL_BACKENDS.includes(backend as (typeof MODEL_BACKENDS)[number])) {
+    throw badRequest(`backend must be one of: ${MODEL_BACKENDS.join(", ")}`, "backend");
+  }
+  const model = registerModel(userId, {
+    id: slugifyModelId(repoId),
+    name: options.name ?? repoId,
+    version: options.version ?? "1.0",
+    backend: backend as RegisterModelInput["backend"],
+    source: "url",
+    repository_url: resolveFileUrl(repoId, weightFile),
+    license: info.repo.license ?? undefined,
+    vram_requirement_mb: options.min_vram_mb,
+    dependencies: options.dependencies,
+    known_limitations: options.known_limitations,
+    task_types: options.task_types,
+  });
+  return { model, file: weightFile, repo: info.repo };
 }

@@ -674,6 +674,29 @@ class ApiClient {
     });
   }
 
+  llmAgent(history, model) {
+    const body = { history };
+    if (model) body.model = model;
+    return this.request("/llm/agent", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  llmApproveProposal(id) {
+    return this.request(`/llm/proposals/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  llmRejectProposal(id) {
+    return this.request(`/llm/proposals/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   searchHuggingFace({ q = "", filter = "", limit = 12 } = {}) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);

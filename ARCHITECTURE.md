@@ -123,7 +123,10 @@ app-root (main router)
 │   │                 unit-tested)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, per-model benchmark run + results
-│   │              table (WS 14), admin-gated registration form + install/enable/remove)
+│   │              table (WS 14), admin-gated registration form + install/enable/remove,
+│   │              LLM assistant settings panel + connection test (docs/llm.md),
+│   │              HuggingFace browse/search → register panel, Model Copilot chat with
+│   │              approve/reject proposal cards)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
@@ -351,6 +354,18 @@ server.ts (entry point)
    │   │   verified), reporting dangling links and missing/corrupt media
   │   ├── Logger sink mirrors warn/error into the durable `diagnostics` table (DIA-003)
   │   └── (see docs/diagnostics.md)
+  ├── LLM routes (/api/v1/llm/*, auth middleware; settings mutations admin-only)
+  │   ├── Settings (stored in the settings table, key masked in GET), status,
+  │   │   test connection, one-shot chat
+  │   ├── Assist: purpose-driven content generation (script/scene/prompt) with
+  │   │   optional skill guidance — see the `assistant` skill block
+  │   ├── HuggingFace catalog: search + repo metadata/file listing + auto-register
+  │   │   a model row from a repo (weights not downloaded — use the install flow)
+  │   ├── Model Copilot (agent): bounded tool-calling loop against the configured
+  │   │   LLM (services/llm_agent.ts) — read-only tools auto-execute, mutating
+  │   │   tools (admin-only) create in-memory proposals that are executed only
+  │   │   after explicit approval (POST /api/v1/llm/proposals/:id/approve)
+  │   └── (see docs/llm.md)
   ├── OpenAPI routes (public; generated API documentation — see docs/openapi.md)
   │   ├── GET /api/v1/openapi.json (the generated OpenAPI 3.1 document)
   │   └── GET /api/v1/docs (Swagger UI)

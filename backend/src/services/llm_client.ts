@@ -1,11 +1,17 @@
 import { getLlmSettings, isLlmConfigured } from "@cinemaItor/db/llm_settings.ts";
 import { AppError, ERROR_CODES } from "@cinemaItor/errors.ts";
 
-export type LlmRole = "system" | "user" | "assistant";
+export type LlmRole = "system" | "user" | "assistant" | "tool";
 
 export interface LlmMessage {
   role: LlmRole;
-  content: string;
+  content: string | null;
+  /** Present on assistant messages that call tools. */
+  tool_calls?: LlmToolCall[];
+  /** Present on tool-result messages; matches the LlmToolCall.id. */
+  tool_call_id?: string;
+  /** Present on tool-result messages (some runners require it). */
+  name?: string;
 }
 
 export interface LlmToolCall {
@@ -98,10 +104,16 @@ export async function chatLlm(
 
   const body: Record<string, unknown> = {
     model,
-    messages: options.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
+    messages: options.messages.map((m) => {
+      const out: Record<string, unknown> = {
+        role: m.role,
+        content: m.content ?? "",
+      };
+      if (m.tool_calls) out.tool_calls = m.tool_calls;
+      if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+      if (m.name) out.name = m.name;
+      return out;
+    }),
   };
   if (options.temperature !== undefined) body.temperature = options.temperature;
   const maxTokens = options.maxTokens ??

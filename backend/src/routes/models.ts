@@ -9,7 +9,6 @@ import {
   getModel,
   listBenchmarkResults,
   listModels,
-  MODEL_BACKENDS,
   MODEL_SOURCES,
   registerModel,
   type RegisterModelInput,
@@ -19,8 +18,7 @@ import {
   type UpdateModelInput,
 } from "@cinemaItor/db/models.ts";
 import {
-  installFromLocal,
-  installFromUrl,
+  installModelById,
   removeModelFiles,
   verifyModelFile,
 } from "@cinemaItor/services/model_files.ts";
@@ -29,10 +27,8 @@ import { requestBenchmark } from "@cinemaItor/services/model_benchmark.ts";
 import { detectHardware, modelRequirementWarnings } from "@cinemaItor/services/hardware.ts";
 import {
   getHuggingFaceRepo,
-  pickWeightFile,
-  resolveFileUrl,
+  registerModelFromHuggingFace,
   searchHuggingFaceModels,
-  slugifyModelId,
   validateRepoId,
 } from "@cinemaItor/services/huggingface.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
@@ -209,31 +205,18 @@ export const modelRouter = new Router()
     const body = await readJsonBody(ctx);
     const repoId = optionalString(body, "repo_id");
     if (!repoId) throw badRequest("repo_id is required");
-    validateRepoId(repoId);
-    const file = optionalString(body, "file");
-    const info = await getHuggingFaceRepo(repoId);
-    const weightFile = pickWeightFile(info.files, file);
-    const id = slugifyModelId(repoId);
-    const backend = optionalString(body, "backend") ?? "local_cli";
-    if (!MODEL_BACKENDS.includes(backend as (typeof MODEL_BACKENDS)[number])) {
-      throw badRequest(`backend must be one of: ${MODEL_BACKENDS.join(", ")}`, "backend");
-    }
-    const input: RegisterModelInput = {
-      id,
-      name: optionalString(body, "name") ?? repoId,
-      version: optionalString(body, "version") ?? "1.0",
-      backend: backend as RegisterModelInput["backend"],
-      source: "url",
-      repository_url: resolveFileUrl(repoId, weightFile),
-      license: info.repo.license ?? undefined,
-      vram_requirement_mb: optionalInt(body, "min_vram_mb"),
+    const result = await registerModelFromHuggingFace(userId, repoId, {
+      file: optionalString(body, "file"),
+      backend: optionalString(body, "backend"),
+      name: optionalString(body, "name"),
+      version: optionalString(body, "version"),
+      task_types: stringArray(body, "task_types"),
+      min_vram_mb: optionalInt(body, "min_vram_mb"),
       dependencies: stringArray(body, "dependencies"),
       known_limitations: stringArray(body, "known_limitations"),
-      task_types: stringArray(body, "task_types"),
-    };
-    const model = registerModel(userId, input);
+    });
     ctx.response.status = 201;
-    ctx.response.body = { model, file: weightFile, repo: info.repo };
+    ctx.response.body = result;
   })
   .get("/api/v1/models/:id", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
@@ -282,41 +265,14 @@ export const modelRouter = new Router()
   .post("/api/v1/models/:id/install", authMiddleware, async (ctx, _next) => {
     requireAdmin(ctx);
     const id = requireIdParam(ctx);
-    const model = getModel(id);
-    if (!model) throw notFound("Model not found");
-
     const body = await readJsonBody(ctx);
-    const sourcePath = optionalString(body, "source_path") ?? model.source_path ?? undefined;
-    const repositoryUrl = optionalString(body, "repository_url") ?? model.repository_url ??
-      undefined;
-    const consent = optionalBool(body, "consent");
-
-    const lay = layout();
-    let result;
-    if (sourcePath) {
-      result = await installFromLocal(lay, id, sourcePath);
-    } else if (repositoryUrl) {
-      // MOD-013: network model sources require explicit consent.
-      if (consent !== true) {
-        throw badRequest(
-          "Installing from a network source requires explicit consent (consent: true)",
-          "consent",
-        );
-      }
-      result = await installFromUrl(lay, id, repositoryUrl, loadConfig().uploadMaxBytes);
-    } else if (model.source === "mock" || model.backend === "mock") {
-      setModelInstalled(id, model.file_hash ?? "");
-      result = { fileHash: model.file_hash ?? "", fileBytes: 0 };
-    } else {
-      throw badRequest(
-        "No installation source: provide source_path or repository_url on the model",
-      );
-    }
-
-    const installed = setModelInstalled(id, result.fileHash);
-    if (!installed) throw notFound("Model not found");
+    const result = await installModelById(id, {
+      consent: optionalBool(body, "consent"),
+      sourcePath: optionalString(body, "source_path"),
+      repositoryUrl: optionalString(body, "repository_url"),
+    });
     ctx.response.status = 201;
-    ctx.response.body = { model: installed, install: result };
+    ctx.response.body = result;
   })
   .post("/api/v1/models/:id/verify", authMiddleware, async (ctx, _next) => {
     requireUserId(ctx);
