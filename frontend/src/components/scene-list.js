@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { parseScript, scriptToSceneInputs } from "../script-parse.js";
+import "./ai-assist-dialog.js";
 
 export class SceneList extends LitElement {
   static styles = css`
@@ -314,6 +315,7 @@ export class SceneList extends LitElement {
     importBusy: { state: true },
     importError: { state: true },
     importedCount: { state: true },
+    assistOpen: { state: true },
     showContinuity: { state: true },
     continuityProject: { state: true },
     continuityReport: { state: true },
@@ -352,6 +354,7 @@ export class SceneList extends LitElement {
     this.importBusy = false;
     this.importError = "";
     this.importedCount = 0;
+    this.assistOpen = false;
     this.showContinuity = false;
     this.continuityProject = "";
     this.continuityReport = null;
@@ -549,6 +552,24 @@ export class SceneList extends LitElement {
                   @input=${(e) => (this.importText = e.target.value)}
                   placeholder="INT. OFFICE - DAY&#10;&#10;She reads the report.&#10;&#10;LEA&#10;We found it."></textarea>
               </div>
+              <div class="filters">
+                <button
+                  class="btn btn-secondary"
+                  ?disabled=${this.importBusy}
+                  @click=${() => (this.assistOpen = true)}>
+                  Write with AI
+                </button>
+              </div>
+              ${this.assistOpen
+                ? html`
+                  <ai-assist-dialog
+                    purpose="write_script"
+                    .initial-context=${this.importText}
+                    insert-label="Use as script"
+                    @insert=${this._onAssistInsert}
+                    @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+                `
+                : null}
               <div class="import-hint">
                 Fountain-lite: INT./EXT. lines start scenes; short all-caps lines (after a
                 blank line) start dialogue; "(...)" are parentheticals.
@@ -786,6 +807,7 @@ export class SceneList extends LitElement {
     this.importParsed = null;
     this.importError = "";
     this.importedCount = 0;
+    this.assistOpen = false;
   }
 
   async _onImportFile(e) {
@@ -799,6 +821,12 @@ export class SceneList extends LitElement {
     } finally {
       e.target.value = "";
     }
+  }
+
+  _onAssistInsert(e) {
+    this.importText = e.detail.content;
+    this.assistOpen = false;
+    this._previewScript();
   }
 
   _previewScript() {

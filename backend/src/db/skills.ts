@@ -1,6 +1,7 @@
 import { getDb } from "./database.ts";
 import { badRequest, forbidden, notFound } from "../errors.ts";
 import { getUserById } from "./schema.ts";
+import { MODEL_TASK_TYPES, type ModelTaskType } from "./models.ts";
 
 // ---------------------------------------------------------------------------
 // Definition shape (v1: JSON only, audio generation steps, no code execution)
@@ -25,6 +26,18 @@ export interface SkillStep {
   seed?: string | null;
 }
 
+export interface SkillAssistantExample {
+  prompt: string;
+  notes: string | null;
+}
+
+export interface SkillAssistantBlock {
+  /** Task types this prompt guidance applies to (non-empty subset when present). */
+  model_task_types: string[];
+  guidance: string | null;
+  examples: SkillAssistantExample[];
+}
+
 export interface SkillDefinition {
   name: string;
   version: string;
@@ -34,6 +47,8 @@ export interface SkillDefinition {
   /** Input specs keyed by input name. */
   inputs: Record<string, SkillInputSpec>;
   steps: SkillStep[];
+  /** Optional prompt-creation knowledge for the LLM assistant (see docs/llm.md). */
+  assistant?: SkillAssistantBlock | null;
 }
 
 export interface Skill {
@@ -218,6 +233,88 @@ function parseSteps(raw: unknown, inputs: Record<string, SkillInputSpec>): Skill
  * `definition` request body field). Throws badRequest with a precise message
  * on any violation.
  */
+function parseAssistant(raw: unknown): SkillAssistantBlock | null {
+  // null round-trips through definition_json, so accept it as "no block".
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw badRequest("assistant must be a JSON object");
+  }
+  const obj = raw as Record<string, unknown>;
+
+  let modelTaskTypes: string[] = [];
+  const rawTaskTypes = obj.model_task_types;
+  if (rawTaskTypes !== undefined) {
+    if (!Array.isArray(rawTaskTypes)) {
+      throw badRequest("assistant.model_task_types must be an array");
+    }
+    // [] round-trips through definition_json after normalization, so an empty
+    // array is accepted as "not specified" (a block with no task types and no
+    // guidance/examples is still rejected below).
+    for (const task of rawTaskTypes) {
+      if (
+        typeof task !== "string" || !MODEL_TASK_TYPES.includes(task as ModelTaskType)
+      ) {
+        throw badRequest(
+          `assistant.model_task_types contains unknown task type: ${task}. ` +
+            `Allowed: ${MODEL_TASK_TYPES.join(", ")}`,
+        );
+      }
+    }
+    modelTaskTypes = [...new Set(rawTaskTypes as string[])];
+  }
+
+  let guidance: string | null = null;
+  if (obj.guidance !== undefined) {
+    if (typeof obj.guidance !== "string") {
+      throw badRequest("assistant.guidance must be a string");
+    }
+    const trimmed = obj.guidance.trim();
+    if (trimmed.length > 4000) {
+      throw badRequest("assistant.guidance exceeds 4000 characters");
+    }
+    guidance = trimmed;
+  }
+
+  let examples: SkillAssistantExample[] = [];
+  if (obj.examples !== undefined) {
+    if (!Array.isArray(obj.examples)) {
+      throw badRequest("assistant.examples must be an array");
+    }
+    if (obj.examples.length > 8) {
+      throw badRequest("assistant.examples may contain at most 8 items");
+    }
+    examples = obj.examples.map((entry, index) => {
+      const e = entry as Record<string, unknown>;
+      if (typeof e !== "object" || e === null || Array.isArray(e)) {
+        throw badRequest(`assistant.examples[${index}] must be a JSON object`);
+      }
+      if (
+        typeof e.prompt !== "string" || e.prompt.trim().length === 0 ||
+        e.prompt.trim().length > 2000
+      ) {
+        throw badRequest(
+          `assistant.examples[${index}].prompt must be a non-empty string of at most 2000 characters`,
+        );
+      }
+      let notes: string | null = null;
+      if (e.notes !== undefined) {
+        if (typeof e.notes !== "string" || e.notes.trim().length > 500) {
+          throw badRequest(
+            `assistant.examples[${index}].notes must be a string of at most 500 characters`,
+          );
+        }
+        notes = e.notes.trim();
+      }
+      return { prompt: e.prompt.trim(), notes };
+    });
+  }
+
+  if (guidance === null && examples.length === 0) {
+    throw badRequest("assistant must contain guidance or at least one example");
+  }
+  return { model_task_types: modelTaskTypes, guidance, examples };
+}
+
 export function parseSkillDefinition(raw: unknown): SkillDefinition {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw badRequest("skill definition must be a JSON object");
@@ -230,7 +327,8 @@ export function parseSkillDefinition(raw: unknown): SkillDefinition {
   const description = optionalString(obj.description, "description", 500);
   const inputs = parseInputs(obj.inputs);
   const steps = parseSteps(obj.steps, inputs);
-  return { name, version, author, license, description, inputs, steps };
+  const assistant = parseAssistant(obj.assistant);
+  return { name, version, author, license, description, inputs, steps, assistant };
 }
 
 /**

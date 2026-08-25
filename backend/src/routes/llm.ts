@@ -7,8 +7,16 @@ import {
 } from "@cinemaItor/db/llm_settings.ts";
 import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
 import { getUserById } from "@cinemaItor/db/schema.ts";
-import { badRequest, forbidden, unauthorized } from "@cinemaItor/errors.ts";
+import { AppError, badRequest, ERROR_CODES, forbidden, unauthorized } from "@cinemaItor/errors.ts";
 import { chatLlm, type LlmMessage, testLlmConnection } from "@cinemaItor/services/llm_client.ts";
+import {
+  ASSIST_PURPOSES,
+  type AssistPurpose,
+  buildAssistMessages,
+  ensureRefsPreserved,
+} from "@cinemaItor/services/llm_assist.ts";
+import { getModel } from "@cinemaItor/db/models.ts";
+import { getSkill } from "@cinemaItor/db/skills.ts";
 import { logAudit } from "@cinemaItor/services/audit.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
 import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
@@ -238,6 +246,103 @@ async function handleChat(ctx: Context): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Assist
+// ---------------------------------------------------------------------------
+
+function parseAssistBody(body: Record<string, unknown>) {
+  const purpose = body.purpose;
+  if (typeof purpose !== "string" || !ASSIST_PURPOSES.includes(purpose as AssistPurpose)) {
+    throw badRequest(`purpose must be one of: ${ASSIST_PURPOSES.join(", ")}`);
+  }
+  const context = body.context;
+  if (typeof context !== "string" || context.trim().length === 0) {
+    throw badRequest("context must be a non-empty string");
+  }
+  if (context.length > 32_000) {
+    throw badRequest("context exceeds 32000 characters");
+  }
+  let modelId: string | undefined;
+  if (body.model_id !== undefined) {
+    if (typeof body.model_id !== "string" || !body.model_id.trim()) {
+      throw badRequest("model_id must be a non-empty string");
+    }
+    modelId = body.model_id.trim();
+  }
+  let skillId: string | undefined;
+  if (body.skill_id !== undefined) {
+    if (typeof body.skill_id !== "string" || !body.skill_id.trim()) {
+      throw badRequest("skill_id must be a non-empty string");
+    }
+    skillId = body.skill_id.trim();
+  }
+  let maxTokens: number | undefined;
+  if (body.max_tokens !== undefined) {
+    if (
+      typeof body.max_tokens !== "number" ||
+      !Number.isInteger(body.max_tokens) || body.max_tokens < 1 ||
+      body.max_tokens > 1_000_000
+    ) {
+      throw badRequest("max_tokens must be an integer between 1 and 1000000");
+    }
+    maxTokens = body.max_tokens;
+  }
+  return { purpose: purpose as AssistPurpose, context, modelId, skillId, maxTokens };
+}
+
+async function handleAssist(ctx: Context): Promise<void> {
+  requireUserId(ctx);
+  const body = await readJsonBody(ctx);
+  const { purpose, context, modelId, skillId, maxTokens } = parseAssistBody(body);
+
+  if (purpose !== "enhance_prompt" && (modelId || skillId)) {
+    throw badRequest("model_id and skill_id are only supported for purpose 'enhance_prompt'");
+  }
+
+  let model = undefined as ReturnType<typeof getModel> | undefined;
+  if (modelId) {
+    model = getModel(modelId);
+    if (!model) throw badRequest(`Unknown model_id '${modelId}'`);
+    if (!model.enabled) throw badRequest(`Model '${model.id}' is not enabled`);
+  }
+
+  let skill: ReturnType<typeof getSkill> | undefined;
+  if (skillId) {
+    skill = getSkill(skillId);
+    if (!skill) throw badRequest(`Unknown skill_id '${skillId}'`);
+    if (!skill.definition.assistant) {
+      throw badRequest(`Skill '${skill.id}' has no assistant block`);
+    }
+  }
+
+  if (model && skill) {
+    const skillTypes = skill.definition.assistant!.model_task_types;
+    const overlap = model.task_types.filter((t) => skillTypes.includes(t));
+    if (overlap.length === 0) {
+      throw badRequest(
+        `Skill '${skill.id}' targets task types [${skillTypes.join(", ")}] which do not ` +
+          `overlap the task types of model '${model.id}' [${model.task_types.join(", ")}]`,
+      );
+    }
+  }
+
+  const result = await chatLlm({
+    messages: buildAssistMessages(purpose, context, { model, skill }),
+    maxTokens,
+  });
+  if (result.content === null) {
+    throw new AppError(
+      ERROR_CODES.LLM_BAD_RESPONSE,
+      "The LLM endpoint returned an unexpected response: the response has no content",
+      { status: 502 },
+    );
+  }
+  const content = purpose === "enhance_prompt"
+    ? ensureRefsPreserved(result.content, context)
+    : result.content;
+  ctx.response.body = { purpose, content };
+}
+
+// ---------------------------------------------------------------------------
 // Router + OpenAPI metadata
 // ---------------------------------------------------------------------------
 
@@ -248,7 +353,8 @@ export const router = new Router()
   })
   .get("/api/v1/llm/status", authMiddleware, handleStatus)
   .post("/api/v1/llm/test", authMiddleware, handleTest)
-  .post("/api/v1/llm/chat", authMiddleware, handleChat);
+  .post("/api/v1/llm/chat", authMiddleware, handleChat)
+  .post("/api/v1/llm/assist", authMiddleware, handleAssist);
 
 const LlmSettingsViewSchema = {
   type: "object",
@@ -405,6 +511,42 @@ export const openApiOps: Record<string, OperationMeta> = {
                 total_tokens: { type: "integer" },
               },
             },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 502, 503, 504),
+    },
+  },
+  "POST /api/v1/llm/assist": {
+    summary: "Purpose-specific LLM assistance (script, scene design, prompt enhancement)",
+    description:
+      "Sends the purpose's system prompt plus the caller's context to the configured LLM. " +
+      "For enhance_prompt, model_id injects the model's metadata and skill_id the skill's " +
+      "assistant block into the system prompt; @reference tokens in the context are " +
+      "re-appended if the model drops them. Synchronous; bounded by the configured timeout.",
+    requestBody: {
+      description: "The assist request",
+      schema: {
+        type: "object",
+        required: ["purpose", "context"],
+        properties: {
+          purpose: { type: "string", enum: [...ASSIST_PURPOSES] },
+          context: { type: "string", maxLength: 32000 },
+          model_id: { type: "string" },
+          skill_id: { type: "string" },
+          max_tokens: { type: "integer" },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "The generated content for the purpose",
+        schema: {
+          type: "object",
+          required: ["purpose", "content"],
+          properties: {
+            purpose: { type: "string", enum: [...ASSIST_PURPOSES] },
+            content: { type: "string" },
           },
         },
       },

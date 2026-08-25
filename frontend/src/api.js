@@ -663,6 +663,17 @@ class ApiClient {
     });
   }
 
+  assistLlm({ purpose, context, model_id: modelId, skill_id: skillId, max_tokens: maxTokens }) {
+    const body = { purpose, context };
+    if (modelId) body.model_id = modelId;
+    if (skillId) body.skill_id = skillId;
+    if (maxTokens !== undefined && maxTokens !== null) body.max_tokens = maxTokens;
+    return this.request("/llm/assist", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   // --- v1 jobs ---
 
   listJobs(filter = {}) {
