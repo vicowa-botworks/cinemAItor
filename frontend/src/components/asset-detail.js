@@ -14,6 +14,8 @@ import {
   versionCompareRows,
 } from "../compare.js";
 import { modelFormatForFile } from "../model-views.js";
+import { generationKindForAsset } from "./asset-generation.js";
+import "./asset-generate.js";
 
 const STATUS_OPTIONS = ["draft", "approved", "rejected", "archived"];
 
@@ -523,6 +525,7 @@ export class AssetDetail extends LitElement {
     subtitleResult: { state: true },
     compareIds: { state: true },
     comparePreviews: { state: true },
+    genJobId: { state: true },
   };
 
   constructor() {
@@ -552,6 +555,7 @@ export class AssetDetail extends LitElement {
     this.viewsBusy = false;
     this.exportedViews = [];
     this._viewerModule = null;
+    this.genJobId = null;
   }
 
   willUpdate(changed) {
@@ -588,6 +592,7 @@ export class AssetDetail extends LitElement {
     this.viewerError = "";
     this.viewsBusy = false;
     this.exportedViews = [];
+    this.genJobId = null;
   }
 
   _revokePreview() {
@@ -785,6 +790,10 @@ export class AssetDetail extends LitElement {
     } catch {
       this.dependencies = null;
     }
+  }
+
+  _onGenerateQueued(e) {
+    this.genJobId = e.detail?.job_id ?? null;
   }
 
   async _loadPreview() {
@@ -1574,6 +1583,36 @@ export class AssetDetail extends LitElement {
             </form>
           </div>
         </div>
+
+        ${generationKindForAsset(asset)
+          ? html`
+            <div class="section">
+              <h3>Generate / edit with a prompt</h3>
+              <p class="waveform-note">
+                Queues a ${generationKindForAsset(asset)} generation job —
+                candidates are stored as new versions of this asset when the
+                job finishes. Review or restore them from the versions list
+                below.
+              </p>
+              <asset-generate .editAsset=${asset}
+                @queued=${this._onGenerateQueued}></asset-generate>
+              ${this.genJobId
+                ? html`
+                  <div class="preview-actions">
+                    <span class="waveform-note">
+                      Job <code>${this.genJobId}</code> queued.
+                    </span>
+                    <a class="back-link" href="#/jobs">Open job monitor</a>
+                    <button class="btn btn-secondary"
+                      @click=${() => this._loadAll()}>
+                      Refresh
+                    </button>
+                  </div>
+                `
+                : ""}
+            </div>
+          `
+          : ""}
 
         ${this._isModelAsset() && asset?.active_version && this._modelFormatSupported()
           ? html`

@@ -241,11 +241,25 @@ export class AssetList extends LitElement {
             </span>
           </div>
           <div class="header-actions">
+            <button class="btn" @click=${() => this._openPanel("generate")}>
+              Generate
+            </button>
             <button class="btn" @click=${() => this._openPanel("upload")}>Upload</button>
             <button class="btn btn-secondary"
               @click=${() => this._openPanel("create")}>New Asset</button>
           </div>
         </div>
+
+        ${this.panel === "generate"
+          ? html`
+            <div class="panel">
+              <div class="panel-title">
+                Generate Asset (prompt → image / video)
+              </div>
+              <asset-generate .projectId=${this.projectId}></asset-generate>
+            </div>
+          `
+          : ""}
 
         ${this.panel === "upload"
           ? html`
@@ -323,8 +337,8 @@ export class AssetList extends LitElement {
           : this.assets.length === 0
           ? html`
             <div class="empty">
-              No assets ${this.projectId ? "in this project" : "yet"}. Upload a file or create
-              an asset to get started.
+              No assets ${this.projectId ? "in this project" : "yet"}. Upload a file, generate
+              one from a prompt, or create an asset to get started.
             </div>
           `
           : html`

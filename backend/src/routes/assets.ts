@@ -31,6 +31,11 @@ import { loadConfig } from "@cinemaItor/config.ts";
 import { readRawUpload } from "@cinemaItor/routes/upload.ts";
 import { queueProxyGeneration } from "@cinemaItor/services/job_runner.ts";
 import {
+  type AssetReferenceInput,
+  generateIntoAsset,
+  generateNewAsset,
+} from "@cinemaItor/services/asset_generation.ts";
+import {
   clampThumbnailWidth,
   generateThumbnail,
   quantizeTimestamp,
@@ -167,6 +172,31 @@ function validateAssetUpdates(
   return updates;
 }
 
+function parseReferences(value: unknown): AssetReferenceInput[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw badRequest("references must be an array");
+  if (value.length > 8) throw badRequest("At most 8 references");
+  return value.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      throw badRequest(`references[${index}] must be an object`);
+    }
+    const ref = entry as Record<string, unknown>;
+    const assetId = typeof ref.asset_id === "string" ? ref.asset_id.trim() : "";
+    if (!assetId) throw badRequest(`references[${index}].asset_id is required`);
+    let versionNumber: number | undefined;
+    if (ref.version_number !== undefined) {
+      if (
+        typeof ref.version_number !== "number" ||
+        !Number.isInteger(ref.version_number) || ref.version_number < 1
+      ) {
+        throw badRequest(`references[${index}].version_number must be a positive integer`);
+      }
+      versionNumber = ref.version_number;
+    }
+    return { asset_id: assetId, version_number: versionNumber };
+  });
+}
+
 interface ParamContext extends AuthedContext {
   params: Record<string, string | undefined>;
 }
@@ -224,6 +254,41 @@ export const assetRouter = new Router()
     const asset = createAsset(input, userId);
     ctx.response.status = 201;
     ctx.response.body = assetDetail(asset);
+  })
+  .post("/api/v1/assets/generate", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const body = await readJsonBody(ctx);
+    const result = generateNewAsset(userId, {
+      kind: body.kind,
+      prompt: optionalString(body, "prompt"),
+      unique_slug: typeof body.unique_slug === "string" ? body.unique_slug : "",
+      display_name: optionalString(body, "display_name"),
+      asset_type: optionalString(body, "asset_type"),
+      library_scope: body.library_scope as "global" | "project" | undefined,
+      project_id: optionalString(body, "project_id"),
+      model_id: optionalString(body, "model_id"),
+      seed: optionalString(body, "seed"),
+      candidates: body.candidates,
+      references: parseReferences(body.references),
+    });
+    ctx.response.status = 202;
+    ctx.response.body = result;
+  })
+  .post("/api/v1/assets/:id/generate", authMiddleware, async (ctx, _next) => {
+    const userId = requireUserId(ctx);
+    const body = await readJsonBody(ctx);
+    const asset = requireAsset(ctx as ParamContext);
+    const result = generateIntoAsset(userId, asset.id, {
+      kind: body.kind,
+      prompt: optionalString(body, "prompt"),
+      model_id: optionalString(body, "model_id"),
+      seed: optionalString(body, "seed"),
+      candidates: body.candidates,
+      include_current: body.include_current === true,
+      references: parseReferences(body.references),
+    });
+    ctx.response.status = 202;
+    ctx.response.body = result;
   })
   .get("/api/v1/assets/:id", authMiddleware, (ctx, _next) => {
     const userId = requireUserId(ctx);
@@ -639,6 +704,38 @@ export const openApiOps: Record<string, OperationMeta> = {
         schema: ref("AssetDetail"),
       },
       ...errorResponses(400, 401, 409),
+    },
+  },
+  "POST /api/v1/assets/generate": {
+    summary: "Generate a new image/video asset from a prompt",
+    description: "Creates the asset and enqueues a generation job. Without " +
+      "references the task is text_to_image / text_to_video; with image or " +
+      "video references it becomes image_to_image / image_to_video. " +
+      "Candidates are stored as versions of the new asset and picked in the " +
+      "review workflow.",
+    requestBody: { schema: ref("AssetGenerateRequest") },
+    responses: {
+      202: {
+        description: "The queued job and its target asset",
+        schema: ref("AssetGenerateResult"),
+      },
+      ...errorResponses(400, 401, 404, 409),
+    },
+  },
+  "POST /api/v1/assets/{id}/generate": {
+    summary: "Generate/edit an existing asset from a prompt",
+    description: "Enqueues a generation job whose candidates are stored as new " +
+      "versions of the target asset (the last candidate becomes the active " +
+      "version; use the review board to compare and approve). With " +
+      "include_current or references the task is image_to_image / " +
+      "image_to_video, otherwise text_to_image / text_to_video.",
+    requestBody: { schema: ref("AssetEditRequest") },
+    responses: {
+      202: {
+        description: "The queued job and its target asset",
+        schema: ref("AssetGenerateResult"),
+      },
+      ...errorResponses(400, 401, 404),
     },
   },
   "GET /api/v1/assets/{id}": {

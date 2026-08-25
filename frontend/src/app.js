@@ -9,6 +9,8 @@ import "./components/asset-detail.js";
 import "./components/asset-card.js";
 import "./components/asset-form.js";
 import "./components/asset-upload.js";
+import "./components/asset-generate.js";
+import "./components/asset-reference-picker.js";
 import "./components/prompt-editor.js";
 import "./components/model-manager.js";
 import "./components/job-monitor.js";

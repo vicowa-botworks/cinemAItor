@@ -21,7 +21,7 @@ export interface GenerateOptions {
   settings?: Record<string, unknown>;
 }
 
-function pickModel(taskType: string, modelId: string | undefined): Model {
+export function pickModel(taskType: string, modelId: string | undefined): Model {
   if (modelId) {
     const model = getModel(modelId);
     if (!model) throw badRequest("Model not found");

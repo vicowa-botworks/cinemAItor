@@ -11,7 +11,7 @@
  * resolves to a schema defined here.
  */
 
-import type { OpenApiSchema } from "./types.ts";
+import { type OpenApiSchema, ref } from "./types.ts";
 
 const isoDate = { type: "string", format: "date-time" };
 
@@ -799,6 +799,105 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
       project_id: { type: ["string", "null"] },
       description: { type: "string" },
+    },
+  },
+
+  /** Shared image/video reference item for asset generation bodies. */
+  AssetReference: {
+    type: "object",
+    required: ["asset_id"],
+    properties: {
+      asset_id: { type: "string" },
+      version_number: {
+        type: "integer",
+        minimum: 1,
+        description: "Defaults to the asset's active version",
+      },
+    },
+  },
+
+  /** POST /api/v1/assets/generate body. */
+  AssetGenerateRequest: {
+    type: "object",
+    required: ["kind", "prompt", "unique_slug"],
+    properties: {
+      kind: { type: "string", enum: ["image", "video"] },
+      prompt: { type: "string" },
+      unique_slug: {
+        type: "string",
+        pattern: "^[a-z0-9][a-z0-9_]{0,63}$",
+      },
+      display_name: { type: "string", maxLength: 200 },
+      asset_type: {
+        type: "string",
+        description: "Defaults to the kind. character / location / prop / image for the " +
+          "image kind; video for the video kind.",
+      },
+      library_scope: {
+        type: "string",
+        enum: ["global", "project"],
+        default: "global",
+      },
+      project_id: { type: "string" },
+      model_id: { type: "string" },
+      seed: { type: "string" },
+      candidates: {
+        type: "integer",
+        minimum: 1,
+        maximum: 8,
+        default: 2,
+      },
+      references: {
+        type: "array",
+        maxItems: 8,
+        items: ref("AssetReference"),
+      },
+    },
+  },
+
+  /** POST /api/v1/assets/{id}/generate body. */
+  AssetEditRequest: {
+    type: "object",
+    required: ["kind", "prompt"],
+    properties: {
+      kind: { type: "string", enum: ["image", "video"] },
+      prompt: {
+        type: "string",
+        description: "Edit instructions for the new version",
+      },
+      model_id: { type: "string" },
+      seed: { type: "string" },
+      candidates: {
+        type: "integer",
+        minimum: 1,
+        maximum: 8,
+        default: 2,
+      },
+      include_current: {
+        type: "boolean",
+        default: false,
+        description: "Use the asset's active version as a reference input",
+      },
+      references: {
+        type: "array",
+        maxItems: 8,
+        items: ref("AssetReference"),
+      },
+    },
+  },
+
+  /** POST /api/v1/assets[/generate] response (202). */
+  AssetGenerateResult: {
+    type: "object",
+    required: ["job_id", "job_type", "asset_id", "model_id"],
+    properties: {
+      job_id: { type: "string" },
+      job_type: {
+        type: "string",
+        description: "Task type: text_to_image / image_to_image / text_to_video / image_to_video",
+      },
+      asset_id: { type: "string", description: "The target asset" },
+      model_id: { type: "string" },
     },
   },
 
