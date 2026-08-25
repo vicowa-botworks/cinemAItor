@@ -631,6 +631,17 @@ The product track follows `MASTER-PLAN.md`.
       enabled flag. The server's allowlist validation is unchanged; the task-type list in the
       component now matches `MODEL_TASK_TYPES` exactly. Frontend-only — no new backend code;
       `api.registerModel` already had API test coverage
+- [x] ComfyUI backend usability for hosted servers: the model health check unconditionally required
+      a local model file for every non-mock backend — a `comfyui` model pointed at a remote ComfyUI
+      (e.g. a hosted server with the checkpoints living there) always failed with "Model is not
+      installed (file missing)" and could never report its endpoint state. Remote backends
+      (`comfyui`, `local_http`) no longer require a local file: the endpoint probe is the runtime
+      check, and a local file is still checksum-verified when one is present. `docs/models.md`
+      gained a "Using a hosted ComfyUI" section (endpoint = base URL, workflow = API-format prompt
+      graph from "Save (API Format)" or `GET /history/<prompt_id>` — the URL fragment is the prompt
+      id — `{{prompt}}`/`{{seed}}`/`{{input:0}}` wiring, output-node requirement, no local install
+      needed, and why the ComfyUI "Save as Python script" export is the wrong artifact); +1 backend
+      test step
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -703,3 +714,5 @@ The product track follows `MASTER-PLAN.md`.
 - OpenAPI API documentation (generated spec + Swagger UI + coverage tests): Mon Aug 24 2026
 - Model registration UI (admin-only form on the models page; `transcribe` added to task types): Tue
   Aug 25 2026
+- ComfyUI hosted-server support (health check no longer requires a local file for remote backends
+  - hosted-ComfyUI docs): Tue Aug 25 2026

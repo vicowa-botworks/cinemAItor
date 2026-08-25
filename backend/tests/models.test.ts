@@ -372,6 +372,35 @@ describe("model manager", () => {
     assertEquals(updated?.health_error, "boom");
   });
 
+  it("health check: remote backends are healthy without a local file", async () => {
+    const comfyDown = registerModel(userId, {
+      name: "comfy-remote-down",
+      version: "1.0",
+      backend: "comfyui",
+      task_types: ["text_to_image"],
+      default_settings: { endpoint: "http://127.0.0.1:1/health", workflow: { "1": {} } },
+    });
+    const unreachable = await checkModelHealth(layout, comfyDown);
+    assertEquals(unreachable.status, "error");
+    assert(unreachable.message.includes("unreachable"));
+
+    const server = await mockDownloadServer(new Uint8Array([1]));
+    try {
+      const comfyUp = registerModel(userId, {
+        name: "comfy-remote-up",
+        version: "1.0",
+        backend: "comfyui",
+        task_types: ["text_to_image"],
+        default_settings: { endpoint: `${server.url}/health`, workflow: { "1": {} } },
+      });
+      const ok = await checkModelHealth(layout, comfyUp);
+      assertEquals(ok.status, "ok");
+      assert(ok.message.includes("remote runtime"));
+    } finally {
+      server.stop();
+    }
+  });
+
   it("removes model files and registry entry", async () => {
     const m = registerT2I();
     const src = await writeSourceFile("rm-src.bin", new Uint8Array([3]));

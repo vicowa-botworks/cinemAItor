@@ -65,9 +65,9 @@ distinguished by id/name/version metadata).
 - **Health check** per backend:
   - `mock` → always ok (simulated).
   - `local_cli` → file exists + checksum ok + all `dependencies` resolvable on `PATH`.
-  - `comfyui` / `local_http` → file exists + checksum ok + (if `default_settings.endpoint` is set)
-    the endpoint answers. Result is persisted (`health_status`, `health_error`,
-    `health_checked_at`).
+  - `comfyui` / `local_http` → (if `default_settings.endpoint` is set) the endpoint answers — the
+    runtime is remote, so no local file is required; a local file is still checksum-verified when
+    one is present. Result is persisted (`health_status`, `health_error`, `health_checked_at`).
 - **Hardware detection** (`detectHardware` in `services/hardware.ts`): platform, CPU count, and
   total RAM come from `/proc` (Linux) or `sysctl` (macOS); the GPU is detected via
   `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version` (3s timeout, first GPU on
@@ -142,7 +142,7 @@ Example:
 
 ### comfyui
 
-Submits a workflow graph to a local ComfyUI server:
+Submits a workflow graph to a ComfyUI server (local or hosted):
 
 | `default_settings` key | Type        | Description                                                      |
 | ---------------------- | ----------- | ---------------------------------------------------------------- |
@@ -158,3 +158,24 @@ every second, surfaces `execution_error` details from the entry status, collects
 `images`/`gifs`/`videos` file ref from the node outputs, and downloads each through `GET /view`. An
 unreachable server, a rejected prompt, and a run with zero outputs all fail the job; cancellation
 issues `POST /interrupt`.
+
+**Using a hosted ComfyUI** (e.g. `https://comfyui.internal.example.com`):
+
+- `endpoint` is the server base URL (no trailing path) — it must be reachable from the server
+  hosting this app. The health check probes it directly, and remote backends need **no local model
+  install**: register + enable is all that's required.
+- `workflow` is the API-format prompt graph (node map), not the UI workflow JSON. Get it from the
+  ComfyUI UI via **Save (API Format)**, or — if the workflow has been queued at least once — from
+  `GET /history/<prompt_id>` on the server: the fragment of a ComfyUI URL is the prompt id, and the
+  entry's `prompt` field is exactly the graph the adapter submits.
+- Wire the placeholders: the prompt goes into the text-encode node(s) value as `{{prompt}}`, the
+  sampler seed node value as `"{{seed}}"`, and (for image-to-video/image-to-image) the image-load
+  node value as `"{{input:0}}"` — the app uploads the job's input asset (e.g. a panel preview)
+  before submitting.
+- The workflow must contain at least one node whose outputs include an `images`/`gifs`/`videos`
+  entry (e.g. Save Image, a video-combine node) — a run with zero such outputs fails the job.
+- Each job run submits the workflow once with the job's seed; re-running a job with the same seed is
+  reproducible on the ComfyUI side.
+- The ComfyUI UI's "Save as Python script" export is a standalone local runner and is **not** what
+  this backend consumes — for a hosted server, use the HTTP API path above (or, if you want to run
+  the script yourself locally, register the model with the `local_cli` backend instead).
