@@ -632,6 +632,37 @@ class ApiClient {
     return this.request("/models/hardware");
   }
 
+  // --- v1 llm ---
+
+  getLlmSettings() {
+    return this.request("/llm/settings");
+  }
+
+  updateLlmSettings(update) {
+    return this.request("/llm/settings", {
+      method: "PUT",
+      body: JSON.stringify(update),
+    });
+  }
+
+  getLlmStatus() {
+    return this.request("/llm/status");
+  }
+
+  testLlm() {
+    return this.request("/llm/test", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  llmChat(messages, extra = {}) {
+    return this.request("/llm/chat", {
+      method: "POST",
+      body: JSON.stringify({ messages, ...extra }),
+    });
+  }
+
   // --- v1 jobs ---
 
   listJobs(filter = {}) {

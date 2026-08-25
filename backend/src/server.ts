@@ -10,6 +10,7 @@ import { renderRouter } from "@cinemaItor/routes/renders.ts";
 import { diagnosticsRouter } from "@cinemaItor/routes/diagnostics.ts";
 import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
+import { router as llmRouter } from "@cinemaItor/routes/llm.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
@@ -109,6 +110,7 @@ export function createApp(
   app.use(assetRouter.routes());
   app.use(audioRouter.routes());
   app.use(modelRouter.routes());
+  app.use(llmRouter.routes());
   app.use(jobRouter.routes());
   app.use(reviewRouter.routes());
   app.use(renderRouter.routes());
@@ -127,6 +129,7 @@ export function createApp(
   app.use(assetRouter.allowedMethods());
   app.use(audioRouter.allowedMethods());
   app.use(modelRouter.allowedMethods());
+  app.use(llmRouter.allowedMethods());
   app.use(jobRouter.allowedMethods());
   app.use(reviewRouter.allowedMethods());
   app.use(renderRouter.allowedMethods());
