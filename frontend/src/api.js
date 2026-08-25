@@ -328,6 +328,43 @@ class ApiClient {
     });
   }
 
+  /**
+   * Queue prompt-based generation of a NEW asset (image or video).
+   * `references` is an optional array of { asset_id, version_number? }
+   * image/video versions that upgrade the task to image_to_image /
+   * image_to_video.
+   * @param {object} data
+   * @param {"image"|"video"} data.kind
+   * @param {string} data.prompt
+   * @param {string} data.unique_slug
+   * @param {object} [data.references]
+   * @returns {Promise<{job_id: string, job_type: string, asset_id: string, model_id: string}>}
+   */
+  generateAsset(data) {
+    return this.request("/assets/generate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Queue prompt-based generation/edit of an EXISTING asset. Candidates are
+   * stored as new versions of the asset.
+   * @param {string} id
+   * @param {object} data
+   * @param {"image"|"video"} data.kind
+   * @param {string} data.prompt
+   * @param {boolean} [data.include_current]
+   * @param {object} [data.references]
+   * @returns {Promise<{job_id: string, job_type: string, asset_id: string, model_id: string}>}
+   */
+  editAssetGeneration(id, data) {
+    return this.request(`/assets/${encodeURIComponent(id)}/generate`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   updateAsset(id, data) {
     return this.request(`/assets/${encodeURIComponent(id)}`, {
       method: "PATCH",

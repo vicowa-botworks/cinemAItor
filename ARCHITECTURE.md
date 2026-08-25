@@ -91,13 +91,19 @@ app-root (main router)
 │   └── project-form (create; template picker pre-creates a starting timeline)
 ├── project-detail (project settings, edit, delete; shows the project's template)
 │   └── project-form (edit)
-├── asset-list (global library + per-project via #/project/:id/assets)
+├── asset-list (global library + per-project via #/project/:id/assets; Generate panel)
 │   ├── asset-card (tile with lazy blob-preview thumbnail)
 │   ├── asset-form (create metadata-only asset)
-│   └── asset-upload (create + raw-bytes streaming file upload → first version)
+│   ├── asset-upload (create + raw-bytes streaming file upload → first version)
+│   ├── asset-generate (prompt-based generation: new image/video asset OR new versions of an
+│   │   │               existing asset; text→image/video or reference→image/video task upgrade,
+│   │   │               model/seed/candidates pickers, "use current version" toggle in edit mode)
+│   └── asset-reference-picker (pick existing image/video assets as generation references,
+│   │                           active version by default, max 8)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
   │   │              version A/B compare (two versions side by side: synced play + metadata diff,
   │   │              see compare.js),
+  │   │              prompt generation/edit section (asset-generate in edit mode → new versions),
   │   │              audio adjustments (waveform + trim/gain for audio assets),
   │   │              audio cleanup (denoise/normalize → new version, AUD-012),
   │   │              subtitle generation (transcribe → SRT candidates on a new subtitle asset, AUD-014),
@@ -225,8 +231,11 @@ server.ts (entry point)
  │   │   + restore + aliases + tags + preview
  │   │   + per-version preview (GET /:id/versions/:versionId/preview, A/B compare)
  │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
- │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
- │   │     pointers, prompt references, AST-015; feeds the UI "Used in" view)
+  │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
+  │   │     pointers, prompt references, AST-015; feeds the UI "Used in" view)
+  │   │   + prompt-based generation: POST /generate (new image/video asset) and
+  │   │     POST /:id/generate (new versions; reference inputs, include_current) —
+  │   │     t2i/t2v or i2i/i2v by presence of references (see docs/assets.md)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)

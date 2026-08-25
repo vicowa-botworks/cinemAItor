@@ -77,31 +77,56 @@ The Asset Detail **Versions** section supports picking two versions for an A/B c
 
 ## Endpoints
 
-| Method | Endpoint                                           | Description                                                             |
-| ------ | -------------------------------------------------- | ----------------------------------------------------------------------- |
-| GET    | `/api/v1/assets`                                   | List assets (filter + search)                                           |
-| POST   | `/api/v1/assets`                                   | Create an asset                                                         |
-| GET    | `/api/v1/assets/:id`                               | Asset detail (aliases, tags, active v.)                                 |
-| PATCH  | `/api/v1/assets/:id`                               | Update metadata or status                                               |
-| DELETE | `/api/v1/assets/:id`                               | Soft-delete (with reference warnings)                                   |
-| POST   | `/api/v1/assets/:id/upload`                        | Raw-bytes streaming upload, creates a version                           |
-| GET    | `/api/v1/assets/:id/versions`                      | List versions (newest first)                                            |
-| POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                                   |
-| GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                         |
-| POST   | `/api/v1/assets/:id/versions/:versionId/restore`   | Restore an older version                                                |
-| GET    | `/api/v1/assets/:id/versions/:versionId/proxy`     | Stream the version's proxy file                                         |
-| GET    | `/api/v1/assets/:id/versions/:versionId/thumbnail` | Cached JPEG thumbnail (`?at=`, `?w=`) for video frames / images         |
-| POST   | `/api/v1/assets/:id/versions/:versionId/proxy`     | Regenerate the version's proxy (fresh job)                              |
-| POST   | `/api/v1/assets/:id/aliases`                       | Add an alias `@name`                                                    |
-| DELETE | `/api/v1/assets/:id/aliases/:aliasSlug`            | Remove an alias                                                         |
-| POST   | `/api/v1/assets/:id/tags`                          | Add a tag                                                               |
-| DELETE | `/api/v1/assets/:id/tags/:tag`                     | Remove a tag                                                            |
-| GET    | `/api/v1/assets/:id/preview`                       | Stream the active version's file                                        |
-| GET    | `/api/v1/assets/:id/versions/:versionId/preview`   | Stream one specific version's stored file (version A/B compare)         |
-| GET    | `/api/v1/assets/:id/dependencies`                  | Dependency map (timeline items, panel/shot pointers, prompt references) |
+| Method | Endpoint                                           | Description                                                              |
+| ------ | -------------------------------------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/v1/assets`                                   | List assets (filter + search)                                            |
+| POST   | `/api/v1/assets`                                   | Create an asset                                                          |
+| POST   | `/api/v1/assets/generate`                          | Create an image/video asset and queue prompt-based generation (202)      |
+| POST   | `/api/v1/assets/:id/generate`                      | Queue prompt-based generation of new versions on an existing asset (202) |
+| GET    | `/api/v1/assets/:id`                               | Asset detail (aliases, tags, active v.)                                  |
+| PATCH  | `/api/v1/assets/:id`                               | Update metadata or status                                                |
+| DELETE | `/api/v1/assets/:id`                               | Soft-delete (with reference warnings)                                    |
+| POST   | `/api/v1/assets/:id/upload`                        | Raw-bytes streaming upload, creates a version                            |
+| GET    | `/api/v1/assets/:id/versions`                      | List versions (newest first)                                             |
+| POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                                    |
+| GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                          |
+| POST   | `/api/v1/assets/:id/versions/:versionId/restore`   | Restore an older version                                                 |
+| GET    | `/api/v1/assets/:id/versions/:versionId/proxy`     | Stream the version's proxy file                                          |
+| GET    | `/api/v1/assets/:id/versions/:versionId/thumbnail` | Cached JPEG thumbnail (`?at=`, `?w=`) for video frames / images          |
+| POST   | `/api/v1/assets/:id/versions/:versionId/proxy`     | Regenerate the version's proxy (fresh job)                               |
+| POST   | `/api/v1/assets/:id/aliases`                       | Add an alias `@name`                                                     |
+| DELETE | `/api/v1/assets/:id/aliases/:aliasSlug`            | Remove an alias                                                          |
+| POST   | `/api/v1/assets/:id/tags`                          | Add a tag                                                                |
+| DELETE | `/api/v1/assets/:id/tags/:tag`                     | Remove a tag                                                             |
+| GET    | `/api/v1/assets/:id/preview`                       | Stream the active version's file                                         |
+| GET    | `/api/v1/assets/:id/versions/:versionId/preview`   | Stream one specific version's stored file (version A/B compare)          |
+| GET    | `/api/v1/assets/:id/dependencies`                  | Dependency map (timeline items, panel/shot pointers, prompt references)  |
 
 List filters (query params): `project_id`, `library_scope`, `asset_type`, `status`, `tag`, and `q`
 (case-insensitive match on slug, display name, and description).
+
+### Generation (prompt-based)
+
+`POST /api/v1/assets/generate` (new asset) and `POST /api/v1/assets/:id/generate` (edit an existing
+asset) queue a model-backed generation job for image or video content (202, job created — the asset
+itself is created synchronously in the new-asset case, with no versions yet):
+
+- `kind`: `image` or `video`. The task type is derived from the inputs: no references →
+  `text_to_image` / `text_to_video`; with references → `image_to_image` / `image_to_video`.
+- `references` (optional, max 8): `{ asset_id, version_number? }` — existing image/video assets (the
+  active version by default) attached as job inputs. Each reference requires read permission; the
+  target asset requires write permission.
+- `include_current` (edit endpoint only): attach the asset's active version as a reference.
+- `prompt` (required), `model_id` (optional — first enabled model for the task otherwise), `seed`
+  (optional integer string), `candidates` (1–8, default 2).
+- New-asset only: `unique_slug`, `display_name`, `asset_type` (image kind: `image` / `character` /
+  `location` / `prop`; video kind: `video`), `library_scope` + `project_id` (same rules as
+  `POST /api/v1/assets`).
+
+Candidates produced by the runner are stored as new versions of the target asset with generation
+provenance (the last candidate becomes active), exactly like other generation jobs — review them on
+the review board or restore a version from the asset detail page. Audio/other asset types are
+rejected with 400 on the edit endpoint.
 
 ### Dependency tracking
 
