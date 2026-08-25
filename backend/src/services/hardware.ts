@@ -118,15 +118,30 @@ export async function detectHardware(): Promise<HardwareInfo> {
   }
 
   let gpu: GpuInfo | null = null;
+  // nvidia-smi rejects the whole query when any field is invalid, and
+  // drivers >= 590 dropped `cuda_version` from the queryable fields — so
+  // the stable core fields are queried separately from the best-effort
+  // CUDA version (query field first, `-q` output fallback).
   const nvidia = await runCommand("nvidia-smi", [
-    "--query-gpu=name,memory.total,memory.used,driver_version,cuda_version",
+    "--query-gpu=name,memory.total,memory.used,driver_version",
     "--format=csv,noheader",
   ]);
   if (nvidia) {
-    const [name, total, used, driver, cuda] = nvidia
+    const [name, total, used, driver] = nvidia
       .split("\n")[0]
       .split(",")
       .map((s) => s.trim());
+    let cuda = await runCommand("nvidia-smi", [
+      "--query-gpu=cuda_version",
+      "--format=csv,noheader",
+    ]);
+    if (cuda !== null) {
+      cuda = cuda.split("\n")[0].trim() || null;
+    } else {
+      const detailed = await runCommand("nvidia-smi", ["-q"]);
+      const match = detailed === null ? null : detailed.match(/CUDA Version\s*:\s*([\w.]+)/);
+      cuda = match ? match[1] : null;
+    }
     gpu = {
       vendor: "nvidia",
       model: name || "unknown",

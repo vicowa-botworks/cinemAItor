@@ -47,9 +47,12 @@ written to `audit_logs` (entity type `model`).
     `health_checked_at`).
 - **Hardware detection** (`detectHardware` in `services/hardware.ts`): platform, CPU count, and
   total RAM come from `/proc` (Linux) or `sysctl` (macOS); the GPU is detected via
-  `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version,cuda_version` (3s timeout,
-  first GPU on multi-GPU hosts). Memory fields are unit-aware (`MiB` is the nvidia-smi default),
-  e.g. `97871 MiB` → `vram_mb: 97871`. The GPU object is
+  `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version` (3s timeout, first GPU on
+  multi-GPU hosts). Memory fields are unit-aware (`MiB` is the nvidia-smi default), e.g. `97871 MiB`
+  → `vram_mb: 97871`. The CUDA version is a best-effort second query: `--query-gpu=cuda_version` on
+  older drivers, falling back to the `CUDA Version` line of `nvidia-smi -q` on drivers ≥ 590, where
+  the field was removed from the queryable set (nvidia-smi fails the _entire_ query when any field
+  is invalid, so the core fields must be queried separately). The GPU object is
   `{ vendor, model, vram_mb, vram_used_mb, driver_version, cuda_version }` with every field null
   when undetectable — both the models hardware endpoint and the diagnostics hardware report
   (DIA-001) return this same object, so the UIs must use these exact keys.

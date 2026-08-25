@@ -607,6 +607,19 @@ The product track follows `MASTER-PLAN.md`.
       unique operationIds (legacy `/api/*` routes carry a `Legacy` infix so they never collide with
       their v1 twins), secured ops document 401; +10 backend steps; backend 474 + frontend 277 test
       steps green. `docs/openapi.md` covers the conventions
+- [x] GPU detection on nvidia-smi 590+ (driver ≥ 590, e.g. 595 on Blackwell): `nvidia-smi` rejects
+      the _entire_ `--query-gpu` when any field is invalid, and drivers ≥ 590 removed `cuda_version`
+      from the queryable fields — so the single 5-field query in `detectHardware` failed with exit
+      code 2 and both the models hardware and diagnostics endpoints reported "no GPU detected" on
+      machines whose only problem was a new driver. The core fields
+      (`name,memory.total,memory.used,driver_version`) are now queried separately and the CUDA
+      version is best-effort: `--query-gpu=cuda_version` on older drivers, falling back to the
+      `CUDA Version` line of `nvidia-smi -q` on the new ones (null when both fail). The
+      `dev:backend` / `start` tasks also gained `--allow-run` — without it `nvidia-smi` (and ffmpeg)
+      cannot be spawned at all, so GPU detection and real renders were impossible on those entry
+      points. +1 backend step (fake-`nvidia-smi`-on-PATH regression test emulating the 590+ field
+      rejection, green without a GPU); backend 475 + frontend 277 test steps green — see
+      `docs/models.md`
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -674,4 +687,6 @@ The product track follows `MASTER-PLAN.md`.
   encoder probe, preset validation): Sun Aug 23 2026
 - Email system (SMTP configuration, password reset, email confirmation, admin invitations): Mon Aug
   24 2026
+- GPU detection on nvidia-smi 590+ (split query + `-q` CUDA fallback; `--allow-run` on
+  `dev:backend`/`start`): Tue Aug 25 2026
 - OpenAPI API documentation (generated spec + Swagger UI + coverage tests): Mon Aug 24 2026
