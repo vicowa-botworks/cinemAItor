@@ -2677,6 +2677,27 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       timeoutSeconds: { type: "integer" },
     },
   },
+  LlmProposal: {
+    type: "object",
+    required: ["id", "tool", "args", "status", "created_at", "expires_at"],
+    properties: {
+      id: { type: "string" },
+      tool: {
+        type: "string",
+        enum: [
+          "register_model",
+          "register_model_from_huggingface",
+          "install_model",
+          "remove_model",
+        ],
+      },
+      args: { type: "object" },
+      status: { type: "string", enum: ["pending", "approved", "rejected"] },
+      created_at: { type: "string" },
+      expires_at: { type: "string" },
+      result: { type: ["object", "null"], nullable: true },
+    },
+  },
   HuggingFaceRepoSummary: {
     type: "object",
     required: ["id", "likes", "downloads", "pipeline_tag", "tags", "license"],

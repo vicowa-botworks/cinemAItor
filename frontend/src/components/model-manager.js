@@ -443,6 +443,144 @@ export class ModelManager extends LitElement {
       accent-color: var(--color-primary);
     }
 
+    .copilot-chat {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+      max-height: 420px;
+      overflow-y: auto;
+      padding: 10px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+    }
+
+    .copilot-empty {
+      color: var(--color-text-muted);
+      font-size: 13px;
+      margin: 0;
+    }
+
+    .copilot-msg {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 92%;
+    }
+
+    .copilot-msg.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .copilot-msg.assistant {
+      align-self: flex-start;
+    }
+
+    .copilot-bubble {
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--color-text);
+    }
+
+    .copilot-msg.user .copilot-bubble {
+      background-color: var(--color-primary);
+      color: #fff;
+    }
+
+    .copilot-msg.assistant .copilot-bubble {
+      background-color: var(--color-surface-hover);
+      border: 1px solid var(--color-border);
+    }
+
+    .copilot-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .copilot-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .copilot-step .chip {
+      font-size: 11px;
+    }
+
+    .copilot-step.ok .chip {
+      background-color: rgba(74, 222, 128, 0.15);
+      color: #4ade80;
+    }
+
+    .copilot-step.error .chip {
+      background-color: rgba(248, 113, 113, 0.15);
+      color: #f87171;
+    }
+
+    .copilot-step.proposal .chip {
+      background-color: rgba(251, 191, 36, 0.15);
+      color: #fbbf24;
+    }
+
+    .copilot-proposal {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 12px;
+    }
+
+    .copilot-proposal .tool {
+      font-weight: 600;
+      color: var(--color-text);
+    }
+
+    .copilot-proposal .args {
+      color: var(--color-text-muted);
+      font-family: monospace;
+      font-size: 11px;
+      max-width: 420px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .copilot-proposal.done {
+      opacity: 0.7;
+    }
+
+    .copilot-input {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .copilot-input textarea {
+      flex: 1;
+      resize: vertical;
+      min-height: 40px;
+      max-height: 160px;
+      padding: 8px 10px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text);
+      font-size: 13px;
+      font-family: inherit;
+    }
+
     .reg-field label {
       font-size: 12px;
       color: var(--color-text-muted);
@@ -673,6 +811,11 @@ export class ModelManager extends LitElement {
     llmBusy: { state: true },
     llmNotice: { state: true },
     llmError: { state: true },
+    copilot: { state: true },
+    copilotInput: { state: true },
+    copilotBusy: { state: true },
+    copilotError: { state: true },
+    copilotProposalBusy: { state: true },
     showRegister: { state: true },
     regBusy: { state: true },
     regForm: { state: true },
@@ -709,6 +852,11 @@ export class ModelManager extends LitElement {
     this.llmBusy = null;
     this.llmNotice = null;
     this.llmError = "";
+    this.copilot = [];
+    this.copilotInput = "";
+    this.copilotBusy = false;
+    this.copilotError = "";
+    this.copilotProposalBusy = null;
     this.showRegister = false;
     this.regBusy = false;
     this.regForm = { ...EMPTY_REG_FORM };
@@ -905,6 +1053,8 @@ export class ModelManager extends LitElement {
             ? html`<p class="admin-note">Only admins can change the LLM settings.</p>`
             : null}
         </div>
+
+        ${this._renderCopilotPanel()}
 
         ${this._renderHfPanel()}
 
@@ -1152,6 +1302,223 @@ export class ModelManager extends LitElement {
         </form>
       </div>
     `;
+  }
+
+  _renderCopilotPanel() {
+    if (!this.llmConfigured) {
+      return html`
+        <div class="panel">
+          <div class="llm-head">
+            <h3>Model Copilot</h3>
+            <span class="chip disabled">not configured</span>
+          </div>
+          <p class="admin-note">
+            Configure the LLM assistant above to use the Model Copilot.
+          </p>
+        </div>
+      `;
+    }
+    return html`
+      <div class="panel">
+        <div class="llm-head">
+          <h3>Model Copilot</h3>
+          <span class="chip enabled">tool harness</span>
+        </div>
+        <p class="admin-note">
+          Ask about models, registry state, or HuggingFace repos. Read-only tools
+          run directly; mutating tools (register, install, remove) create a
+          proposal that you must approve explicitly.
+          ${!this.isAdmin ? "You are not an admin, so mutating tools are not available." : ""}
+        </p>
+        ${this.copilot.length > 0
+          ? html`
+            <button class="btn btn-secondary btn-small" @click=${() => this._copilotClear()}>
+              Clear conversation
+            </button>
+          `
+          : null}
+        ${this.copilot.length > 0
+          ? html`
+            <div class="copilot-chat">
+              ${this.copilot.map((turn) => this._renderCopilotTurn(turn))}
+              ${this.copilotBusy
+                ? html`
+                  <div class="copilot-msg assistant">
+                    <div class="copilot-bubble">
+                                    Thinking...</div>
+                  </div>
+                `
+                : null}
+            </div>
+          `
+          : null}
+        ${this.copilotError ? html`<div class="error">${this.copilotError}</div>` : null}
+        <form
+          class="copilot-input"
+          @submit=${(e) => {
+            e.preventDefault();
+            this._sendCopilot();
+          }}>
+          <textarea
+            placeholder="e.g. Which video models are installed and healthy?"
+            .value=${this.copilotInput}
+            @input=${(e) => (this.copilotInput = e.target.value)}
+            @keydown=${(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                this._sendCopilot();
+              }
+            }}></textarea>
+          <button
+            class="btn"
+            type="submit"
+            ?disabled=${this.copilotBusy || this.copilotInput.trim() === ""}>
+            ${this.copilotBusy ? "Working..." : "Ask"}
+          </button>
+        </form>
+      </div>
+    `;
+  }
+
+  _renderCopilotTurn(turn) {
+    const steps = (turn.steps ?? [])
+      .filter((s) => s.status !== "proposal")
+      .map(
+        (s) =>
+          html`
+            <div class="copilot-step ${s.status}">
+              <span class="chip">${s.status === "ok" ? s.tool : "error"}</span>
+              <span>${s.summary}</span>
+            </div>
+          `,
+      );
+    const proposals = (turn.proposals ?? []).map((p) => this._renderProposal(p));
+    return html`
+      <div class="copilot-msg ${turn.role}">
+        ${turn.content ? html`<div class="copilot-bubble">${turn.content}</div>` : null}
+        ${steps.length > 0 ? html`<div class="copilot-steps">${steps}</div>` : null}
+        ${proposals.length > 0 ? html`<div class="copilot-steps">${proposals}</div>` : null}
+      </div>
+    `;
+  }
+
+  _renderProposal(p) {
+    const busy = this.copilotProposalBusy === p.id;
+    const isPending = p.status === "pending";
+    return html`
+      <div class="copilot-proposal ${isPending ? "" : "done"}">
+        <span class="tool">${p.tool}</span>
+        <span class="args" title=${JSON.stringify(p.args)}>
+          ${JSON.stringify(p.args)}
+        </span>
+        ${isPending && this.isAdmin
+          ? html`
+            <button
+              class="btn btn-small"
+              ?disabled=${busy}
+              @click=${() => this._copilotApprove(p)}>
+              ${busy ? "Running..." : "Approve"}
+            </button>
+            <button
+              class="btn btn-secondary btn-small"
+              ?disabled=${busy}
+              @click=${() => this._copilotReject(p)}>
+              Reject
+            </button>
+          `
+          : html`<span class="chip">${p.status}${busy ? "..." : ""}</span>`}
+        ${p.status === "approved" && p.result
+          ? html`<span class="args">${this._copilotResultSummary(p.tool, p.result)}</span>`
+          : null}
+      </div>
+    `;
+  }
+
+  _copilotResultSummary(tool, result) {
+    if (tool === "register_model" || tool === "register_model_from_huggingface") {
+      return `registered "${result.model?.name ?? "?"}"`;
+    }
+    if (tool === "install_model") return "install job enqueued";
+    if (tool === "remove_model") return "model removed";
+    return "";
+  }
+
+  _copilotHistory() {
+    return this.copilot
+      .filter((t) => t.content)
+      .map((t) => ({ role: t.role, content: t.content }));
+  }
+
+  async _sendCopilot() {
+    const text = this.copilotInput.trim();
+    if (!text || this.copilotBusy) return;
+    this.copilotInput = "";
+    this.copilotError = "";
+    this.copilot = [
+      ...this.copilot,
+      { role: "user", content: text },
+      { role: "assistant", content: "", steps: [], proposals: [] },
+    ];
+    this.copilotBusy = true;
+    try {
+      const result = await api.llmAgent(this._copilotHistory());
+      this.copilot = [
+        ...this.copilot.slice(0, -1),
+        {
+          role: "assistant",
+          content: result.reply,
+          steps: result.steps ?? [],
+          proposals: result.proposals ?? [],
+        },
+      ];
+    } catch (err) {
+      // Drop the empty placeholder assistant turn and surface the error.
+      this.copilot = [...this.copilot.slice(0, -2), { role: "user", content: text }];
+      this.copilotError = err.message || "The Model Copilot request failed.";
+    } finally {
+      this.copilotBusy = false;
+    }
+  }
+
+  _setProposal(proposal) {
+    this.copilot = this.copilot.map((turn) => {
+      if (!turn.proposals) return turn;
+      return {
+        ...turn,
+        proposals: turn.proposals.map((p) => (p.id === proposal.id ? proposal : p)),
+      };
+    });
+  }
+
+  async _copilotApprove(proposal) {
+    this.copilotProposalBusy = proposal.id;
+    this.copilotError = "";
+    try {
+      const { proposal: updated, result } = await api.llmApproveProposal(proposal.id);
+      this._setProposal({ ...updated, result: result ?? updated.result });
+    } catch (err) {
+      this.copilotError = err.message || "Approval failed.";
+    } finally {
+      this.copilotProposalBusy = null;
+    }
+  }
+
+  async _copilotReject(proposal) {
+    this.copilotProposalBusy = proposal.id;
+    this.copilotError = "";
+    try {
+      const { proposal: updated } = await api.llmRejectProposal(proposal.id);
+      this._setProposal(updated);
+    } catch (err) {
+      this.copilotError = err.message || "Rejecting the proposal failed.";
+    } finally {
+      this.copilotProposalBusy = null;
+    }
+  }
+
+  _copilotClear() {
+    this.copilot = [];
+    this.copilotError = "";
   }
 
   _renderHfPanel() {

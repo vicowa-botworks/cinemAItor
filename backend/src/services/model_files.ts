@@ -1,7 +1,10 @@
 import { join } from "@std/path";
+import { loadConfig } from "../config.ts";
 import type { StorageLayout } from "../storage/paths.ts";
+import { storageLayout } from "../storage/paths.ts";
 import { sha256File } from "../storage/checksums.ts";
-import { badRequest, conflict } from "../errors.ts";
+import { getModel, type Model, setModelInstalled } from "../db/models.ts";
+import { badRequest, conflict, notFound } from "../errors.ts";
 
 // Installed artifacts live at <app_data>/models/<model_id>/model.bin.
 export function modelDir(layout: StorageLayout, modelId: string): string {
@@ -116,6 +119,45 @@ export async function installFromUrl(
   await Deno.writeFile(target, bytes);
   const fileHash = await sha256File(target);
   return { fileHash, fileBytes: total };
+}
+
+/**
+ * Full install flow for a model row — the install route and the model-copilot
+ * `install_model` tool share this. Network sources require explicit consent
+ * (MOD-013); optional overrides let the route pass request-body values.
+ */
+export async function installModelById(
+  modelId: string,
+  opts: { consent?: boolean; sourcePath?: string; repositoryUrl?: string } = {},
+): Promise<{ model: Model; install: InstallResult }> {
+  const model = getModel(modelId);
+  if (!model) throw notFound("Model not found");
+
+  const sourcePath = opts.sourcePath ?? model.source_path ?? undefined;
+  const repositoryUrl = opts.repositoryUrl ?? model.repository_url ?? undefined;
+  const lay = storageLayout(loadConfig().appDataDir);
+  let result: InstallResult;
+  if (sourcePath) {
+    result = await installFromLocal(lay, modelId, sourcePath);
+  } else if (repositoryUrl) {
+    if (opts.consent !== true) {
+      throw badRequest(
+        "Installing from a network source requires explicit consent (consent: true)",
+        "consent",
+      );
+    }
+    result = await installFromUrl(lay, modelId, repositoryUrl, loadConfig().uploadMaxBytes);
+  } else if (model.source === "mock" || model.backend === "mock") {
+    result = { fileHash: model.file_hash ?? "", fileBytes: 0 };
+  } else {
+    throw badRequest(
+      "No installation source: provide source_path or repository_url on the model",
+    );
+  }
+
+  const installed = setModelInstalled(modelId, result.fileHash);
+  if (!installed) throw notFound("Model not found");
+  return { model: installed, install: result };
 }
 
 /** Remove installed files for a model (MOD-005). */

@@ -7,8 +7,16 @@ import {
 } from "@cinemaItor/db/llm_settings.ts";
 import { type AuthedContext, authMiddleware } from "@cinemaItor/middleware/auth.ts";
 import { getUserById } from "@cinemaItor/db/schema.ts";
-import { AppError, badRequest, ERROR_CODES, forbidden, unauthorized } from "@cinemaItor/errors.ts";
+import {
+  AppError,
+  badRequest,
+  ERROR_CODES,
+  forbidden,
+  notFound,
+  unauthorized,
+} from "@cinemaItor/errors.ts";
 import { chatLlm, type LlmMessage, testLlmConnection } from "@cinemaItor/services/llm_client.ts";
+import { approveProposal, rejectProposal, runAgent } from "@cinemaItor/services/llm_agent.ts";
 import {
   ASSIST_PURPOSES,
   type AssistPurpose,
@@ -343,6 +351,78 @@ async function handleAssist(ctx: Context): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Agent (model copilot)
+// ---------------------------------------------------------------------------
+
+function isAdminUser(userId: number): boolean {
+  const user = getUserById(userId);
+  return user !== undefined && user.role === "admin";
+}
+
+interface ProposalParamContext extends AuthedContext {
+  params: { id?: string };
+}
+
+function proposalParam(ctx: Context): string {
+  const id = (ctx as ProposalParamContext).params?.id ?? "";
+  if (!id) throw notFound("Proposal not found");
+  return id;
+}
+
+async function handleAgent(ctx: Context): Promise<void> {
+  const userId = requireUserId(ctx);
+  const body = await readJsonBody(ctx);
+  let model: string | undefined;
+  if (body.model !== undefined) {
+    if (typeof body.model !== "string" || !body.model.trim()) {
+      throw badRequest("model must be a non-empty string");
+    }
+    model = body.model.trim();
+  }
+  const result = await runAgent({
+    history: body.history,
+    userId,
+    isAdmin: isAdminUser(userId),
+    model,
+  });
+  logAudit(
+    userId,
+    "llm.agent_run",
+    "llm",
+    "agent",
+    {
+      iterations: result.iterations,
+      truncated: result.truncated,
+      tools: result.steps.map((s) => s.tool),
+    },
+  );
+  ctx.response.body = {
+    reply: result.reply,
+    model: result.model,
+    iterations: result.iterations,
+    truncated: result.truncated,
+    steps: result.steps,
+    proposals: result.proposals,
+  };
+}
+
+async function handleApproveProposal(ctx: Context): Promise<void> {
+  const userId = requireUserId(ctx);
+  const id = proposalParam(ctx);
+  const { proposal, result } = await approveProposal(id, userId, isAdminUser(userId));
+  logAudit(userId, "llm.proposal_approve", proposal.tool, proposal.id);
+  ctx.response.body = { proposal, result };
+}
+
+function handleRejectProposal(ctx: Context): void {
+  const userId = requireUserId(ctx);
+  const id = proposalParam(ctx);
+  const proposal = rejectProposal(id, isAdminUser(userId));
+  logAudit(userId, "llm.proposal_reject", proposal.tool, proposal.id);
+  ctx.response.body = { proposal };
+}
+
+// ---------------------------------------------------------------------------
 // Router + OpenAPI metadata
 // ---------------------------------------------------------------------------
 
@@ -354,7 +434,10 @@ export const router = new Router()
   .get("/api/v1/llm/status", authMiddleware, handleStatus)
   .post("/api/v1/llm/test", authMiddleware, handleTest)
   .post("/api/v1/llm/chat", authMiddleware, handleChat)
-  .post("/api/v1/llm/assist", authMiddleware, handleAssist);
+  .post("/api/v1/llm/assist", authMiddleware, handleAssist)
+  .post("/api/v1/llm/agent", authMiddleware, handleAgent)
+  .post("/api/v1/llm/proposals/:id/approve", authMiddleware, handleApproveProposal)
+  .post("/api/v1/llm/proposals/:id/reject", authMiddleware, handleRejectProposal);
 
 const LlmSettingsViewSchema = {
   type: "object",
@@ -551,6 +634,101 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(400, 401, 502, 503, 504),
+    },
+  },
+  "POST /api/v1/llm/agent": {
+    summary: "Model copilot turn: bounded tool-calling loop",
+    description:
+      "Runs the cinemaItor model copilot against the configured LLM with its tool set. " +
+      "Read-only tools auto-execute; mutating tools create proposals that await explicit " +
+      "approval (POST /api/v1/llm/proposals/{id}/approve). Admin callers get the mutating " +
+      "tools; other callers only the read-only schema.",
+    requestBody: {
+      description: "Conversation history (user/assistant turns)",
+      schema: {
+        type: "object",
+        required: ["history"],
+        properties: {
+          history: {
+            type: "array",
+            minItems: 1,
+            maxItems: 32,
+            items: {
+              type: "object",
+              required: ["role", "content"],
+              properties: {
+                role: { type: "string", enum: ["user", "assistant"] },
+                content: { type: "string" },
+              },
+            },
+          },
+          model: { type: "string" },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "The copilot reply + tool steps + any proposals created",
+        schema: {
+          type: "object",
+          required: ["reply", "model", "iterations", "truncated", "steps", "proposals"],
+          properties: {
+            reply: { type: "string" },
+            model: { type: "string" },
+            iterations: { type: "integer" },
+            truncated: { type: "boolean" },
+            steps: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["tool", "args", "status", "summary"],
+                properties: {
+                  tool: { type: "string" },
+                  args: { type: "object" },
+                  status: { type: "string", enum: ["ok", "error", "proposal"] },
+                  summary: { type: "string" },
+                  proposal_id: { type: "string" },
+                },
+              },
+            },
+            proposals: { type: "array", items: ref("LlmProposal") },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 502, 503, 504),
+    },
+  },
+  "POST /api/v1/llm/proposals/{id}/approve": {
+    summary: "Approve a pending copilot proposal (admin)",
+    description: "Re-checks admin role and re-runs validation by executing the stored tool call. " +
+      "A validation failure propagates and leaves the proposal pending.",
+    responses: {
+      200: {
+        description: "The executed proposal",
+        schema: {
+          type: "object",
+          required: ["proposal", "result"],
+          properties: {
+            proposal: ref("LlmProposal"),
+            result: { type: "object" },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404, 409, 502),
+    },
+  },
+  "POST /api/v1/llm/proposals/{id}/reject": {
+    summary: "Reject a pending copilot proposal (admin)",
+    responses: {
+      200: {
+        description: "The closed proposal",
+        schema: {
+          type: "object",
+          required: ["proposal"],
+          properties: { proposal: ref("LlmProposal") },
+        },
+      },
+      ...errorResponses(401, 403, 404, 409),
     },
   },
 };
