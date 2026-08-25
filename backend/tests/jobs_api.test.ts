@@ -184,8 +184,10 @@ describe("jobs api", () => {
           assert(types.includes(expected), `missing event ${expected}`);
         }
 
+        // Auto-queued proxy jobs for the generated candidates also end up
+        // succeeded; only count the job this test created.
         const list = (await (
-          await get("/api/v1/jobs?status=succeeded", ownerToken)
+          await get("/api/v1/jobs?status=succeeded&job_type=text_to_image", ownerToken)
         ).json()) as JobBody[];
         assertEquals(list.length, 1);
         assertEquals(list[0].id, jobId);

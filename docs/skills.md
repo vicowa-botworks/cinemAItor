@@ -28,7 +28,12 @@ A skill has a stable user-facing slug id and a JSON definition:
       "model_id": "optional pin",
       "seed": "optional pin"
     }
-  ]
+  ],
+  "assistant": {
+    "model_task_types": ["text_to_video"],
+    "guidance": "How to write prompts for this model family…",
+    "examples": [{ "prompt": "…", "notes": "why this works" }]
+  }
 }
 ```
 
@@ -39,9 +44,16 @@ Validation (400 with a precise message on any violation):
 - `inputs` is an object keyed by identifier; each spec has `type` ∈ `string | number | boolean`,
   optional `required` (boolean) and optional `default` (must match the type). A spec cannot be both
   `required` and carry a `default`.
-- `steps` is a non-empty array of ≤16; each step has `type` ∈ `music | voiceover | sfx` (v1 is
+- `steps` is an array of ≤16; each step has `type` ∈ `music | voiceover | sfx` (v1 is
   audio-generation only), a `prompt` (≤2000) whose `{{ name }}` placeholders must all reference
-  declared inputs, and optional per-step `model_id` / `seed` pins.
+  declared inputs, and optional per-step `model_id` / `seed` pins. `steps` must be non-empty
+  **unless** the definition carries an `assistant` block (prompt-creation skills are knowledge, not
+  generation steps).
+- `assistant` is optional and makes the skill a "prompt-creation skill" for the LLM assistant (see
+  `docs/llm.md`): `model_task_types` (non-empty subset of the known model task types when present),
+  `guidance` (≤4000 chars) and `examples` (≤8, each `prompt` ≤2000, optional `notes` ≤500). At least
+  one of `guidance` / `examples` is required. `GET /api/v1/skills?assistant=1` lists only these
+  skills (the assist dialog's picker).
 
 Skill ids are 1–64 chars of `a-z 0-9 - _` starting with a letter or digit; the `sys-` prefix is
 reserved for system skills.
@@ -69,7 +81,8 @@ All endpoints require authentication. A run requires project write access to `pr
   required enforced, types checked, unknown inputs rejected) and every step's model is resolved (a
   `step.model_id` pin must exist and be enabled, otherwise an enabled model with the step's task
   type is picked: `music` → `music`, `voiceover` → `voice`, `sfx` → `audio`) before any job is
-  queued; failure returns 400 with no jobs on the queue.
+  queued; failure returns 400 with no jobs on the queue. An assistant-only skill (no steps) is
+  rejected up front with 400 — it exists to feed the LLM assistant, not to run.
 - **Jobs:** each step enqueues one generation job via the shared audio-generation path — the step's
   expanded prompt seeds a fresh audio asset (`<kind>_<hex>` slug) under the project, so outputs
   remain reviewable in the job monitor and review board like any other generation.
@@ -85,6 +98,9 @@ definitions live in `src/db/skills.ts` (`SYSTEM_SKILLS`), not in the migration:
 
 - `sys-tense-score` — one music step, inputs `mood` (default `tense`) and `length` (default `30s`).
 - `sys-foley-pass` — one sfx step, required input `action`.
+- `sys-t2v-prompting` — assistant-only: no steps, a `text_to_video` assistant block with general
+  prompting guidance and example prompts. Selecting it in the assist dialog's skill picker shapes
+  `enhance_prompt` output (see `docs/llm.md`).
 
 System skills are visible to every user but cannot be deleted (admins included) and can only be
 updated or toggled by an admin.

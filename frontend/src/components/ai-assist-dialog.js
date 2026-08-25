@@ -65,9 +65,11 @@ class AiAssistDialog extends LitElement {
       try {
         const [models, skills] = await Promise.all([
           api.listModels({ enabled: true }),
-          api.listSkills(),
+          api.listSkills({ assistant: "1" }),
         ]);
         this.models = models ?? [];
+        // Server filters, but keep the guard: the picker must only ever
+        // offer prompt-creation skills.
         this.skills = (skills ?? []).filter(
           (s) => s.definition?.assistant,
         );

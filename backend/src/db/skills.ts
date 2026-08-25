@@ -202,8 +202,11 @@ function assertKnownPlaceholders(
 }
 
 function parseSteps(raw: unknown, inputs: Record<string, SkillInputSpec>): SkillStep[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw badRequest("steps must be a non-empty array");
+  // An empty array is accepted here so that assistant-only skills (prompt
+  // knowledge without generation steps) can parse; parseSkillDefinition
+  // rejects `steps: []` unless an assistant block is present.
+  if (!Array.isArray(raw)) {
+    throw badRequest("steps must be an array");
   }
   if (raw.length > 16) {
     throw badRequest("steps allows at most 16 steps");
@@ -328,6 +331,11 @@ export function parseSkillDefinition(raw: unknown): SkillDefinition {
   const inputs = parseInputs(obj.inputs);
   const steps = parseSteps(obj.steps, inputs);
   const assistant = parseAssistant(obj.assistant);
+  if (steps.length === 0 && !assistant) {
+    throw badRequest(
+      "steps must be a non-empty array (or provide an assistant block)",
+    );
+  }
   return { name, version, author, license, description, inputs, steps, assistant };
 }
 
@@ -421,6 +429,38 @@ export const SYSTEM_SKILLS: SkillDefinition[] = [
     },
     steps: [{ type: "sfx", prompt: "Realistic foley sound effects: {{ action }}" }],
   },
+  {
+    name: "Text-to-Video Prompting",
+    version: "1.0.0",
+    author: "cinemAItor",
+    license: "MIT",
+    description: "General text-to-video prompting guidance. Not a generation skill — it feeds " +
+      "the LLM assistant (see the Models page, LLM Assistant) when enhancing prompts.",
+    inputs: {},
+    steps: [],
+    assistant: {
+      model_task_types: ["text_to_video"],
+      guidance: "Write prompts as one continuous shot description in present tense. " +
+        "Lead with the subject and its main action, then camera: shot size (wide, medium, " +
+        "close-up), angle, and movement (static, slow dolly in, tracking, crane, orbit). " +
+        "Add lighting and mood (golden hour, overcast, neon, hard side light), then setting " +
+        "details. Prefer concrete nouns and strong verbs over abstract adjectives. " +
+        "Keep prompts under ~60 words; one subject, one action, one camera move per prompt. " +
+        "Avoid text, logos, watermarks, and fast multi-scene cuts in a single prompt.",
+      examples: [
+        {
+          prompt: "Medium shot, slow dolly in on a lighthouse keeper wiping salt from the glass, " +
+            "storm light flickering, dark sea churning below",
+          notes: "Subject + action first, one camera move, lighting and mood, concrete nouns.",
+        },
+        {
+          prompt: "Wide static shot of an empty train platform at dawn, low fog, a single figure " +
+            "walking into frame from the left, muted blue palette",
+          notes: "Setting-led prompt; the single slow action keeps the motion coherent.",
+        },
+      ],
+    },
+  },
 ];
 
 /**
@@ -438,6 +478,7 @@ export function seedSystemSkills(): void {
   const entries = [
     ["sys-tense-score", SYSTEM_SKILLS[0]],
     ["sys-foley-pass", SYSTEM_SKILLS[1]],
+    ["sys-t2v-prompting", SYSTEM_SKILLS[2]],
   ] as const;
   for (const [id, definition] of entries) {
     insert.run(
@@ -524,11 +565,13 @@ function requireManagePermission(userId: number, skill: Skill): void {
 // CRUD
 // ---------------------------------------------------------------------------
 
-export function listSkills(): Skill[] {
+export function listSkills(assistantOnly = false): Skill[] {
   const rows = getDb().prepare(
     "SELECT * FROM skills ORDER BY (is_system = 0), name",
   ).all() as unknown as Record<string, unknown>[];
-  return rows.map(skillFromRow);
+  const skills = rows.map(skillFromRow);
+  // `?assistant=1` feeds the assist dialog's prompt-creation-skill picker.
+  return assistantOnly ? skills.filter((s) => s.definition.assistant !== null) : skills;
 }
 
 export function getSkill(id: string): Skill | undefined {

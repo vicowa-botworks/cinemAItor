@@ -1172,8 +1172,8 @@ class ApiClient {
 
   // --- Skills ---------------------------------------------------------------
 
-  listSkills() {
-    return this.request("/skills");
+  listSkills(filter = {}) {
+    return this.request(`/skills${this._query(filter)}`);
   }
 
   getSkill(id) {

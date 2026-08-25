@@ -178,7 +178,11 @@ describe("proxy workflow api", () => {
 
         const jobs = await listProxyJobs();
         assertEquals(jobs.length, 1);
-        assertEquals(jobs[0].status, "queued");
+        // The runner may already have claimed the job by the time we list it.
+        assert(
+          ["queued", "running"].includes(jobs[0].status),
+          `unexpected initial status ${jobs[0].status}`,
+        );
         const done = await waitForProxyJob(jobs[0].id, "succeeded");
         assertEquals(done.error_text, null);
 

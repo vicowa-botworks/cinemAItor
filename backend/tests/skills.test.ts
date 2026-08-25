@@ -72,6 +72,7 @@ describe("skills (db)", () => {
     const ids = all.map((s) => s.id);
     assert(ids.includes("sys-tense-score"), "system music skill is seeded");
     assert(ids.includes("sys-foley-pass"), "system sfx skill is seeded");
+    assert(ids.includes("sys-t2v-prompting"), "t2v prompting skill is seeded");
     const tense = getSkill("sys-tense-score");
     assert(tense);
     assertEquals(tense.is_system, true);
@@ -79,9 +80,35 @@ describe("skills (db)", () => {
     assertEquals(tense.definition.steps.length, 1);
     assertEquals(tense.definition.steps[0].type, "music");
 
+    // The seeded prompting skill carries an assistant block and no steps.
+    const t2v = getSkill("sys-t2v-prompting");
+    assert(t2v);
+    assertEquals(t2v.definition.steps, []);
+    assertEquals(t2v.definition.assistant?.model_task_types, ["text_to_video"]);
+    assert((t2v.definition.assistant?.guidance ?? "").length > 0);
+    assert(t2v.definition.assistant?.examples.length);
+
     // Re-seeding is idempotent.
     seedSystemSkills();
     assertEquals(listSkills().length, all.length);
+  });
+
+  it("lists only prompt-creation skills with assistantOnly", () => {
+    createSkill("plain-skill", TENSE_DEF, ownerId);
+    createSkill(
+      "assistant-skill",
+      parseSkillDefinition(defOverrides({
+        steps: [],
+        assistant: { guidance: "Be specific." },
+      })),
+      ownerId,
+    );
+    const all = listSkills();
+    const filtered = listSkills(true);
+    assertEquals(filtered.length, 2); // sys-t2v-prompting + assistant-skill
+    assert(filtered.every((s) => s.definition.assistant !== null));
+    assert(!filtered.some((s) => s.id === "plain-skill"));
+    assertEquals(all.length, filtered.length + 3); // + the 3 step-carrying skills
   });
 
   it("creates a user skill and records an initial version snapshot", () => {
@@ -174,6 +201,15 @@ describe("skills (db)", () => {
     }));
     assertEquals(guidanceOnly.assistant?.model_task_types, []);
 
+    // An assistant block also justifies an empty step list (prompt-creation
+    // skills are knowledge, not generation steps).
+    const assistantOnly = parseSkillDefinition(defOverrides({
+      steps: [],
+      assistant: { guidance: "Be specific." },
+    }));
+    assertEquals(assistantOnly.steps, []);
+    assert(assistantOnly.assistant);
+
     const bad: unknown[] = [
       defOverrides({ assistant: "nope" }),
       defOverrides({ assistant: {} }),
@@ -225,6 +261,31 @@ describe("skills (db)", () => {
     const shapes = versions.map((v) => v.definition.assistant?.guidance);
     assert(shapes.includes("Camera language matters."));
     assert(shapes.includes("Updated guidance."));
+
+    // Assistant-only skills round-trip too: the stored definition re-parses
+    // with an empty step list (normalization must not inject values that the
+    // re-parse would reject).
+    const knowledge = createSkill(
+      "knowledge-only",
+      parseSkillDefinition(defOverrides({
+        steps: [],
+        assistant: { model_task_types: ["text_to_image"], guidance: "g" },
+      })),
+      ownerId,
+    );
+    const reloaded = getSkill(knowledge.id);
+    assertEquals(reloaded?.definition.steps, []);
+    assertEquals(reloaded?.definition.assistant?.guidance, "g");
+    updateSkill(
+      knowledge.id,
+      parseSkillDefinition(defOverrides({
+        name: "Knowledge v2",
+        steps: [],
+        assistant: { model_task_types: ["text_to_image"], guidance: "g2" },
+      })),
+      ownerId,
+    );
+    assertEquals(getSkill(knowledge.id)?.definition.assistant?.guidance, "g2");
   });
 
   it("resolves inputs with defaults, required checks and type checks", () => {
@@ -446,6 +507,15 @@ describe("skill engine", () => {
     assertEquals(listJobs().length, 0, "no partial jobs on a pre-flight failure");
   });
 
+  it("refuses to run an assistant-only skill (no generation steps)", () => {
+    seedSystemSkills();
+    assertThrows(
+      () => runSkill(ownerId, "sys-t2v-prompting", { project_id: projectId }),
+      Error,
+      "no generation steps",
+    );
+  });
+
   it("refuses to run a disabled skill", () => {
     setSkillEnabled("two-step", false, ownerId);
     assertThrows(() => runSkill(ownerId, "two-step", { project_id: projectId }), Error, "disabled");
@@ -561,6 +631,12 @@ describe("skills api", () => {
       const body = (await res.json()) as { id: string }[];
       assert(body.some((s) => s.id === "sys-tense-score"));
       assert(body.some((s) => s.id === "sys-foley-pass"));
+
+      const filtered = await req("GET", "/api/v1/skills?assistant=1", undefined, adminToken);
+      assertEquals(filtered.status, 200);
+      const filteredBody = (await filtered.json()) as { id: string }[];
+      assertEquals(filteredBody.length, 1);
+      assertEquals(filteredBody[0].id, "sys-t2v-prompting");
     }));
 
   it("creates, updates, toggles and deletes a skill through the API", () =>

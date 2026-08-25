@@ -62,6 +62,11 @@ export function runSkill(
   if (!request.project_id || typeof request.project_id !== "string") {
     throw badRequest("project_id is required");
   }
+  if (skill.definition.steps.length === 0) {
+    throw badRequest(
+      `skill '${skillId}' has no generation steps (it only carries prompt-creation guidance)`,
+    );
+  }
   const resolved = resolveSkillInputs(skill.definition, request.inputs);
   skill.definition.steps.forEach(requireModelForStep);
 
