@@ -9,7 +9,28 @@ const TASK_TYPES = [
   "audio",
   "music",
   "voice",
+  "transcribe",
 ];
+
+const BACKENDS = ["mock", "local_cli", "comfyui", "local_http"];
+
+const SOURCES = ["local", "url", "mock"];
+
+const EMPTY_REG_FORM = {
+  name: "",
+  version: "",
+  backend: "mock",
+  tasks: [],
+  source: "",
+  repository_url: "",
+  source_path: "",
+  license: "",
+  vram_requirement_mb: "",
+  ram_requirement_mb: "",
+  dependencies: "",
+  default_settings: "",
+  enabled: true,
+};
 
 export class ModelManager extends LitElement {
   static styles = css`
@@ -24,6 +45,13 @@ export class ModelManager extends LitElement {
       justify-content: space-between;
       align-items: center;
       gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .list-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       flex-wrap: wrap;
     }
 
@@ -350,6 +378,19 @@ export class ModelManager extends LitElement {
       gap: 4px;
     }
 
+    .reg-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px 16px;
+      margin-top: 12px;
+    }
+
+    .reg-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
     .llm-field.wide {
       grid-column: 1 / -1;
     }
@@ -382,6 +423,82 @@ export class ModelManager extends LitElement {
     .llm-check input {
       accent-color: var(--color-primary);
     }
+
+    .reg-field label {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .reg-field label .req {
+      color: var(--color-error);
+    }
+
+    .reg-field input,
+    .reg-field select,
+    .reg-field textarea {
+      padding: 7px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      font-size: 13px;
+      font-family: inherit;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .reg-field textarea {
+      font-family: var(--font-mono, monospace);
+      resize: vertical;
+      min-height: 64px;
+    }
+
+    .reg-tasks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 12px;
+      align-items: center;
+    }
+
+    .reg-tasks .reg-tasks-label {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .reg-tasks label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .reg-advanced {
+      margin-top: 14px;
+      font-size: 13px;
+    }
+
+    .reg-advanced summary {
+      cursor: pointer;
+      color: var(--color-text-muted);
+      font-weight: 500;
+    }
+
+    .reg-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .reg-actions .btn {
+      padding: 8px 16px;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
   `;
 
   static properties = {
@@ -404,6 +521,9 @@ export class ModelManager extends LitElement {
     llmBusy: { state: true },
     llmNotice: { state: true },
     llmError: { state: true },
+    showRegister: { state: true },
+    regBusy: { state: true },
+    regForm: { state: true },
   };
 
   constructor() {
@@ -427,6 +547,9 @@ export class ModelManager extends LitElement {
     this.llmBusy = null;
     this.llmNotice = null;
     this.llmError = "";
+    this.showRegister = false;
+    this.regBusy = false;
+    this.regForm = { ...EMPTY_REG_FORM };
     this._queryTimer = null;
   }
 
@@ -451,10 +574,23 @@ export class ModelManager extends LitElement {
       <div class="model-manager">
         <div class="list-header">
           <div class="list-title">Models</div>
-          <button class="btn btn-secondary" @click=${this._loadAll}>
-            ${this.loading ? "Refreshing..." : "Refresh"}
-          </button>
+          <div class="list-header-actions">
+            ${this.isAdmin
+              ? html`
+                <button
+                  class="btn"
+                  @click=${() => (this.showRegister = !this.showRegister)}>
+                  ${this.showRegister ? "Hide registration" : "Register model"}
+                </button>
+              `
+              : null}
+            <button class="btn btn-secondary" @click=${this._loadAll}>
+              ${this.loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
         </div>
+
+        ${this.isAdmin && this.showRegister ? this._renderRegisterForm() : null}
 
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice
@@ -659,6 +795,187 @@ export class ModelManager extends LitElement {
             </p>
           `
           : null}
+      </div>
+    `;
+  }
+
+  _renderRegisterForm() {
+    const f = this.regForm;
+    const set = (key) => (e) => {
+      const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+      this.regForm = { ...this.regForm, [key]: value };
+    };
+    const toggleTask = (task) => () => {
+      const tasks = f.tasks.includes(task) ? f.tasks.filter((t) => t !== task) : [...f.tasks, task];
+      this.regForm = { ...this.regForm, tasks };
+    };
+    return html`
+      <div class="panel">
+        <h3>Register model</h3>
+        <form @submit=${this._registerSubmit} @reset=${this._registerReset}>
+          <div class="reg-grid">
+            <div class="reg-field">
+              <label for="reg-name">Name <span class="req">*</span></label>
+              <input
+                id="reg-name"
+                type="text"
+                required
+                placeholder="e.g. SDXL Turbo"
+                .value=${f.name}
+                @input=${set("name")} />
+            </div>
+            <div class="reg-field">
+              <label for="reg-version">Version <span class="req">*</span></label>
+              <input
+                id="reg-version"
+                type="text"
+                required
+                placeholder="e.g. 1.0"
+                .value=${f.version}
+                @input=${set("version")} />
+            </div>
+            <div class="reg-field">
+              <label for="reg-backend">Backend <span class="req">*</span></label>
+              <select
+                id="reg-backend"
+                .value=${f.backend}
+                @change=${set("backend")}>
+                ${BACKENDS.map(
+                  (b) => html`<option value=${b}>${b}</option>`,
+                )}
+              </select>
+            </div>
+            <div class="reg-field">
+              <label for="reg-source">Source</label>
+              <select
+                id="reg-source"
+                .value=${f.source}
+                @change=${set("source")}>
+                <option value="">—</option>
+                ${SOURCES.map(
+                  (s) => html`<option value=${s}>${s}</option>`,
+                )}
+              </select>
+            </div>
+            ${f.source === "url"
+              ? html`
+                <div class="reg-field">
+                  <label for="reg-repo-url">Repository URL</label>
+                  <input
+                    id="reg-repo-url"
+                    type="text"
+                    placeholder="https://..."
+                    .value=${f.repository_url}
+                    @input=${set("repository_url")} />
+                </div>
+              `
+              : null}
+            ${f.source === "local"
+              ? html`
+                <div class="reg-field">
+                  <label for="reg-source-path">Source path</label>
+                  <input
+                    id="reg-source-path"
+                    type="text"
+                    placeholder="/path/on/server"
+                    .value=${f.source_path}
+                    @input=${set("source_path")} />
+                </div>
+              `
+              : null}
+            <div class="reg-field">
+              <label for="reg-license">License</label>
+              <input
+                id="reg-license"
+                type="text"
+                placeholder="e.g. Apache-2.0"
+                .value=${f.license}
+                @input=${set("license")} />
+            </div>
+            <div class="reg-field">
+              <label for="reg-vram">VRAM requirement (MB)</label>
+              <input
+                id="reg-vram"
+                type="number"
+                min="0"
+                placeholder="e.g. 8192"
+                .value=${f.vram_requirement_mb}
+                @input=${set("vram_requirement_mb")} />
+            </div>
+            <div class="reg-field">
+              <label for="reg-ram">RAM requirement (MB)</label>
+              <input
+                id="reg-ram"
+                type="number"
+                min="0"
+                placeholder="e.g. 16384"
+                .value=${f.ram_requirement_mb}
+                @input=${set("ram_requirement_mb")} />
+            </div>
+          </div>
+
+          <div class="reg-tasks">
+            <span class="reg-tasks-label">Task types:</span>
+            ${TASK_TYPES.map(
+              (t) =>
+                html`
+                  <label>
+                    <input
+                      type="checkbox"
+                      .checked=${f.tasks.includes(t)}
+                      @change=${toggleTask(t)} />
+                    ${t}
+                  </label>
+                `,
+            )}
+          </div>
+
+          <details class="reg-advanced">
+            <summary>Advanced options</summary>
+            <div class="reg-grid">
+              <div class="reg-field">
+                <label for="reg-deps">
+                  Dependencies (comma-separated)
+                </label>
+                <input
+                  id="reg-deps"
+                  type="text"
+                  placeholder="e.g. ffmpeg, python3"
+                  .value=${f.dependencies}
+                  @input=${set("dependencies")} />
+              </div>
+              <div class="reg-field">
+                <label for="reg-settings">
+                  Default settings (JSON)
+                </label>
+                <textarea
+                  id="reg-settings"
+                  placeholder='{"command": "/usr/local/bin/sdxl", "args": ["--prompt", "{prompt}", "--seed", "{seed}", "--out", "{output}"]}'
+                  .value=${f.default_settings}
+                  @input=${set("default_settings")}></textarea>
+              </div>
+              <div class="reg-field">
+                <label>
+                  <input
+                    type="checkbox"
+                    .checked=${f.enabled}
+                    @change=${set("enabled")} />
+                  Enabled on registration
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <div class="reg-actions">
+            <button
+              type="submit"
+              class="btn"
+              ?disabled=${this.regBusy}>
+              ${this.regBusy ? "Registering..." : "Register"}
+            </button>
+            <button type="reset" class="btn btn-secondary">Clear</button>
+          </div>
+        </form>
       </div>
     `;
   }
@@ -941,6 +1258,82 @@ export class ModelManager extends LitElement {
     this.llm = await api.updateLlmSettings(update);
     this.llmConfigured = this.llm.configured;
     this.llmDraft = { ...this.llmDraft, api_key: "" };
+  }
+
+  _registerReset() {
+    this.regForm = { ...EMPTY_REG_FORM };
+  }
+
+  async _registerSubmit(e) {
+    e.preventDefault();
+    const f = this.regForm;
+    if (!f.name.trim() || !f.version.trim()) {
+      this.error = "Name and version are required.";
+      return;
+    }
+    let settings = {};
+    if (f.default_settings.trim()) {
+      try {
+        const parsed = JSON.parse(f.default_settings);
+        if (
+          typeof parsed !== "object" || parsed === null ||
+          Array.isArray(parsed)
+        ) {
+          throw new Error("must be a JSON object");
+        }
+        settings = parsed;
+      } catch (err) {
+        this.error = `Default settings is not valid JSON: ${err.message}`;
+        return;
+      }
+    }
+    const payload = {
+      name: f.name.trim(),
+      version: f.version.trim(),
+      backend: f.backend,
+      task_types: f.tasks,
+      enabled: f.enabled,
+    };
+    if (f.source) payload.source = f.source;
+    if (f.source === "url" && f.repository_url.trim()) {
+      payload.repository_url = f.repository_url.trim();
+    }
+    if (f.source === "local" && f.source_path.trim()) {
+      payload.source_path = f.source_path.trim();
+    }
+    if (f.license.trim()) payload.license = f.license.trim();
+    const vram = Number(f.vram_requirement_mb);
+    if (f.vram_requirement_mb !== "" && Number.isFinite(vram)) {
+      payload.vram_requirement_mb = vram;
+    }
+    const ram = Number(f.ram_requirement_mb);
+    if (f.ram_requirement_mb !== "" && Number.isFinite(ram)) {
+      payload.ram_requirement_mb = ram;
+    }
+    const deps = f.dependencies
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (deps.length > 0) payload.dependencies = deps;
+    if (f.default_settings.trim()) payload.default_settings = settings;
+
+    this.regBusy = true;
+    this.error = "";
+    this.notice = null;
+    try {
+      await api.registerModel(payload);
+      this.notice = {
+        kind: "ok",
+        text: `"${payload.name}" registered.`,
+      };
+      this.showRegister = false;
+      this._registerReset();
+      await this._loadModels();
+    } catch (err) {
+      this.error = err.message || "Failed to register model.";
+    } finally {
+      this.regBusy = false;
+    }
   }
 
   async _run(id, fn, noticeFn) {

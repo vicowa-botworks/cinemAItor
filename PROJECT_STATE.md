@@ -607,6 +607,41 @@ The product track follows `MASTER-PLAN.md`.
       unique operationIds (legacy `/api/*` routes carry a `Legacy` infix so they never collide with
       their v1 twins), secured ops document 401; +10 backend steps; backend 474 + frontend 277 test
       steps green. `docs/openapi.md` covers the conventions
+- [x] GPU detection on nvidia-smi 590+ (driver ≥ 590, e.g. 595 on Blackwell): `nvidia-smi` rejects
+      the _entire_ `--query-gpu` when any field is invalid, and drivers ≥ 590 removed `cuda_version`
+      from the queryable fields — so the single 5-field query in `detectHardware` failed with exit
+      code 2 and both the models hardware and diagnostics endpoints reported "no GPU detected" on
+      machines whose only problem was a new driver. The core fields
+      (`name,memory.total,memory.used,driver_version`) are now queried separately and the CUDA
+      version is best-effort: `--query-gpu=cuda_version` on older drivers, falling back to the
+      `CUDA Version` line of `nvidia-smi -q` on the new ones (null when both fail). The
+      `dev:backend` / `start` tasks also gained `--allow-run` — without it `nvidia-smi` (and ffmpeg)
+      cannot be spawned at all, so GPU detection and real renders were impossible on those entry
+      points. +1 backend step (fake-`nvidia-smi`-on-PATH regression test emulating the 590+ field
+      rejection, green without a GPU); backend 475 + frontend 277 test steps green — see
+      `docs/models.md`
+- [x] Model registration UI: the models page had the `POST /api/v1/models` endpoint and the
+      `api.registerModel` client but no way to call them — even as admin there was no form to add a
+      model. `model-manager` now shows an admin-only **Register model** button (next to Refresh)
+      that toggles a registration panel: required `name` / `version` / `backend` (mock, local_cli,
+      comfyui, local_http), task-type multi-select (now including `transcribe`, which was also
+      missing from the task filter dropdown), optional source (`local` + path, `url` + repository
+      URL, or `mock`), license, VRAM/RAM requirements, and an Advanced section with `dependencies`,
+      `default_settings` (JSON object, parsed + validated client-side before submit), and the
+      enabled flag. The server's allowlist validation is unchanged; the task-type list in the
+      component now matches `MODEL_TASK_TYPES` exactly. Frontend-only — no new backend code;
+      `api.registerModel` already had API test coverage
+- [x] ComfyUI backend usability for hosted servers: the model health check unconditionally required
+      a local model file for every non-mock backend — a `comfyui` model pointed at a remote ComfyUI
+      (e.g. a hosted server with the checkpoints living there) always failed with "Model is not
+      installed (file missing)" and could never report its endpoint state. Remote backends
+      (`comfyui`, `local_http`) no longer require a local file: the endpoint probe is the runtime
+      check, and a local file is still checksum-verified when one is present. `docs/models.md`
+      gained a "Using a hosted ComfyUI" section (endpoint = base URL, workflow = API-format prompt
+      graph from "Save (API Format)" or `GET /history/<prompt_id>` — the URL fragment is the prompt
+      id — `{{prompt}}`/`{{seed}}`/`{{input:0}}` wiring, output-node requirement, no local install
+      needed, and why the ComfyUI "Save as Python script" export is the wrong artifact); +1 backend
+      test step
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -674,4 +709,10 @@ The product track follows `MASTER-PLAN.md`.
   encoder probe, preset validation): Sun Aug 23 2026
 - Email system (SMTP configuration, password reset, email confirmation, admin invitations): Mon Aug
   24 2026
+- GPU detection on nvidia-smi 590+ (split query + `-q` CUDA fallback; `--allow-run` on
+  `dev:backend`/`start`): Tue Aug 25 2026
 - OpenAPI API documentation (generated spec + Swagger UI + coverage tests): Mon Aug 24 2026
+- Model registration UI (admin-only form on the models page; `transcribe` added to task types): Tue
+  Aug 25 2026
+- ComfyUI hosted-server support (health check no longer requires a local file for remote backends
+  - hosted-ComfyUI docs): Tue Aug 25 2026

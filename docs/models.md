@@ -33,6 +33,29 @@ Read endpoints and benchmarks accept any authenticated user (both are measuremen
 are written); mutations (register/patch/delete/install) require the admin role. Everything is
 written to `audit_logs` (entity type `model`).
 
+## Registering models
+
+The model-manager page (`#/models`) shows a **Register model** button for admin users (next to
+Refresh), toggling a registration form that calls `POST /api/v1/models`:
+
+- **Required**: `name`, `version`, `backend` (`mock`, `local_cli`, `comfyui`, or `local_http` — see
+  the adapter tables below for the `default_settings` each backend expects; `local_http` has no
+  adapter yet, so jobs for such models fail).
+- **Task types**: multi-select of `text_to_image`, `image_to_image`, `image_to_video`,
+  `text_to_video`, `audio`, `music`, `voice`, `transcribe` — the model is offered for the generation
+  features of the checked tasks.
+- **Source** (optional): `local` (with `source_path`), `url` (with `repository_url`; installs from
+  URL sources require the consent prompt), or `mock`.
+- **Requirements** (optional): `vram_requirement_mb` / `ram_requirement_mb` — drive the hardware
+  requirement warnings.
+- **Advanced** (optional): `dependencies` (comma-separated in the form, validated against `PATH` by
+  `local_cli` health checks), `default_settings` (a JSON object, parsed client-side before submit),
+  and the enabled flag (a model can be registered disabled and enabled later).
+
+The server validates the backend, source, and task types against the same allowlists and answers
+`400` with the allowed values on mismatch; duplicate registrations are allowed (models are
+distinguished by id/name/version metadata).
+
 ## Behavior
 
 - **Install**: copies/downloads the source into the store, computes SHA-256, stores `file_hash` +
@@ -42,14 +65,17 @@ written to `audit_logs` (entity type `model`).
 - **Health check** per backend:
   - `mock` → always ok (simulated).
   - `local_cli` → file exists + checksum ok + all `dependencies` resolvable on `PATH`.
-  - `comfyui` / `local_http` → file exists + checksum ok + (if `default_settings.endpoint` is set)
-    the endpoint answers. Result is persisted (`health_status`, `health_error`,
-    `health_checked_at`).
+  - `comfyui` / `local_http` → (if `default_settings.endpoint` is set) the endpoint answers — the
+    runtime is remote, so no local file is required; a local file is still checksum-verified when
+    one is present. Result is persisted (`health_status`, `health_error`, `health_checked_at`).
 - **Hardware detection** (`detectHardware` in `services/hardware.ts`): platform, CPU count, and
   total RAM come from `/proc` (Linux) or `sysctl` (macOS); the GPU is detected via
-  `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version,cuda_version` (3s timeout,
-  first GPU on multi-GPU hosts). Memory fields are unit-aware (`MiB` is the nvidia-smi default),
-  e.g. `97871 MiB` → `vram_mb: 97871`. The GPU object is
+  `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version` (3s timeout, first GPU on
+  multi-GPU hosts). Memory fields are unit-aware (`MiB` is the nvidia-smi default), e.g. `97871 MiB`
+  → `vram_mb: 97871`. The CUDA version is a best-effort second query: `--query-gpu=cuda_version` on
+  older drivers, falling back to the `CUDA Version` line of `nvidia-smi -q` on drivers ≥ 590, where
+  the field was removed from the queryable set (nvidia-smi fails the _entire_ query when any field
+  is invalid, so the core fields must be queried separately). The GPU object is
   `{ vendor, model, vram_mb, vram_used_mb, driver_version, cuda_version }` with every field null
   when undetectable — both the models hardware endpoint and the diagnostics hardware report
   (DIA-001) return this same object, so the UIs must use these exact keys.
@@ -116,7 +142,7 @@ Example:
 
 ### comfyui
 
-Submits a workflow graph to a local ComfyUI server:
+Submits a workflow graph to a ComfyUI server (local or hosted):
 
 | `default_settings` key | Type        | Description                                                      |
 | ---------------------- | ----------- | ---------------------------------------------------------------- |
@@ -132,3 +158,24 @@ every second, surfaces `execution_error` details from the entry status, collects
 `images`/`gifs`/`videos` file ref from the node outputs, and downloads each through `GET /view`. An
 unreachable server, a rejected prompt, and a run with zero outputs all fail the job; cancellation
 issues `POST /interrupt`.
+
+**Using a hosted ComfyUI** (e.g. `https://comfyui.internal.example.com`):
+
+- `endpoint` is the server base URL (no trailing path) — it must be reachable from the server
+  hosting this app. The health check probes it directly, and remote backends need **no local model
+  install**: register + enable is all that's required.
+- `workflow` is the API-format prompt graph (node map), not the UI workflow JSON. Get it from the
+  ComfyUI UI via **Save (API Format)**, or — if the workflow has been queued at least once — from
+  `GET /history/<prompt_id>` on the server: the fragment of a ComfyUI URL is the prompt id, and the
+  entry's `prompt` field is exactly the graph the adapter submits.
+- Wire the placeholders: the prompt goes into the text-encode node(s) value as `{{prompt}}`, the
+  sampler seed node value as `"{{seed}}"`, and (for image-to-video/image-to-image) the image-load
+  node value as `"{{input:0}}"` — the app uploads the job's input asset (e.g. a panel preview)
+  before submitting.
+- The workflow must contain at least one node whose outputs include an `images`/`gifs`/`videos`
+  entry (e.g. Save Image, a video-combine node) — a run with zero such outputs fails the job.
+- Each job run submits the workflow once with the job's seed; re-running a job with the same seed is
+  reproducible on the ComfyUI side.
+- The ComfyUI UI's "Save as Python script" export is a standalone local runner and is **not** what
+  this backend consumes — for a hosted server, use the HTTP API path above (or, if you want to run
+  the script yourself locally, register the model with the `local_cli` backend instead).

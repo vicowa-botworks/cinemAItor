@@ -372,6 +372,35 @@ describe("model manager", () => {
     assertEquals(updated?.health_error, "boom");
   });
 
+  it("health check: remote backends are healthy without a local file", async () => {
+    const comfyDown = registerModel(userId, {
+      name: "comfy-remote-down",
+      version: "1.0",
+      backend: "comfyui",
+      task_types: ["text_to_image"],
+      default_settings: { endpoint: "http://127.0.0.1:1/health", workflow: { "1": {} } },
+    });
+    const unreachable = await checkModelHealth(layout, comfyDown);
+    assertEquals(unreachable.status, "error");
+    assert(unreachable.message.includes("unreachable"));
+
+    const server = await mockDownloadServer(new Uint8Array([1]));
+    try {
+      const comfyUp = registerModel(userId, {
+        name: "comfy-remote-up",
+        version: "1.0",
+        backend: "comfyui",
+        task_types: ["text_to_image"],
+        default_settings: { endpoint: `${server.url}/health`, workflow: { "1": {} } },
+      });
+      const ok = await checkModelHealth(layout, comfyUp);
+      assertEquals(ok.status, "ok");
+      assert(ok.message.includes("remote runtime"));
+    } finally {
+      server.stop();
+    }
+  });
+
   it("removes model files and registry entry", async () => {
     const m = registerT2I();
     const src = await writeSourceFile("rm-src.bin", new Uint8Array([3]));
@@ -419,9 +448,19 @@ describe("model manager", () => {
   it("detects an nvidia gpu through nvidia-smi on PATH", async () => {
     const binDir = await Deno.makeTempDir();
     const bin = join(binDir, "nvidia-smi");
+    // Argument-aware fake emulating an nvidia-smi where `cuda_version` is
+    // still a valid --query-gpu field (drivers < 590).
     await Deno.writeTextFile(
       bin,
-      "#!/bin/sh\necho 'NVIDIA RTX PRO 6000 Blackwell Max-Q, 97871 MiB, 2048 MiB, 570.81.09, 12.6'\n",
+      [
+        "#!/bin/sh",
+        'case "$*" in',
+        "  *--query-gpu=cuda_version*) printf '12.6\\n' ;;",
+        "  *--query-gpu=*) printf 'NVIDIA RTX PRO 6000 Blackwell Max-Q, 97871 MiB, 2048 MiB, 570.81.09\\n' ;;",
+        "  *) printf 'CUDA Version                                         : 12.6\\n' ;;",
+        "esac",
+        "",
+      ].join("\n"),
     );
     await Deno.chmod(bin, 0o755);
     const oldPath = Deno.env.get("PATH") ?? "";
@@ -434,6 +473,42 @@ describe("model manager", () => {
       assertEquals(hw.gpu?.vram_used_mb, 2048);
       assertEquals(hw.gpu?.driver_version, "570.81.09");
       assertEquals(hw.gpu?.cuda_version, "12.6");
+    } finally {
+      Deno.env.set("PATH", oldPath);
+      await Deno.remove(binDir, { recursive: true });
+    }
+  });
+
+  it("still detects the gpu when cuda_version is not a queryable field (driver >= 590)", async () => {
+    const binDir = await Deno.makeTempDir();
+    const bin = join(binDir, "nvidia-smi");
+    // Emulates nvidia-smi 590+ (e.g. driver 595 on Blackwell): a query that
+    // contains `cuda_version` fails the whole command, so the CUDA version
+    // can only be read from the `-q` detailed output.
+    await Deno.writeTextFile(
+      bin,
+      [
+        "#!/bin/sh",
+        'case "$*" in',
+        "  *--query-gpu=cuda_version*) echo 'Field \"cuda_version\" is not a valid field to query.' >&2; exit 2 ;;",
+        "  *--query-gpu=*) printf 'NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 97887 MiB, 85515 MiB, 595.84\\n' ;;",
+        "  *) printf 'CUDA Version                                         : 13.2\\n' ;;",
+        "esac",
+        "",
+      ].join("\n"),
+    );
+    await Deno.chmod(bin, 0o755);
+    const oldPath = Deno.env.get("PATH") ?? "";
+    Deno.env.set("PATH", `${binDir}:${oldPath}`);
+    try {
+      const hw = await detectHardware();
+      assertEquals(hw.gpu?.vendor, "nvidia");
+      assertEquals(hw.gpu?.model, "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition");
+      assertEquals(hw.gpu?.vram_mb, 97887);
+      assertEquals(hw.gpu?.vram_used_mb, 85515);
+      assertEquals(hw.gpu?.driver_version, "595.84");
+      // Fallback to the `-q` detailed output must recover the CUDA version.
+      assertEquals(hw.gpu?.cuda_version, "13.2");
     } finally {
       Deno.env.set("PATH", oldPath);
       await Deno.remove(binDir, { recursive: true });
