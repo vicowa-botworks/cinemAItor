@@ -59,7 +59,9 @@ function parseDefinitionField(body: Record<string, unknown>): SkillDefinition {
 export const skillsRouter = new Router()
   .get("/api/v1/skills", authMiddleware, (ctx, _next) => {
     void requireUserId(ctx);
-    ctx.response.body = listSkills();
+    // ?assistant=1 narrows the list to prompt-creation skills (an `assistant`
+    // block in the definition) for the assist dialog's picker.
+    ctx.response.body = listSkills(ctx.request.url.searchParams.get("assistant") === "1");
   })
   .post("/api/v1/skills", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
@@ -154,6 +156,13 @@ function updateSkillOrCreate(
 export const openApiOps: Record<string, OperationMeta> = {
   "GET /api/v1/skills": {
     summary: "List skills (v1: JSON audio-generation definitions)",
+    parameters: {
+      assistant: {
+        schema: { type: "string", enum: ["1"] },
+        description:
+          'When "1", only skills carrying an assistant block (prompt-creation skills) are listed',
+      },
+    },
     responses: {
       200: {
         description: "The skills",
