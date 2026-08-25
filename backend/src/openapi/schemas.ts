@@ -2555,6 +2555,29 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       created_by_user_id: { type: ["integer", "null"] },
     },
   },
+
+  /** LLM endpoint settings as returned to admins (API key masked). */
+  LlmSettings: {
+    type: "object",
+    required: [
+      "enabled",
+      "baseUrl",
+      "apiKeySet",
+      "model",
+      "temperature",
+      "maxTokens",
+      "timeoutSeconds",
+    ],
+    properties: {
+      enabled: { type: "boolean" },
+      baseUrl: { type: "string" },
+      apiKeySet: { type: "boolean", description: "Whether an API key is stored" },
+      model: { type: "string" },
+      temperature: { type: "string", description: "Empty string = not set" },
+      maxTokens: { type: "string", description: "Empty string = not set" },
+      timeoutSeconds: { type: "integer" },
+    },
+  },
 };
 
 /** Tag descriptions shown in Swagger UI's tag list. */
@@ -2578,6 +2601,7 @@ export const TAG_DESCRIPTIONS: Record<string, string> = {
   references: "@reference parsing, audit and repair",
   timelines: "Timelines, tracks, items, markers, snapshots, scoring",
   diagnostics: "Hardware, storage, logs, backups, diagnostics",
+  llm: "LLM assistant: endpoint settings, chat, creative assist, Model Copilot",
   openapi: "API documentation endpoints",
 };
 

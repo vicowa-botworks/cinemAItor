@@ -1267,6 +1267,30 @@ GET    /api/v1/diagnostics/logs
 POST   /api/v1/diagnostics/export
 ```
 
+## 8.14 LLM Assistant & Model Copilot (Workstream 16)
+
+```text
+GET    /api/v1/llm/settings               (admin) LLM endpoint settings; api key as boolean flag only
+PUT    /api/v1/llm/settings               (admin) partial update: base_url/model/api_key/temperature/max_tokens/timeout/enabled
+POST   /api/v1/llm/test                   (admin) connection test, minimal completion, reports latency/error
+POST   /api/v1/llm/chat                   (any auth) one-shot chat {messages, model?, temperature?, max_tokens?}
+POST   /api/v1/llm/assist                 (any auth) creative assist: purpose write_script|design_scene|enhance_prompt
+                                           + context, model_id?, skill_id? (see section 37)
+POST   /api/v1/llm/agent                  (any auth) Model Copilot chat: bounded tool-calling loop;
+                                           mutating tools return approval proposals, not execution
+POST   /api/v1/llm/agent/proposals/:id/approve   (admin) execute a pending mutating tool proposal
+POST   /api/v1/llm/agent/proposals/:id/reject    (admin) reject a pending mutating tool proposal
+```
+
+HuggingFace catalog (mounted under the models routes):
+
+```text
+GET    /api/v1/models/huggingface/search?q=&filter=&limit=   (any auth) search public HF repos
+GET    /api/v1/models/huggingface/:repoId                    (any auth) repo metadata + file listing
+POST   /api/v1/models/from-huggingface                       (admin) register a model row from a repo
+                                           (source: url; install remains the consent-gated install flow)
+```
+
 ---
 
 # 9. Core Workstreams
@@ -1462,9 +1486,50 @@ Later:
 - 3D import/preview/reference
 - Script parser
 - Continuity analysis
-- AI assistant
+- AI assistant (executed as Workstream 16)
 - Advanced render
 - Optional cloud gateway
+
+## Workstream 16: LLM Assistant & Model Copilot
+
+Goal: make the app approachable for new users by embedding a configurable local LLM as a creative
+and operational helper, and giving the LLM a bounded tool harness so it can look up model details on
+HuggingFace, register/install generation models, and help connect runtimes (ComfyUI, llama.cpp,
+Ollama).
+
+Scope:
+
+- LLM endpoint configuration on the Models page (separate section): an OpenAI-compatible chat
+  endpoint (llama.cpp server, Ollama `/v1`, LM Studio, vLLM, or any compatible local runner), with
+  model name, optional API key, temperature, max tokens, timeout, and a connection test
+- One-shot chat endpoint (synchronous, bounded by timeout — not a queued job; the user waits)
+- Creative assist purposes: `write_script` (idea → Fountain-lite screenplay, importable),
+  `design_scene` (scene design: description, shots, camera, mood, lighting, dialogue),
+  `enhance_prompt` (rewrite a generation prompt for a target model/task, preserving `@refs`)
+- AI-assist UI in the creative surfaces (prompt editor, scene list import, scene detail)
+- Skills as prompt-creation knowledge: a skill definition may carry an `assistant` block (guidance +
+  example prompts) that the assistant injects when writing prompts — e.g. a "text-to-video
+  prompting" skill for a specific T2V model family
+- Model-aware assist context: the target model's metadata (task types, limitations, defaults) plus
+  selected skill guidance shape the system prompt
+- HuggingFace integration (server-side proxy of the public HF API, explicit user action): search,
+  repository/file listing, and auto-register a model row from a repo (weights then install through
+  the normal consent-gated install flow)
+- Tool harness ("Model Copilot"): the LLM calls named tools through OpenAI-style function calling in
+  a bounded loop; read-only tools (list models, HF search/info, ComfyUI status) run automatically;
+  mutating tools (register/install/remove model) are recorded as proposals the user explicitly
+  approves or rejects in the UI (admin-gated)
+- ComfyUI helper: the copilot probes an endpoint (`/system_stats`), inspects available models, and
+  proposes registering a comfyui-backend model with a workflow
+
+Non-goals (v1):
+
+- No streaming responses; no persistent multi-session memory (history is per-request)
+- No arbitrary code execution; no mutating tool without explicit user approval
+- Approvals are in-memory (TTL-bounded), not durable across restarts
+- No public cloud LLM services — endpoints are local/user-controlled
+
+Detailed design: section 37.
 
 ---
 
@@ -1806,7 +1871,8 @@ Expand into advanced local film production.
 - 3D as reference
 - Advanced 3D pipeline later
 - Script parser
-- AI assistant
+- AI assistant (executed as Workstream 16: LLM endpoint settings, creative assist, skill prompt
+  guidance, HuggingFace catalog, Model Copilot tool harness — section 37)
 - Continuity analyzer
 - AI “watch the movie” music
 - Music stems
@@ -2145,6 +2211,27 @@ Post-MVP, JSON/YAML first.
 | SKL-011 | Skill import/export  | Portable skill file supported       |
 | SKL-012 | Skill testing        | Test cases can be run               |
 | SKL-013 | Skill chaining       | Multiple skills can run in sequence |
+
+## 11.19 LLM Assistant & Model Copilot (Workstream 16)
+
+| ID      | Feature                          | Acceptance criteria                                                                                                                                                                                                  |
+| ------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LMA-001 | LLM endpoint settings            | Models page has a separate LLM section; stores base URL, model, optional API key, temperature, max tokens, timeout, enabled flag in `app_settings`; GET never returns the raw key                                    |
+| LMA-002 | LLM connection test              | `POST /api/v1/llm/test` performs a minimal completion against the configured OpenAI-compatible endpoint and reports ok + latency or a precise error; 503 when unconfigured                                           |
+| LMA-003 | One-shot chat                    | `POST /api/v1/llm/chat` sends messages to the endpoint and returns `{content, model, usage?}`; bounded by timeout; 503 when unconfigured                                                                             |
+| LMA-004 | Script writing assist            | `POST /api/v1/llm/assist` with `purpose: write_script` turns a movie idea into Fountain-lite screenplay text the scene-list script import can parse                                                                  |
+| LMA-005 | Scene design assist              | `purpose: design_scene` returns a structured scene design (description, shots with camera/movement, mood, lighting, time of day, dialogue) from a context string                                                     |
+| LMA-006 | Prompt enhancement               | `purpose: enhance_prompt` rewrites a generation prompt for a target model/task type; existing `@reference` tokens are preserved verbatim                                                                             |
+| LMA-007 | AI-assist UI                     | Prompt editor, scene-list import, and scene detail offer an AI-assist dialog: context, run, copy/apply the result; disabled with tooltip when no LLM is configured                                                   |
+| LMA-008 | Skill assistant block            | Skill definitions accept an optional `assistant` block (`model_task_types`, `guidance`, `examples`); validation + version snapshots include it                                                                       |
+| LMA-009 | Model-aware assist context       | Assist requests may pass `model_id` (model metadata injected) and `skill_id` (assistant guidance + examples injected); the target model must be enabled                                                              |
+| LMA-010 | HuggingFace search + repo detail | `GET /api/v1/models/huggingface/search` and `GET /api/v1/models/huggingface/:repoId` proxy the public HF API server-side; normalized repo metadata + file listing with sizes                                         |
+| LMA-011 | Auto-register from HuggingFace   | `POST /api/v1/models/from-huggingface` (admin) creates a model row with `source: url` pointing at the chosen repo file (explicit or heuristic pick); install remains the consent-gated install flow                  |
+| LMA-012 | HF browse panel                  | Models page panel: search box, results table, repo file picker, register button; installed state then uses the normal install/verify flow                                                                            |
+| LMA-013 | Tool harness                     | Named tools with JSON schemas: read-only tools (list models, HF search/info, ComfyUI status) auto-execute; mutating tools (register model, register from HF, install, remove) are admin-gated and never auto-execute |
+| LMA-014 | Agent chat (Model Copilot)       | `POST /api/v1/llm/agent` runs a bounded tool-calling loop (max 8 iterations); mutating tool calls are recorded as in-memory proposals (1h TTL) and the model is told to ask the user to approve in the UI            |
+| LMA-015 | ComfyUI connection helper        | Copilot can probe a ComfyUI endpoint (`/system_stats`), report queue/GPU state, and propose registering a comfyui-backend model with endpoint + workflow                                                             |
+| LMA-016 | Model Copilot UI                 | Models page copilot section: chat panel, tool-call activity log, and proposal cards with Approve/Reject (admin) that show the exact tool + arguments                                                                 |
 
 ---
 
@@ -3377,9 +3464,19 @@ The recommended implementation order is:
 - 3D
 - script parser
 - continuity
-- AI assistant
+- AI assistant (executed as Step 10 / Workstream 16)
 - advanced render
 - optional cloud gateway
+
+## Step 10: LLM Assistant & Model Copilot
+
+- LMA-001 through LMA-003 (LLM endpoint settings, test, one-shot chat)
+- LMA-004 through LMA-007 (assist purposes + creative UI)
+- LMA-008 through LMA-009 (skill prompt-creation guidance, model-aware context)
+- LMA-010 through LMA-012 (HuggingFace catalog + auto-register)
+- LMA-013 through LMA-016 (tool harness, agent, ComfyUI helper, copilot UI)
+
+Design: section 37.
 
 ---
 
@@ -3589,3 +3686,159 @@ The MVP should be judged by one question:
 > user-controlled hardware?
 
 If yes, the product core is validated.
+
+---
+
+# 37. LLM Assistant & Model Copilot Design (Workstream 16)
+
+## Purpose
+
+New users face three walls: they do not know how to write good prompts, which models to install, or
+how to connect a runtime such as ComfyUI. A local LLM (llama.cpp server, Ollama, LM Studio, vLLM, or
+any OpenAI-compatible endpoint) removes those walls: it writes and improves prompts, designs scenes,
+and — through a bounded tool harness — looks up model details on HuggingFace and registers/installs
+models, with every mutating action explicitly approved by the user.
+
+Local-first rule: the endpoint is always user-controlled. No public cloud LLM services are called by
+the app itself.
+
+## Configuration & Transport
+
+- Settings live in `app_settings` (same mechanism as the SMTP settings): `llm_enabled`,
+  `llm_base_url`, `llm_api_key`, `llm_model`, `llm_temperature`, `llm_max_tokens`,
+  `llm_timeout_seconds`.
+- `llm_base_url` is the server root (e.g. `http://127.0.0.1:11434/v1` for Ollama,
+  `http://127.0.0.1:8080/v1` for llama.cpp). The client POSTs to `{base_url}/chat/completions` — the
+  OpenAI-compatible shape, which all supported runners expose. `Authorization: Bearer <key>` is sent
+  only when a key is set.
+- All LLM calls are **synchronous and bounded** (default timeout 60 s, configurable). They are not
+  queued jobs: the user is waiting, and a hung local runner should fail fast and loudly. Media
+  generation stays in the job queue.
+- Error mapping: not configured → `503 LLM_NOT_CONFIGURED`; network failure → `502 LLM_UNREACHABLE`;
+  401/403 → `502 LLM_AUTH_FAILED`; 404 → `502 LLM_MODEL_NOT_FOUND`; timeout → `504 LLM_TIMEOUT`;
+  non-JSON/unexpected → `502 LLM_BAD_RESPONSE`.
+- The API key is never returned: `GET /api/v1/llm/settings` exposes `api_key_set` only; `PUT`
+  accepts a new key string or `null` to clear. A `GET /api/v1/llm/status` (any authenticated user)
+  returns `{configured: boolean}` so the creative UIs can enable/disable their AI buttons without
+  admin rights.
+
+## Assist purposes
+
+`POST /api/v1/llm/assist` takes `{purpose, context, model_id?, skill_id?, max_tokens?}`:
+
+- `write_script` — context is a movie idea/outline; the system prompt makes the model answer with
+  Fountain-lite only (scene headings `INT./EXT. … - TIME`, action, character names in caps,
+  dialogue). The output is directly pasteable into the scene-list script import.
+- `design_scene` — context is a story beat/panel summary; the system prompt fixes the answer shape:
+  Overview, Mood & Tone, numbered Shots (description, camera, movement, duration), Lighting, Time of
+  day, Dialogue.
+- `enhance_prompt` — context is the current prompt; with `model_id` the model's metadata (name, task
+  types, known limitations, default settings) is injected into the system prompt; with `skill_id`
+  the skill's assistant block (below) is injected. Existing `@reference` tokens must survive
+  verbatim (the system prompt enforces this; a post-check strips any lost refs back in).
+
+System prompts live in `services/llm_assist.ts` as versioned constants.
+
+## Skills as prompt knowledge
+
+A skill definition may carry an optional `assistant` block:
+
+```json
+"assistant": {
+  "model_task_types": ["text_to_video"],
+  "guidance": "How to write prompts for this model family: motion verbs, camera language,
+               what to avoid, style keywords that work…",
+  "examples": [ { "prompt": "…", "notes": "why this works" } ]
+}
+```
+
+- Validation: `guidance` ≤ 4000 chars; `examples` ≤ 8 (each `prompt` ≤ 2000, `notes` ≤ 500);
+  `model_task_types` a non-empty subset of known task types when present.
+- Skills with an `assistant` block are "prompt-creation skills" — e.g. one per T2V model family with
+  the vocabulary that model responds to.
+- `GET /api/v1/skills?assistant=1` lists them for the assist dialog's picker.
+- Assist with `skill_id` + `model_id`: the skill's task types must overlap the model's (400 with a
+  precise message otherwise). A seeded system skill `sys-t2v-prompting` provides general
+  text-to-video prompting guidance out of the box.
+
+## HuggingFace catalog
+
+`services/huggingface.ts` proxies the **public** HuggingFace REST API server-side
+(`https://huggingface.co/api/models…`, no token required for public reads, 15 s timeout):
+
+- `GET /api/v1/models/huggingface/search?q=&filter=&limit=` → normalized
+  `{id, likes, downloads, pipeline_tag, tags, license}` per repo.
+- `GET /api/v1/models/huggingface/:repoId` → repo metadata + file listing with sizes (`/tree/main`).
+- `POST /api/v1/models/from-huggingface` (admin) —
+  `{repo_id, file?, backend?, task_types?,
+  name?, version?, min_vram_mb?, dependencies?, known_limitations?}`:
+  fetches the file listing, picks the weight file (explicit `file` or heuristic: largest file among
+  `.safetensors` / `.gguf` / `.ckpt` / `.bin`), and registers a model row with `source: "url"`,
+  `file_url` = `https://huggingface.co/<repo>/resolve/main/<file>`, `repository_url` = the repo
+  page. Weights are **not** downloaded here — the normal consent-gated `POST /:id/install` flow does
+  that. `409` when the slugified id already exists; `400` when no usable weight file is found.
+
+The Models page gets a "Browse HuggingFace" panel (search → results → file picker → Register), so a
+new user can go from "I want a good image model" to an installed model in three clicks.
+
+## Tool harness & Model Copilot
+
+The LLM can call named tools through OpenAI-style function calling in a bounded loop
+(`POST /api/v1/llm/agent`, max 8 tool iterations):
+
+- **Read-only tools (auto-execute):** `list_models`, `model_info`, `list_skills`,
+  `huggingface_search`, `huggingface_model_info`, `comfyui_status` (GETs the endpoint's
+  `/system_stats`: queue, devices, VRAM).
+- **Mutating tools (admin-only, never auto-execute):** `register_model`,
+  `register_model_from_huggingface`, `install_model`, `remove_model`. When the model calls one, the
+  harness records a **proposal** (in-memory, 1 h TTL: tool + exact args), tells the model "proposal
+  `X` created — ask the user to approve it in the UI", and the final response returns the proposals
+  to the client. The UI renders a proposal card with Approve/Reject; approve executes the stored
+  call (re-checking admin + validation) and feeds the result back to the user.
+- Non-admin users only see read-only tools in the schema, so the copilot degrades to a consultant
+  for them.
+- The copilot system prompt includes the live context: number of registered models, which task types
+  are covered, whether the LLM itself is the only configured model, etc.
+
+**ComfyUI helper:** the same harness covers connecting ComfyUI — the user pastes the endpoint, the
+copilot probes `/system_stats`, reports what it sees, and proposes a comfyui-backend model row
+(endpoint in `default_settings`, workflow JSON in `workflow_json`) for approval.
+
+## Frontend
+
+- **Models page** (no new route; three new sections under `model-manager`):
+  - _LLM Assistant_ panel (admin edits; everyone sees a configured/not chip): base URL, model, API
+    key (blank = keep), temperature, max tokens, timeout, enable, Save + Test connection.
+  - _Browse HuggingFace_ panel: search, results, file picker, Register.
+  - _Model Copilot_ panel (admin): chat box, tool-call activity, proposal cards.
+- **AI-assist dialog** (new shared component, `ai-assist-dialog.js`): purpose-specific context
+  field(s), optional model + skill pickers for `enhance_prompt`, Run, result with Copy / Insert.
+  Wired into the prompt editor (enhance), scene-list import dialog (write script), and scene detail
+  (design scene / shot prompts). Buttons disable with a tooltip when `GET /api/v1/llm/status`
+  reports unconfigured.
+
+## Tests
+
+- LLM client against an in-process fake OpenAI server (`Deno.serve`): success, tool calls, 401/404,
+  timeout, bad JSON.
+- Settings store round-trip + key masking.
+- Route tests: settings masking, status, chat 503/success, assist purpose validation +
+  ref-preservation post-check, agent loop (read-only auto-execution, mutating → proposal,
+  approve/reject lifecycle, non-admin tool visibility).
+- HuggingFace client against a fake HF server (search mapping, repo, tree) + from-huggingface
+  register (success, 409, no-weight-file 400).
+- Skill definition validation for the `assistant` block.
+
+## Documentation
+
+- `docs/llm.md` — full contract (settings keys, error codes, purposes, agent/proposals, tools,
+  HuggingFace behavior).
+- `docs/models.md` — HuggingFace browse + auto-register section.
+- `docs/skills.md` — assistant block section.
+
+## Non-goals (v1)
+
+- No streaming responses; history is per-request (the UI keeps the visible thread).
+- No persistent multi-session memory; proposals are in-memory (TTL 1 h, lost on restart).
+- No arbitrary code execution; no mutating tool without explicit approval.
+- No public cloud LLM endpoints by design (the user points the app at their runner).

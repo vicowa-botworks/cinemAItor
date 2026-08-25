@@ -318,6 +318,70 @@ export class ModelManager extends LitElement {
       color: var(--color-text-muted);
       font-weight: 500;
     }
+
+    .llm-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .llm-head h3 {
+      margin: 0;
+    }
+
+    .llm-form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+      max-width: 640px;
+    }
+
+    .llm-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .llm-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .llm-field.wide {
+      grid-column: 1 / -1;
+    }
+
+    .llm-field label {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .llm-field input[type="text"],
+    .llm-field input[type="password"],
+    .llm-field input[type="number"] {
+      padding: 8px 10px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text);
+      font-size: 13px;
+    }
+
+    .llm-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .llm-check input {
+      accent-color: var(--color-primary);
+    }
   `;
 
   static properties = {
@@ -334,6 +398,12 @@ export class ModelManager extends LitElement {
     query: { state: true },
     benchmarks: { state: true },
     benchBusyId: { state: true },
+    llm: { state: true },
+    llmConfigured: { state: true },
+    llmDraft: { state: true },
+    llmBusy: { state: true },
+    llmNotice: { state: true },
+    llmError: { state: true },
   };
 
   constructor() {
@@ -351,6 +421,12 @@ export class ModelManager extends LitElement {
     this.query = "";
     this.benchmarks = {};
     this.benchBusyId = null;
+    this.llm = null;
+    this.llmConfigured = false;
+    this.llmDraft = null;
+    this.llmBusy = null;
+    this.llmNotice = null;
+    this.llmError = "";
     this._queryTimer = null;
   }
 
@@ -414,6 +490,112 @@ export class ModelManager extends LitElement {
               )}
             `
             : html`<div class="empty">No hardware report available.</div>`}
+        </div>
+
+        <div class="panel">
+          <div class="llm-head">
+            <h3>LLM Assistant</h3>
+            <span class="chip ${this.llmConfigured ? "enabled" : "disabled"}">
+              ${this.llmConfigured ? "configured" : "not configured"}
+            </span>
+          </div>
+          <p class="admin-note">
+            Point this at an OpenAI-compatible endpoint (llama.cpp server, Ollama
+            <code>/v1</code>, LM Studio, ...). The endpoint powers the writing
+            assistant and the Model Copilot.
+          </p>
+          ${this.isAdmin && this.llm
+            ? html`
+              <div class="llm-form">
+                <label class="llm-check">
+                  <input
+                    type="checkbox"
+                    .checked=${this.llmDraft.enabled}
+                    @change=${(e) => this._llmSetField("enabled", e.target.checked)} />
+                  Enable the LLM assistant
+                </label>
+                <div class="llm-grid">
+                  <div class="llm-field wide">
+                    <label for="llm-base-url">Base URL</label>
+                    <input
+                      id="llm-base-url"
+                      type="text"
+                      placeholder="http://localhost:8080/v1"
+                      .value=${this.llmDraft.base_url}
+                      @input=${(e) => this._llmSetField("base_url", e.target.value)} />
+                  </div>
+                  <div class="llm-field">
+                    <label for="llm-model">Model</label>
+                    <input
+                      id="llm-model"
+                      type="text"
+                      placeholder="qwen3:8b"
+                      .value=${this.llmDraft.model}
+                      @input=${(e) => this._llmSetField("model", e.target.value)} />
+                  </div>
+                  <div class="llm-field">
+                    <label for="llm-api-key">API key</label>
+                    <input
+                      id="llm-api-key"
+                      type="password"
+                      placeholder=${this.llm.apiKeySet
+                        ? "set — leave empty to keep"
+                        : "none (most local runners need no key)"}
+                      .value=${this.llmDraft.api_key}
+                      @input=${(e) => this._llmSetField("api_key", e.target.value)} />
+                  </div>
+                  <div class="llm-field">
+                    <label for="llm-temperature">Temperature</label>
+                    <input
+                      id="llm-temperature"
+                      type="text"
+                      placeholder="0.7 (default)"
+                      .value=${this.llmDraft.temperature}
+                      @input=${(e) => this._llmSetField("temperature", e.target.value)} />
+                  </div>
+                  <div class="llm-field">
+                    <label for="llm-max-tokens">Max tokens</label>
+                    <input
+                      id="llm-max-tokens"
+                      type="text"
+                      placeholder="server default"
+                      .value=${this.llmDraft.max_tokens}
+                      @input=${(e) => this._llmSetField("max_tokens", e.target.value)} />
+                  </div>
+                  <div class="llm-field">
+                    <label for="llm-timeout">Timeout (s)</label>
+                    <input
+                      id="llm-timeout"
+                      type="number"
+                      min="1"
+                      max="600"
+                      .value=${this.llmDraft.timeout_seconds}
+                      @input=${(e) => this._llmSetField("timeout_seconds", e.target.value)} />
+                  </div>
+                </div>
+                <div class="model-actions">
+                  <button
+                    class="btn-small"
+                    ?disabled=${this.llmBusy !== null}
+                    @click=${() => this._testLlm()}>
+                    ${this.llmBusy === "test" ? "Testing..." : "Test connection"}
+                  </button>
+                  <button
+                    class="btn-small"
+                    ?disabled=${this.llmBusy !== null}
+                    @click=${() => this._saveLlm()}>
+                    ${this.llmBusy === "save" ? "Saving..." : "Save settings"}
+                  </button>
+                </div>
+                ${this.llmNotice
+                  ? html`<div class="notice ${this.llmNotice.kind}">${this.llmNotice.text}</div>`
+                  : null}
+                ${this.llmError ? html`<div class="error">${this.llmError}</div>` : null}
+              </div>
+            `
+            : !this.isAdmin
+            ? html`<p class="admin-note">Only admins can change the LLM settings.</p>`
+            : null}
         </div>
 
         <div class="panel">
@@ -630,6 +812,7 @@ export class ModelManager extends LitElement {
       await this._loadModels();
       await this._loadHardware();
       await this._loadBenchmarks();
+      await this._loadLlm();
     } finally {
       this.loading = false;
     }
@@ -675,6 +858,89 @@ export class ModelManager extends LitElement {
       this.hardware = null;
       this.hwWarnings = [];
     }
+  }
+
+  async _loadLlm() {
+    try {
+      if (this.isAdmin) {
+        this.llm = await api.getLlmSettings();
+        this.llmConfigured = this.llm.configured;
+        this.llmDraft = {
+          enabled: this.llm.enabled,
+          base_url: this.llm.baseUrl,
+          api_key: "",
+          model: this.llm.model,
+          temperature: this.llm.temperature,
+          max_tokens: this.llm.maxTokens,
+          timeout_seconds: this.llm.timeoutSeconds,
+        };
+      } else {
+        const status = await api.getLlmStatus();
+        this.llmConfigured = status.configured;
+      }
+    } catch {
+      this.llm = null;
+      this.llmConfigured = false;
+    }
+  }
+
+  _llmSetField(key, value) {
+    this.llmDraft = { ...this.llmDraft, [key]: value };
+  }
+
+  async _saveLlm() {
+    this.llmBusy = "save";
+    this.llmNotice = null;
+    this.llmError = "";
+    try {
+      await this._persistLlmDraft();
+      this.llmNotice = {
+        kind: "ok",
+        text: this.llmConfigured
+          ? "LLM settings saved and the assistant is configured."
+          : "LLM settings saved. Enable the assistant and set a URL + model to activate it.",
+      };
+    } catch (err) {
+      this.llmError = err.message || "Failed to save LLM settings.";
+    } finally {
+      this.llmBusy = null;
+    }
+  }
+
+  async _testLlm() {
+    this.llmBusy = "test";
+    this.llmNotice = null;
+    this.llmError = "";
+    try {
+      // The test endpoint probes the saved settings, so persist the draft
+      // first — testing the form is the point of the button.
+      await this._persistLlmDraft();
+      const result = await api.testLlm();
+      this.llmNotice = {
+        kind: "ok",
+        text: `Connection OK — "${result.model}" answered in ${result.latency_ms} ms.`,
+      };
+    } catch (err) {
+      this.llmError = err.message || "Connection test failed.";
+    } finally {
+      this.llmBusy = null;
+    }
+  }
+
+  async _persistLlmDraft() {
+    const d = this.llmDraft;
+    const update = {
+      enabled: d.enabled,
+      base_url: d.base_url.trim(),
+      model: d.model.trim(),
+      temperature: d.temperature.trim(),
+      max_tokens: d.max_tokens.trim(),
+      timeout_seconds: Number(d.timeout_seconds) || 60,
+    };
+    if (d.api_key.trim() !== "") update.api_key = d.api_key.trim();
+    this.llm = await api.updateLlmSettings(update);
+    this.llmConfigured = this.llm.configured;
+    this.llmDraft = { ...this.llmDraft, api_key: "" };
   }
 
   async _run(id, fn, noticeFn) {
