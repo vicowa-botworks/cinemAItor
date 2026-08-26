@@ -187,7 +187,10 @@ app-root (main router)
 - **Hash-based routing**: Simple client-side routing without server configuration
 - **Custom events**: Components communicate via `CustomEvent` dispatching
 - **API client**: Singleton `ApiClient` class handles all HTTP communication with automatic token
-  injection
+  injection. Every request is guarded by an AbortController timeout (120 s default) so a dead or
+  restarting server fails with a clear `TIMEOUT` ApiError instead of hanging the UI forever;
+  legitimately long endpoints override it (`timeoutMs` — raw uploads 30 min, media streams 5 min,
+  LLM loops + backups 15 min, synchronous model installs unlimited; see `api.js`)
 
 ### Backend Architecture
 

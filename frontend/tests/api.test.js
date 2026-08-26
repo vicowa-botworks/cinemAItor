@@ -1164,4 +1164,87 @@ describe("ApiClient", () => {
       assertEquals(await api.logout(), null);
     });
   });
+
+  describe("request timeout", () => {
+    function hangingFetch() {
+      globalThis.fetch = (url, options = {}) => {
+        captured.push({ url: String(url), options });
+        return new Promise((_resolve, reject) => {
+          const signal = options.signal;
+          if (!signal) return; // stays pending forever
+          signal.addEventListener("abort", () => {
+            const err = new Error("The operation was aborted.");
+            err.name = "AbortError";
+            reject(err);
+          });
+        });
+      };
+    }
+
+    it("arms an abort signal on regular requests", async () => {
+      await api.getMe();
+      const signal = captured[0].options.signal;
+      assert(signal instanceof AbortSignal);
+      assert(!signal.aborted, "timer must be cleared once a response arrives");
+    });
+
+    it("rejects with an ApiError TIMEOUT when no response arrives in time", async () => {
+      hangingFetch();
+      const err = await assertRejects(
+        () => api.request("/auth/me", { timeoutMs: 25 }),
+        ApiError,
+      );
+      assertEquals(err.status, 0);
+      assertEquals(err.code, "TIMEOUT");
+      assert(err.message.includes("timed out"), err.message);
+    });
+
+    it("leaves a hanging request pending when the timeout is disabled", async () => {
+      hangingFetch();
+      const pending = api.request("/auth/me", { timeoutMs: 0 });
+      assert(captured[0].options.signal === undefined);
+      void pending; // intentionally never awaited
+    });
+
+    it("installModel disables the timeout for long downloads", async () => {
+      await api.installModel("m-1");
+      assert(captured[0].options.signal === undefined);
+    });
+
+    it("uploadAsset arms the extended upload timeout", async () => {
+      const file = new File(["bytes"], "a.png", { type: "image/png" });
+      await api.uploadAsset("a-1", file);
+      assert(captured[0].options.signal instanceof AbortSignal);
+    });
+
+    it("llmAgent and backup methods arm the long-task timeout", async () => {
+      await api.llmAgent([{ role: "user", content: "hi" }]);
+      await api.createProjectBackup("p-1");
+      await api.restoreBackup("b-1");
+      for (const entry of captured) {
+        assert(entry.options.signal instanceof AbortSignal);
+      }
+    });
+
+    it("honors a caller-provided signal instead of its own timer", async () => {
+      const controller = new AbortController();
+      await api.request("/auth/me", { signal: controller.signal });
+      assert(captured[0].options.signal === controller.signal);
+    });
+
+    it("arms the media timeout on fetchMediaUrl", async () => {
+      const seen = {};
+      globalThis.fetch = async (_url, options = {}) => {
+        seen.signal = options.signal;
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(["x"], { type: "image/png" }),
+        };
+      };
+      const media = await api.fetchMediaUrl("/assets/a-1/preview");
+      assert(seen.signal instanceof AbortSignal);
+      URL.revokeObjectURL(media.url);
+    });
+  });
 });
