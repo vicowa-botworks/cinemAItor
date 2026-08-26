@@ -191,6 +191,10 @@ export class AssetReferencePicker extends LitElement {
           a.active_version_id &&
           a.id !== this.excludeAssetId,
       );
+      for (const a of this._candidates) {
+        if (!this.isConnected) break;
+        await this._ensureThumb(a);
+      }
     } catch (err) {
       this.error = err.message || "Could not load assets";
     } finally {
@@ -255,13 +259,7 @@ export class AssetReferencePicker extends LitElement {
     `;
   }
 
-  async _renderRows() {
-    // Ensure thumbnails are resolved before rendering rows.
-    for (const a of this._candidates) {
-      if (!this._thumbs.has(a.id)) {
-        await this._ensureThumb(a);
-      }
-    }
+  _renderRows() {
     if (!this.isConnected) return html``;
     if (this._candidates.length === 0) {
       return html`<div class="hint">
@@ -325,7 +323,7 @@ export class AssetReferencePicker extends LitElement {
         ${this.error ? html`<div class="error">${this.error}</div>` : ""}
         ${this.loading
           ? html`<div class="hint">Loading assets...</div>`
-          : html`${await this._renderRows()}`}
+          : html`${this._renderRows()}`}
         <div class="hint">
           Up to ${MAX_REFERENCES} references — the active version of each
           asset is used.
