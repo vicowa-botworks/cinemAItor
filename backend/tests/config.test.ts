@@ -17,6 +17,7 @@ describe("loadConfig", () => {
     assertEquals(config.jobConcurrencyGpu, 1);
     assertEquals(config.jobConcurrencyCpu, 2);
     assertEquals(config.uploadMaxBytes > 0, true);
+    assertEquals(config.modelDownloadMaxBytes, 0);
   });
 
   it("requires JWT_SECRET", () => {
@@ -36,6 +37,7 @@ describe("loadConfig", () => {
       LOG_LEVEL: "debug",
       FFMPEG_PATH: "/usr/bin/ffmpeg",
       UPLOAD_MAX_SIZE: "1234",
+      MODEL_DOWNLOAD_MAX_SIZE: "1000000",
       JOB_CONCURRENCY_GPU: "2",
       JOB_CONCURRENCY_CPU: "4",
     }));
@@ -46,6 +48,7 @@ describe("loadConfig", () => {
     assertEquals(config.logLevel, "debug");
     assertEquals(config.ffmpegPath, "/usr/bin/ffmpeg");
     assertEquals(config.uploadMaxBytes, 1234);
+    assertEquals(config.modelDownloadMaxBytes, 1000000);
     assertEquals(config.jobConcurrencyGpu, 2);
     assertEquals(config.jobConcurrencyCpu, 4);
   });

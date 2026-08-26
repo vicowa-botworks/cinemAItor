@@ -16,8 +16,10 @@ import {
 } from "../src/db/models.ts";
 import { type StorageLayout, storageLayout } from "../src/storage/paths.ts";
 import {
+  fileExists,
   installFromLocal,
   installFromUrl,
+  modelDir,
   modelFile,
   removeModelFiles,
   verifyModelFile,
@@ -231,18 +233,13 @@ describe("model manager", () => {
     assert(bad.message.includes("mismatch"));
   });
 
-  async function mockDownloadServer(body: Uint8Array): Promise<{
+  async function mockDownloadServerApp(app: Application): Promise<{
     url: string;
     stop: () => void;
   }> {
     const probe = await Deno.listen({ port: 0, hostname: "127.0.0.1" });
     const port = (probe.addr as Deno.NetAddr).port;
     await probe.close();
-    const app = new Application();
-    app.use((ctx) => {
-      ctx.response.body = body;
-      ctx.response.status = 200;
-    });
     const abort = new AbortController();
     const listenP = app.listen({ port, hostname: "127.0.0.1", signal: abort.signal });
     listenP.catch(() => {}); // aborted in stop(); nothing to do
@@ -256,6 +253,15 @@ describe("model manager", () => {
       }
     }
     return { url: `http://127.0.0.1:${port}`, stop: () => abort.abort() };
+  }
+
+  function mockDownloadServer(body: Uint8Array) {
+    const app = new Application();
+    app.use((ctx) => {
+      ctx.response.body = body;
+      ctx.response.status = 200;
+    });
+    return mockDownloadServerApp(app);
   }
 
   it("installs from a URL source", async () => {
@@ -297,6 +303,93 @@ describe("model manager", () => {
     } finally {
       mock.stop();
     }
+  });
+
+  it("url install streams to disk with no size limit when maxBytes is 0", async () => {
+    const m = registerT2I();
+    const payload = new Uint8Array(64 * 1024);
+    for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
+    const mock = await mockDownloadServer(payload);
+    try {
+      const result = await installFromUrl(layout, m.id, `${mock.url}/model.bin`, 0);
+      assertEquals(result.fileBytes, payload.length);
+      assertEquals((await verifyModelFile(layout, m.id, result.fileHash)).valid, true);
+      const dirEntries: string[] = [];
+      for await (const entry of Deno.readDir(modelDir(layout, m.id))) {
+        dirEntries.push(entry.name);
+      }
+      assertEquals(dirEntries, ["model.bin"]);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("url install enforces the cap mid-stream without Content-Length and cleans up", async () => {
+    const m = registerT2I();
+    const app = new Application();
+    app.use((ctx) => {
+      if (!ctx.request.url.pathname.endsWith("/model.bin")) {
+        ctx.response.body = new Uint8Array(0);
+        return;
+      }
+      // Chunked body (no Content-Length) larger than the 2-byte cap.
+      ctx.response.body = new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array(8).fill(9));
+          c.close();
+        },
+      });
+    });
+    const mock = await mockDownloadServerApp(app);
+    try {
+      await assertRejects(
+        () => installFromUrl(layout, m.id, `${mock.url}/model.bin`, 2),
+        Error,
+        "exceeds limit",
+      );
+    } finally {
+      mock.stop();
+    }
+    assert(!(await fileExists(modelFile(layout, m.id))));
+    const leftovers: string[] = [];
+    for await (const entry of Deno.readDir(modelDir(layout, m.id))) {
+      leftovers.push(entry.name);
+    }
+    assertEquals(leftovers, []);
+  });
+
+  it("url install leaves no partial files when the download fails mid-stream", async () => {
+    const m = registerT2I();
+    const app = new Application();
+    app.use((ctx) => {
+      if (!ctx.request.url.pathname.endsWith("/model.bin")) {
+        ctx.response.body = new Uint8Array(0);
+        return;
+      }
+      // Advertised size is far larger than the body that actually arrives.
+      ctx.response.headers.set("Content-Length", "1048576");
+      ctx.response.body = new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array([1, 2, 3]));
+          c.close();
+        },
+      });
+    });
+    const mock = await mockDownloadServerApp(app);
+    try {
+      await assertRejects(
+        () => installFromUrl(layout, m.id, `${mock.url}/model.bin`, 0),
+        Error,
+      );
+    } finally {
+      mock.stop();
+    }
+    assert(!(await fileExists(modelFile(layout, m.id))));
+    const leftovers: string[] = [];
+    for await (const entry of Deno.readDir(modelDir(layout, m.id))) {
+      leftovers.push(entry.name);
+    }
+    assertEquals(leftovers, []);
   });
 
   it("health check: mock, missing file, deps, checksum, endpoint", async () => {
