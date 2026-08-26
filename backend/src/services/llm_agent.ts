@@ -14,6 +14,7 @@ import {
   registerModelFromHuggingFace,
   searchHuggingFaceModels,
 } from "./huggingface.ts";
+import { describeHardware, detectHardware } from "./hardware.ts";
 import { installModelById, removeModelFiles } from "./model_files.ts";
 import { chatLlm, type LlmMessage, type LlmToolCall, type LlmToolDef } from "./llm_client.ts";
 
@@ -502,10 +503,11 @@ export function validateAgentHistory(raw: unknown): LlmMessage[] {
 }
 
 /** Live context so the copilot knows what is already registered. */
-export function copilotSystemPrompt(): string {
+export async function copilotSystemPrompt(): Promise<string> {
   const models = listModels();
   const taskTypes = [...new Set(models.flatMap((m) => m.task_types))].sort();
   const assistantSkills = listSkills(true);
+  const hardware = await detectHardware();
   return [
     "You are the model copilot of cinemaItor, a local-first AI movie studio.",
     "You help the user choose, register, and install local generation models, and connect runtimes such as ComfyUI.",
@@ -513,6 +515,8 @@ export function copilotSystemPrompt(): string {
     `${models.length} model(s) registered` +
     (models.length > 0 ? ` covering task types: ${taskTypes.join(", ")}` : "") +
     `; ${assistantSkills.length} skill(s) carry prompt-creation guidance.`,
+    `This server runs on: ${describeHardware(hardware)}.`,
+    "Use that hardware as the ground truth when judging whether a model fits: compare the model's weight/VRAM needs against the free VRAM (or RAM for CPU-only), and only warn about it not fitting when the numbers actually say so — prefer quantized or smaller variants when it genuinely would not fit.",
     "Use the tools to look things up before answering. When the user asks you to register or install a model, call the matching tool — the action is only executed after the user explicitly approves your proposal.",
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
   ].join("\n");
@@ -560,7 +564,7 @@ export interface AgentRunOptions {
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   const history = validateAgentHistory(opts.history);
   const messages: LlmMessage[] = [
-    { role: "system", content: copilotSystemPrompt() },
+    { role: "system", content: await copilotSystemPrompt() },
     ...history,
   ];
   const tools = agentToolDefs(opts.isAdmin);

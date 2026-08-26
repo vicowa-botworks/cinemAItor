@@ -366,9 +366,12 @@ server.ts (entry point)
   │   ├── Assist: purpose-driven content generation (script/scene/prompt) with
   │   │   optional skill guidance — see the `assistant` skill block
   │   ├── Model Copilot (agent): bounded tool-calling loop against the configured
-  │   │   LLM (services/llm_agent.ts) — read-only tools auto-execute, mutating
-  │   │   tools (admin-only) create in-memory proposals that are executed only
-  │   │   after explicit approval (POST /api/v1/llm/proposals/:id/approve)
+  │   │   LLM (services/llm_agent.ts) — the system prompt carries live context
+  │   │   (model/skill registry + detected hardware: RAM/CPU/GPU model, total & free
+  │   │   VRAM, from the 60s-cached detectHardware) so it judges model fit from real
+  │   │   numbers; read-only tools auto-execute, mutating tools (admin-only) create
+  │   │   in-memory proposals executed only after explicit approval
+  │   │   (POST /api/v1/llm/proposals/:id/approve)
   │   └── (see docs/llm.md)
   ├── OpenAPI routes (public; generated API documentation — see docs/openapi.md)
   │   ├── GET /api/v1/openapi.json (the generated OpenAPI 3.1 document)

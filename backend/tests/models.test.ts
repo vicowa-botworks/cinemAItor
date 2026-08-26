@@ -26,8 +26,10 @@ import {
 } from "../src/services/model_files.ts";
 import { checkModelHealth } from "../src/services/model_health.ts";
 import {
+  describeHardware,
   detectHardware,
   type HardwareInfo,
+  invalidateHardwareCache,
   modelRequirementWarnings,
   parseNvidiaSmiMemory,
 } from "../src/services/hardware.ts";
@@ -716,6 +718,50 @@ describe("model manager", () => {
     assertEquals(parseNvidiaSmiMemory("n/a"), null);
   });
 
+  it("describes hardware for the copilot system prompt", () => {
+    const full: HardwareInfo = {
+      platform: "linux",
+      arch: "x86_64",
+      cpu_count: 32,
+      mem_total_mb: 262144,
+      gpu: {
+        vendor: "nvidia",
+        model: "NVIDIA RTX PRO 6000 Blackwell",
+        vram_mb: 97871,
+        vram_used_mb: 2048,
+        driver_version: "570.81.09",
+        cuda_version: "12.6",
+      },
+      detected_at: "2026-08-26T00:00:00.000Z",
+    };
+    const desc = describeHardware(full);
+    assert(desc.includes("256 GB RAM"), desc);
+    assert(desc.includes("32 CPUs"), desc);
+    assert(desc.includes("NVIDIA RTX PRO 6000 Blackwell"), desc);
+    assert(desc.includes("95.6 GB VRAM"), desc);
+    assert(desc.includes("93.6 GB free"), desc);
+
+    const noGpu = describeHardware({ ...full, gpu: null });
+    assert(noGpu.includes("no GPU detected (CPU-only inference)"), noGpu);
+
+    const busy = describeHardware({
+      ...full,
+      gpu: { ...full.gpu as NonNullable<HardwareInfo["gpu"]>, vram_used_mb: 97871 },
+    });
+    assert(busy.includes("fully in use"), busy);
+  });
+
+  it("caches hardware detection for repeated calls", async () => {
+    invalidateHardwareCache();
+    const a = await detectHardware();
+    const b = await detectHardware();
+    assert(b === a, "expected the cached object to be reused");
+    invalidateHardwareCache();
+    const c = await detectHardware();
+    assert(c !== a, "expected a fresh probe after invalidation");
+    invalidateHardwareCache();
+  });
+
   it("detects an nvidia gpu through nvidia-smi on PATH", async () => {
     const binDir = await Deno.makeTempDir();
     const bin = join(binDir, "nvidia-smi");
@@ -736,6 +782,7 @@ describe("model manager", () => {
     await Deno.chmod(bin, 0o755);
     const oldPath = Deno.env.get("PATH") ?? "";
     Deno.env.set("PATH", `${binDir}:${oldPath}`);
+    invalidateHardwareCache();
     try {
       const hw = await detectHardware();
       assertEquals(hw.gpu?.vendor, "nvidia");
@@ -745,6 +792,7 @@ describe("model manager", () => {
       assertEquals(hw.gpu?.driver_version, "570.81.09");
       assertEquals(hw.gpu?.cuda_version, "12.6");
     } finally {
+      invalidateHardwareCache();
       Deno.env.set("PATH", oldPath);
       await Deno.remove(binDir, { recursive: true });
     }
@@ -771,6 +819,7 @@ describe("model manager", () => {
     await Deno.chmod(bin, 0o755);
     const oldPath = Deno.env.get("PATH") ?? "";
     Deno.env.set("PATH", `${binDir}:${oldPath}`);
+    invalidateHardwareCache();
     try {
       const hw = await detectHardware();
       assertEquals(hw.gpu?.vendor, "nvidia");
@@ -781,6 +830,7 @@ describe("model manager", () => {
       // Fallback to the `-q` detailed output must recover the CUDA version.
       assertEquals(hw.gpu?.cuda_version, "13.2");
     } finally {
+      invalidateHardwareCache();
       Deno.env.set("PATH", oldPath);
       await Deno.remove(binDir, { recursive: true });
     }
