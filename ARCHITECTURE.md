@@ -250,7 +250,8 @@ server.ts (entry point)
 │   ├── POST /parse (resolve @tokens), GET /audit, GET /:id, POST /:id/replace
 │   └── (see docs/references.md)
 ├── Model routes (/api/v1/models/*, auth middleware, admin for mutations)
- │   ├── Registry, install/verify (SHA-256), remove, enable/disable, /:id/health-check
+  │   ├── Registry, install/verify (SHA-256; URL installs stream to a temp file,
+  │   │   resumable via HTTP Range with backoff-retry), remove, enable/disable, /:id/health-check
    │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)
    │   │   + /:id/benchmarks (GET); deterministic per-task prompts, 2 candidates each,
    │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows

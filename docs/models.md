@@ -118,10 +118,19 @@ repo, `409` model id already registered, `502` HuggingFace unreachable, timed ou
 ## Behavior
 
 - **Install**: copies/downloads the source into the store, computes SHA-256, stores `file_hash` +
-  `installed_at`. URL installs stream to a temp file and rename it into place (no in-memory
-  buffering, so large weight files are bounded only by disk space; a failed download leaves no
-  partial file). The size is uncapped by default — set `MODEL_DOWNLOAD_MAX_SIZE` (bytes, 0 =
-  unlimited) to enforce a limit.
+  `installed_at`. URL installs stream to a stable temp file (`model.bin.part`) and rename it into
+  place when complete (no in-memory buffering, so large weight files are bounded only by disk
+  space). **Resumable downloads**: a dropped connection or transient server error (`5xx`, network
+  reset) keeps the part file and retries with `Range: bytes=<size>-` on an exponential backoff (1s →
+  30s cap, no retry limit), so a flaky link resumes where it stopped instead of restarting a
+  multi-gigabyte transfer. Servers that ignore `Range` (plain `200`) trigger a clean restart; a
+  `416` that matches the part file's size finalizes it directly. The part file records the source
+  URL it was downloaded from (`.part.url` sidecar); a leftover part from a _different_
+  `repository_url` is discarded rather than resumed, so an interrupted install of one URL can never
+  corrupt a download of another. Permanent failures (bad URL/protocol, HTTP `4xx`, size cap) clean
+  up the part file, so nothing partial is left behind. The size is uncapped by default — set
+  `MODEL_DOWNLOAD_MAX_SIZE` (bytes, 0 = unlimited) to enforce a limit (a part file already beyond
+  the cap is removed and the install fails).
 - **Verify**: re-hashes the installed file and compares to the stored hash; when no hash was stored
   yet, verify records the current hash.
 - **Health check** per backend:
