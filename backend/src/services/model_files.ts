@@ -59,7 +59,12 @@ export async function installFromLocal(
   return { fileHash, fileBytes: stat.size };
 }
 
-/** Download a model file into the store (MOD-003, network). */
+/**
+ * Download a model file into the store (MOD-003, network). Streams to a
+ * temp file and renames it into place, so arbitrarily large downloads are
+ * bounded only by disk space and a failed download never leaves a partial
+ * `model.bin` behind. `maxBytes` of 0 means no limit.
+ */
 export async function installFromUrl(
   layout: StorageLayout,
   modelId: string,
@@ -81,7 +86,7 @@ export async function installFromUrl(
     throw conflict(`Download failed: HTTP ${res.status}`, "repository_url");
   }
   const contentLength = Number(res.headers.get("Content-Length") ?? "0");
-  if (contentLength > maxBytes) {
+  if (maxBytes > 0 && contentLength > maxBytes) {
     throw badRequest(
       `Model file exceeds limit of ${maxBytes} bytes`,
       "repository_url",
@@ -89,36 +94,44 @@ export async function installFromUrl(
   }
   if (!res.body) throw conflict("Download failed: empty response body", "repository_url");
 
-  // Files are bounded by maxBytes, so buffering the whole download is safe.
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const reader = res.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      total += value.byteLength;
-      if (total > maxBytes) {
-        throw badRequest(
-          `Model file exceeds limit of ${maxBytes} bytes`,
-          "repository_url",
-        );
-      }
-      chunks.push(value);
-    }
-  }
-  const bytes = new Uint8Array(total);
-  let pos = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, pos);
-    pos += chunk.byteLength;
-  }
-
   const target = modelFile(layout, modelId);
   await Deno.mkdir(modelDir(layout, modelId), { recursive: true });
-  await Deno.writeFile(target, bytes);
-  const fileHash = await sha256File(target);
-  return { fileHash, fileBytes: total };
+  const tmp = `${target}.part-${crypto.randomUUID()}`;
+  let file: Deno.FsFile | null = null;
+  try {
+    file = await Deno.open(tmp, { write: true, create: true, truncate: true });
+    let total = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (maxBytes > 0 && total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw badRequest(
+            `Model file exceeds limit of ${maxBytes} bytes`,
+            "repository_url",
+          );
+        }
+        await file.write(value);
+      }
+    }
+    await file.close();
+    file = null;
+    await Deno.rename(tmp, target);
+    const fileHash = await sha256File(target);
+    return { fileHash, fileBytes: total };
+  } finally {
+    if (file) {
+      try {
+        await file.close();
+      } catch {
+        // already closed
+      }
+    }
+    await Deno.remove(tmp, { recursive: false }).catch(() => {});
+  }
 }
 
 /**
@@ -146,7 +159,7 @@ export async function installModelById(
         "consent",
       );
     }
-    result = await installFromUrl(lay, modelId, repositoryUrl, loadConfig().uploadMaxBytes);
+    result = await installFromUrl(lay, modelId, repositoryUrl, loadConfig().modelDownloadMaxBytes);
   } else if (model.source === "mock" || model.backend === "mock") {
     result = { fileHash: model.file_hash ?? "", fileBytes: 0 };
   } else {

@@ -118,7 +118,10 @@ repo, `409` model id already registered, `502` HuggingFace unreachable, timed ou
 ## Behavior
 
 - **Install**: copies/downloads the source into the store, computes SHA-256, stores `file_hash` +
-  `installed_at`. URL installs also enforce a size limit (`UPLOAD_MAX_SIZE` bytes).
+  `installed_at`. URL installs stream to a temp file and rename it into place (no in-memory
+  buffering, so large weight files are bounded only by disk space; a failed download leaves no
+  partial file). The size is uncapped by default — set `MODEL_DOWNLOAD_MAX_SIZE` (bytes, 0 =
+  unlimited) to enforce a limit.
 - **Verify**: re-hashes the installed file and compares to the stored hash; when no hash was stored
   yet, verify records the current hash.
 - **Health check** per backend:

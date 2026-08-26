@@ -9,6 +9,8 @@ export interface AppConfig {
   ffmpegPath: string;
   ffprobePath: string;
   uploadMaxBytes: number;
+  /** Max bytes for model downloads; 0 means no limit. */
+  modelDownloadMaxBytes: number;
   jobConcurrencyGpu: number;
   jobConcurrencyCpu: number;
   authRateLimitMax: number;
@@ -36,6 +38,9 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
     2 * 1024 * 1024 * 1024,
     1,
   );
+  // Model downloads stream straight to disk, so they are not bounded by
+  // available memory — unlimited (0) by default; set to cap disk usage.
+  const modelDownloadMaxBytes = intEnv(env, "MODEL_DOWNLOAD_MAX_SIZE", 0, 0);
   const jobConcurrencyGpu = intEnv(env, "JOB_CONCURRENCY_GPU", 1, 1);
   const jobConcurrencyCpu = intEnv(env, "JOB_CONCURRENCY_CPU", 2, 1);
   const authRateLimitMax = intEnv(env, "AUTH_RATE_LIMIT_MAX", 20, 1);
@@ -61,6 +66,7 @@ export function loadConfig(env: EnvLike = Deno.env): AppConfig {
     ffmpegPath: env.get("FFMPEG_PATH") ?? "ffmpeg",
     ffprobePath: env.get("FFPROBE_PATH") ?? "ffprobe",
     uploadMaxBytes,
+    modelDownloadMaxBytes,
     jobConcurrencyGpu,
     jobConcurrencyCpu,
     authRateLimitMax,
