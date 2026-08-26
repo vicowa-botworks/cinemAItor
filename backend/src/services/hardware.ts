@@ -98,8 +98,29 @@ export function parseNvidiaSmiMemory(value: string | undefined | null): number |
  * Best-effort hardware detection (MOD-009). Every field degrades gracefully:
  * unknown values are null/1 rather than throwing, so the API never fails on
  * exotic platforms.
+ *
+ * Detection spawns `nvidia-smi`, so results are cached for a short TTL: the
+ * hardware does not change under a running server, and callers (diagnostics,
+ * model warnings, the copilot system prompt) may ask on every request.
  */
+const HARDWARE_CACHE_TTL_MS = 60_000;
+let hardwareCache: { at: number; info: HardwareInfo } | null = null;
+
+/** Force the next detectHardware() call to re-probe (tests). */
+export function invalidateHardwareCache(): void {
+  hardwareCache = null;
+}
+
 export async function detectHardware(): Promise<HardwareInfo> {
+  if (hardwareCache && Date.now() - hardwareCache.at < HARDWARE_CACHE_TTL_MS) {
+    return hardwareCache.info;
+  }
+  const info = await detectHardwareFresh();
+  hardwareCache = { at: Date.now(), info };
+  return info;
+}
+
+async function detectHardwareFresh(): Promise<HardwareInfo> {
   let cpu_count = 1;
   let mem_total_mb: number | null = null;
 
@@ -160,6 +181,32 @@ export async function detectHardware(): Promise<HardwareInfo> {
     gpu,
     detected_at: new Date().toISOString(),
   };
+}
+
+function gb(mb: number): string {
+  return (mb / 1024).toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * One-paragraph human/LLM-readable summary of the hardware, for embedding in
+ * the copilot system prompt so it can judge whether a model will fit.
+ */
+export function describeHardware(info: HardwareInfo): string {
+  const parts: string[] = [];
+  if (info.mem_total_mb !== null) parts.push(`${gb(info.mem_total_mb)} GB RAM`);
+  parts.push(`${info.cpu_count} CPU` + (info.cpu_count === 1 ? "" : "s"));
+  if (info.gpu) {
+    const vram = info.gpu.vram_mb !== null ? `${gb(info.gpu.vram_mb)} GB VRAM` : "unknown VRAM";
+    let free = "";
+    if (info.gpu.vram_mb !== null && info.gpu.vram_used_mb !== null) {
+      const freeMb = info.gpu.vram_mb - info.gpu.vram_used_mb;
+      free = freeMb > 0 ? `, ${gb(freeMb)} GB free` : ", fully in use";
+    }
+    parts.push(`GPU: ${info.gpu.model} with ${vram}${free}`);
+  } else {
+    parts.push("no GPU detected (CPU-only inference)");
+  }
+  return parts.join(", ");
 }
 
 /**

@@ -141,6 +141,13 @@ usable weight file / bad repo id / unknown `file`, `404` unknown repo, `409` id 
 `history`). The LLM is told it is the cinemaItor model copilot and handed the tools in OpenAI
 function-calling form.
 
+The system prompt carries **live context** so the copilot answers from actual state: the current
+model/skill registry, and the **hardware the server runs on** (RAM, CPU count, GPU model, total and
+free VRAM — or "no GPU detected (CPU-only)"). It is told to treat that hardware as ground truth when
+judging whether a model fits, and to only warn about it not fitting when the numbers actually say
+so. Hardware detection spawns `nvidia-smi`, so results are cached for 60 s (`detectHardware()` in
+`services/hardware.ts`).
+
 **Request:** `{history: [{role: "user" | "assistant", content: string}...], model?}` — at least one
 message, each content trimmed to 20 000 chars; `model` overrides the configured model name.
 
