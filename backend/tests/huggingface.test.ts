@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertMatch, assertThrows } from "@std/assert";
 import { closeDb } from "../src/db/database.ts";
 import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
@@ -22,6 +22,9 @@ interface FakeHfState {
   files: FakeHfFile[];
   lastSearchParams: URLSearchParams | null;
   calls: number;
+  repoPaths: string[];
+  lastAuth: string | null;
+  unauthorized: boolean;
 }
 
 function freshState(): FakeHfState {
@@ -50,6 +53,9 @@ function freshState(): FakeHfState {
     ],
     lastSearchParams: null,
     calls: 0,
+    repoPaths: [],
+    lastAuth: null,
+    unauthorized: false,
   };
 }
 
@@ -70,13 +76,25 @@ function startFakeHf(state: FakeHfState): { url: string; shutdown: () => void } 
         );
         return Response.json(results);
       }
-      // /api/models/<owner%2Fname>[/tree/main] — the repo id is one
-      // percent-encoded segment.
-      const repoId = decodeURIComponent(parts[2]);
+      // Real HF contract: /api/models/<owner>/<name>[/tree/main] — two
+      // separate path segments. A percent-encoded slash is rejected exactly
+      // like the live API (HTTP 400, "url-encoded slash").
+      state.repoPaths.push(url.pathname);
+      state.lastAuth = req.headers.get("authorization");
+      if (/%2[fF]/.test(parts[2])) {
+        return Response.json(
+          { error: `Invalid repo name: ${parts[2]} - repo name includes an url-encoded slash` },
+          { status: 400 },
+        );
+      }
+      if (state.unauthorized) {
+        return Response.json({ error: "Invalid username or password." }, { status: 401 });
+      }
+      const repoId = `${decodeURIComponent(parts[2])}/${decodeURIComponent(parts[3] ?? "")}`;
       const repo = state.repos.find((r) => r.id === repoId);
       if (!repo) return notFound();
-      if (parts.length === 3) return Response.json(repo);
-      if (parts.length === 5 && parts[3] === "tree" && parts[4] === "main") {
+      if (parts.length === 4) return Response.json(repo);
+      if (parts.length === 6 && parts[4] === "tree" && parts[5] === "main") {
         return Response.json(state.files);
       }
       return notFound();
@@ -265,6 +283,61 @@ describe("huggingface routes", () => {
       const model = body.files.find((f) => f.path === "model.safetensors");
       assert(model);
       assertEquals(model.size, 5_000_000_000);
+    });
+  });
+
+  it("requests reach HuggingFace with a literal slash, not %2F", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get(
+        `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+        adminToken,
+      );
+      assertEquals(res.status, 200);
+      // The live HuggingFace API 400s on owner%2Fname — every upstream URL must
+      // carry a real slash between owner and name (meta + tree calls).
+      const paths = [...new Set(state.repoPaths)].sort();
+      assertEquals(
+        paths,
+        ["/api/models/owner/textgen-v1", "/api/models/owner/textgen-v1/tree/main"],
+      );
+      for (const p of state.repoPaths) {
+        assert(!p.includes("%2F"), `upstream URL must not encode the slash: ${p}`);
+      }
+    });
+  });
+
+  it("forwards HF_TOKEN to HuggingFace as a Bearer token", async () => {
+    const oldToken = Deno.env.get("HF_TOKEN");
+    Deno.env.set("HF_TOKEN", "hf_test_token_123");
+    try {
+      await withServer(async (base) => {
+        baseUrl = base;
+        const res = await get(
+          `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+          adminToken,
+        );
+        assertEquals(res.status, 200);
+        assertEquals(state.lastAuth, "Bearer hf_test_token_123");
+      });
+    } finally {
+      if (oldToken === undefined) Deno.env.delete("HF_TOKEN");
+      else Deno.env.set("HF_TOKEN", oldToken);
+    }
+  });
+
+  it("maps an upstream 401 to a 502 with an actionable message", async () => {
+    state.unauthorized = true;
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get(
+        `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+        adminToken,
+      );
+      assertEquals(res.status, 502);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      assertEquals(body.error.code, "NETWORK_ERROR");
+      assertMatch(body.error.message, /HF_TOKEN/);
     });
   });
 

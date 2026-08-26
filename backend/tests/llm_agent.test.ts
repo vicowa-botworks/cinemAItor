@@ -283,15 +283,16 @@ describe("llm agent", () => {
   it("register_model_from_huggingface proposal registers on approval", async () => {
     // Fake HuggingFace endpoint (repo metadata + file tree), following the
     // fake-HF pattern from huggingface.test.ts: the base carries the /api
-    // prefix and the repo id is one percent-encoded path segment.
+    // prefix and the repo id is two path segments, <owner>/<name> (the live
+    // HF API rejects a percent-encoded slash).
     const hf = Deno.serve({ port: 0, hostname: "127.0.0.1" }, (req: Request) => {
       const url = new URL(req.url);
       const parts = url.pathname.split("/").filter(Boolean);
       const notFound = () => Response.json({ error: "Not found" }, { status: 404 });
       if (parts[0] !== "api" || parts[1] !== "models") return notFound();
-      const repoId = decodeURIComponent(parts[2] ?? "");
+      const repoId = `${decodeURIComponent(parts[2] ?? "")}/${decodeURIComponent(parts[3] ?? "")}`;
       if (repoId !== "acme/flux-test") return notFound();
-      if (parts.length === 3) {
+      if (parts.length === 4) {
         return Response.json({
           id: "acme/flux-test",
           likes: 5,
@@ -300,7 +301,7 @@ describe("llm agent", () => {
           tags: ["license:apache-2.0"],
         });
       }
-      if (parts.length === 5 && parts[3] === "tree" && parts[4] === "main") {
+      if (parts.length === 6 && parts[4] === "tree" && parts[5] === "main") {
         return Response.json([
           { name: "model.safetensors", size: 5_000_000_000, type: "file" },
         ]);
