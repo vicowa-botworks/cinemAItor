@@ -1,5 +1,15 @@
 const V1_BASE = "/api/v1";
 
+// A dead or restarting server must never hang the UI forever: requests
+// abort when no response arrives in time. Endpoints that are legitimately
+// long (synchronous model downloads, raw uploads, LLM loops, backups,
+// media streams) override this via `timeoutMs`; `timeoutMs: 0` disables
+// the timeout entirely.
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const UPLOAD_TIMEOUT_MS = 30 * 60_000;
+const MEDIA_TIMEOUT_MS = 5 * 60_000;
+const LONG_TASK_TIMEOUT_MS = 15 * 60_000;
+
 class ApiError extends Error {
   constructor(message, status, code) {
     super(message);
@@ -37,10 +47,11 @@ class ApiClient {
 
   async request(path, options = {}, base = V1_BASE) {
     const headers = { ...options.headers };
+    const { timeoutMs, ...fetchOptions } = options;
     if (
-      options.body !== undefined &&
-      !(options.body instanceof FormData) &&
-      !(options.body instanceof Blob)
+      fetchOptions.body !== undefined &&
+      !(fetchOptions.body instanceof FormData) &&
+      !(fetchOptions.body instanceof Blob)
     ) {
       headers["Content-Type"] = "application/json";
     }
@@ -49,10 +60,11 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${this.#token}`;
     }
 
-    const response = await fetch(`${base}${path}`, {
-      ...options,
-      headers,
-    });
+    const response = await this.#fetchWithTimeout(
+      `${base}${path}`,
+      { ...fetchOptions, headers },
+      timeoutMs,
+    );
 
     if (response.status === 204) {
       return null;
@@ -70,6 +82,28 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  #fetchWithTimeout(url, options, timeoutMs) {
+    const timeout = timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!timeout || options.signal) {
+      return fetch(url, options);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    return fetch(url, { ...options, signal: controller.signal })
+      .finally(() => clearTimeout(timer))
+      .catch((error) => {
+        if (error && error.name === "AbortError") {
+          throw new ApiError(
+            `Request timed out after ${Math.round(timeout / 1000)}s without a response. ` +
+              "The server may be restarting — refresh and try again.",
+            0,
+            "TIMEOUT",
+          );
+        }
+        throw error;
+      });
   }
 
   _query(filter = {}) {
@@ -94,7 +128,11 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${this.#token}`;
     }
 
-    const response = await fetch(`${V1_BASE}${v1Path}`, { headers });
+    const response = await this.#fetchWithTimeout(
+      `${V1_BASE}${v1Path}`,
+      { headers },
+      MEDIA_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       const error = await response
@@ -401,6 +439,7 @@ class ApiClient {
       method: "POST",
       body: file,
       headers,
+      timeoutMs: UPLOAD_TIMEOUT_MS,
     });
   }
 
@@ -599,9 +638,11 @@ class ApiClient {
     if (consent !== undefined) {
       body.consent = consent;
     }
+    // Synchronous download — can run for hours on big weights; no timeout.
     return this.request(`/models/${encodeURIComponent(id)}/install`, {
       method: "POST",
       body: JSON.stringify(body),
+      timeoutMs: 0,
     });
   }
 
@@ -653,6 +694,7 @@ class ApiClient {
     return this.request("/llm/test", {
       method: "POST",
       body: JSON.stringify({}),
+      timeoutMs: LONG_TASK_TIMEOUT_MS,
     });
   }
 
@@ -660,6 +702,7 @@ class ApiClient {
     return this.request("/llm/chat", {
       method: "POST",
       body: JSON.stringify({ messages, ...extra }),
+      timeoutMs: LONG_TASK_TIMEOUT_MS,
     });
   }
 
@@ -671,6 +714,7 @@ class ApiClient {
     return this.request("/llm/assist", {
       method: "POST",
       body: JSON.stringify(body),
+      timeoutMs: LONG_TASK_TIMEOUT_MS,
     });
   }
 
@@ -680,6 +724,7 @@ class ApiClient {
     return this.request("/llm/agent", {
       method: "POST",
       body: JSON.stringify(body),
+      timeoutMs: LONG_TASK_TIMEOUT_MS,
     });
   }
 
@@ -1228,6 +1273,7 @@ class ApiClient {
     return this.request("/diagnostics/backups", {
       method: "POST",
       body: JSON.stringify({ project_id: projectId }),
+      timeoutMs: LONG_TASK_TIMEOUT_MS,
     });
   }
 
@@ -1304,6 +1350,7 @@ class ApiClient {
       {
         method: "POST",
         body: JSON.stringify(projectName ? { project_name: projectName } : {}),
+        timeoutMs: LONG_TASK_TIMEOUT_MS,
       },
     );
   }
