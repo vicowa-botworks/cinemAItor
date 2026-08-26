@@ -99,9 +99,54 @@ jobs:
         with:
           deno-version: v2.9.5
 
+      - name: Parse-check frontend modules
+        working-directory: ./frontend
+        run: |
+          # deno check skips .js files, so a browser-only syntax error (e.g. an
+          # await in a non-async method) would ship uncaught. Node parses every
+          # module the way the browser's module loader would.
+          status=0
+          for f in $(find src tests -name '*.js' | sort); do
+            if ! node --input-type=module --check < "$f" 2>/tmp/syntax-error.txt; then
+              echo "SYNTAX ERROR in $f:"
+              cat /tmp/syntax-error.txt
+              status=1
+            fi
+          done
+          exit $status
+
       - name: Run frontend tests
         working-directory: ./frontend
         run: deno test --allow-net --allow-env
+
+  e2e-smoke:
+    name: E2E Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.5
+
+      - name: Install Playwright
+        working-directory: ./e2e
+        run: npm install
+
+      - name: Install Chromium
+        working-directory: ./e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E smoke
+        working-directory: ./e2e
+        run: npx playwright test
 
   docker-build:
     name: Docker Build

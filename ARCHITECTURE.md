@@ -547,10 +547,15 @@ The `prompts` table is structured to support:
 ### Testing Strategy
 
 - **Backend**: Unit tests for schema layer, integration tests for routes
-- **Frontend**: Unit tests for API client, component tests with mock DOM
+- **Frontend**: Unit tests for API client, component tests with mock DOM; a CI parse-check runs
+  `node --input-type=module --check` over every frontend `.js` module (Deno skips `.js` files, so
+  browser-only syntax errors like an `await` in a non-async method would otherwise ship uncaught)
 - **E2E**: HTTP-level MVP acceptance flow (`backend/tests/mvp_acceptance.test.ts`) drives the full
-  studio journey over live routes (auth → media → jobs → timeline → render/export → backup/restore);
-  a browser-level E2E (Cypress or Playwright) is not implemented yet
+  studio journey over live routes (auth → media → jobs → timeline → render/export → backup/restore).
+  Minimal in-browser smoke test (`e2e/`, Playwright, `e2e-smoke` CI job): boots a throwaway
+  backend + frontend pair on dedicated ports, bootstraps an admin, then verifies the ES module graph
+  loads (all boot components registered — catches any module that fails to parse in the browser), UI
+  login works, and the assets page renders. Chromium headless, single spec.
 
 ### Deployment
 
