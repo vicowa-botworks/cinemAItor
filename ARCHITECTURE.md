@@ -125,8 +125,10 @@ app-root (main router)
 │   │              health check + checksum verify, per-model benchmark run + results
 │   │              table (WS 14), admin-gated registration form + install/enable/remove,
 │   │              LLM assistant settings panel + connection test (docs/llm.md),
-│   │              HuggingFace browse/search → register panel, Model Copilot chat with
-│   │              approve/reject proposal cards)
+│   │              HuggingFace browse/search → register panel (recursive file listing incl.
+│   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
+│   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
+│   │              with approve/reject proposal cards)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
@@ -253,6 +255,9 @@ server.ts (entry point)
    │   │   + /:id/benchmarks (GET); deterministic per-task prompts, 2 candidates each,
    │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows
    │   ├── Hardware detection + requirement warnings (/hardware)
+   │   ├── HuggingFace catalog: /huggingface/search, /huggingface/:repoId (recursive file
+   │   │   listing + README), /huggingface/settings (+/test) optional token (stored > env),
+   │   │   POST /from-huggingface registers a url-sourced model row (admin)
    │   └── (see docs/models.md)
   ├── Job routes (/api/v1/jobs/*, auth middleware)
   │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
@@ -359,8 +364,6 @@ server.ts (entry point)
   │   │   test connection, one-shot chat
   │   ├── Assist: purpose-driven content generation (script/scene/prompt) with
   │   │   optional skill guidance — see the `assistant` skill block
-  │   ├── HuggingFace catalog: search + repo metadata/file listing + auto-register
-  │   │   a model row from a repo (weights not downloaded — use the install flow)
   │   ├── Model Copilot (agent): bounded tool-calling loop against the configured
   │   │   LLM (services/llm_agent.ts) — read-only tools auto-execute, mutating
   │   │   tools (admin-only) create in-memory proposals that are executed only

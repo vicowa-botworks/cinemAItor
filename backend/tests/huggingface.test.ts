@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertMatch, assertThrows } from "@std/assert";
 import { closeDb } from "../src/db/database.ts";
 import { createUser } from "../src/db/schema.ts";
+import { updateHfToken } from "../src/db/hf_settings.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 import {
+  capHfFiles,
+  HF_MAX_FILES,
+  HF_README_MAX_CHARS,
   pickWeightFile,
   resolveFileUrl,
   slugifyModelId,
+  truncateReadme,
   validateRepoId,
 } from "../src/services/huggingface.ts";
 
@@ -20,7 +25,11 @@ interface FakeHfFile {
 interface FakeHfState {
   repos: Record<string, unknown>[];
   files: FakeHfFile[];
+  readme: string | null;
   lastSearchParams: URLSearchParams | null;
+  lastTreeSearchParams: URLSearchParams | null;
+  whoamiStatus: number;
+  whoamiBody: Record<string, unknown>;
   calls: number;
   repoPaths: string[];
   lastAuth: string | null;
@@ -50,8 +59,13 @@ function freshState(): FakeHfState {
       { name: "model.safetensors", size: 5_000_000_000, type: "file" },
       { name: "small.bin", size: 1_000_000, type: "file" },
       { name: "subdir", size: 0, type: "directory" },
+      { name: "vae/diffusion_pytorch_model.safetensors", size: 300_000_000, type: "file" },
     ],
+    readme: "# textgen-v1\n\nUsage example: `pipe(prompt)` renders a clip.\n",
     lastSearchParams: null,
+    lastTreeSearchParams: null,
+    whoamiStatus: 200,
+    whoamiBody: { name: "hf_tester", fullname: "HF Tester" },
     calls: 0,
     repoPaths: [],
     lastAuth: null,
@@ -59,7 +73,9 @@ function freshState(): FakeHfState {
   };
 }
 
-function startFakeHf(state: FakeHfState): { url: string; shutdown: () => void } {
+function startFakeHf(
+  state: FakeHfState,
+): { url: string; publicUrl: string; shutdown: () => void } {
   const server = Deno.serve(
     { port: 0, hostname: "127.0.0.1" },
     (req: Request): Response => {
@@ -67,6 +83,22 @@ function startFakeHf(state: FakeHfState): { url: string; shutdown: () => void } 
       state.calls += 1;
       const parts = url.pathname.split("/").filter(Boolean);
       const notFound = () => Response.json({ error: "Not found" }, { status: 404 });
+      // README on the public site base: /<owner>/<name>/resolve/main/README.md
+      if (
+        parts.length === 5 && parts[2] === "resolve" && parts[3] === "main" &&
+        parts[4] === "README.md"
+      ) {
+        state.lastAuth = req.headers.get("authorization");
+        if (state.readme === null) return notFound();
+        return new Response(state.readme, {
+          headers: { "Content-Type": "text/markdown" },
+        });
+      }
+      // Token check: /api/whoami-v2
+      if (parts[0] === "api" && parts[1] === "whoami-v2") {
+        state.lastAuth = req.headers.get("authorization");
+        return Response.json(state.whoamiBody, { status: state.whoamiStatus });
+      }
       if (parts[0] !== "api" || parts[1] !== "models") return notFound();
       if (parts.length === 2) {
         state.lastSearchParams = url.searchParams;
@@ -95,6 +127,7 @@ function startFakeHf(state: FakeHfState): { url: string; shutdown: () => void } 
       if (!repo) return notFound();
       if (parts.length === 4) return Response.json(repo);
       if (parts.length === 6 && parts[4] === "tree" && parts[5] === "main") {
+        state.lastTreeSearchParams = url.searchParams;
         return Response.json(state.files);
       }
       return notFound();
@@ -103,6 +136,7 @@ function startFakeHf(state: FakeHfState): { url: string; shutdown: () => void } 
   const addr = server.addr;
   return {
     url: `http://127.0.0.1:${addr.port}/api`,
+    publicUrl: `http://127.0.0.1:${addr.port}`,
     shutdown: () => server.shutdown(),
   };
 }
@@ -110,7 +144,7 @@ function startFakeHf(state: FakeHfState): { url: string; shutdown: () => void } 
 let baseUrl = "";
 let adminToken = "";
 let userToken = "";
-let fake: { url: string; shutdown: () => void };
+let fake: { url: string; publicUrl: string; shutdown: () => void };
 let state: FakeHfState;
 
 function headers(token?: string): Record<string, string> {
@@ -119,11 +153,7 @@ function headers(token?: string): Record<string, string> {
   return h;
 }
 
-function post(
-  path: string,
-  body: unknown,
-  token?: string,
-): Promise<Response> {
+function post(path: string, body: unknown, token?: string): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: headers(token),
@@ -133,6 +163,14 @@ function post(
 
 function get(path: string, token?: string): Promise<Response> {
   return fetch(`${baseUrl}${path}`, { headers: headers(token) });
+}
+
+function patch(path: string, body: unknown, token?: string): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    method: "PATCH",
+    headers: headers(token),
+    body: JSON.stringify(body),
+  });
 }
 
 describe("huggingface service (pure)", () => {
@@ -163,6 +201,18 @@ describe("huggingface service (pure)", () => {
     );
   });
 
+  it("pickWeightFile finds weights in subdirectories", () => {
+    assertEquals(
+      pickWeightFile([
+        { path: "README.md", size: 999, type: "file" },
+        { path: "vae/diffusion_pytorch_model.safetensors", size: 300, type: "file" },
+        { path: "unet/diffusion_pytorch_model.safetensors", size: 900, type: "file" },
+        { path: "text_encoder/model.safetensors", size: 500, type: "file" },
+      ]),
+      "unet/diffusion_pytorch_model.safetensors",
+    );
+  });
+
   it("pickWeightFile honors an explicit file and rejects unknown ones", () => {
     assertEquals(
       pickWeightFile([{ path: "a.bin", size: 1, type: "file" }], "a.bin"),
@@ -172,6 +222,51 @@ describe("huggingface service (pure)", () => {
       () => pickWeightFile([{ path: "a.bin", size: 1, type: "file" }], "nope.bin"),
     );
     assertThrows(() => pickWeightFile([{ path: "README.md", size: 1, type: "file" }]));
+  });
+
+  it("capHfFiles passes small listings through unchanged", () => {
+    const files = [
+      { path: "a.bin", size: 1, type: "file" as const },
+      { path: "b.txt", size: 2, type: "file" as const },
+    ];
+    assertEquals(capHfFiles(files), { files, truncated: false });
+  });
+
+  it("capHfFiles truncates but always keeps weight files", () => {
+    const files = [
+      ...Array.from({ length: HF_MAX_FILES + 10 }, (_, i) => ({
+        path: `filler/${i}.txt`,
+        size: i,
+        type: "file" as const,
+      })),
+      { path: "deep/weights/model.safetensors", size: 1, type: "file" as const },
+    ];
+    const { files: capped, truncated } = capHfFiles(files);
+    assert(truncated);
+    assertEquals(capped.length, HF_MAX_FILES);
+    assert(capped.some((f) => f.path === "deep/weights/model.safetensors"));
+  });
+
+  it("capHfFiles keeps weight files even when they alone exceed the cap", () => {
+    const files = Array.from({ length: HF_MAX_FILES + 5 }, (_, i) => ({
+      path: `w/${i}.safetensors`,
+      size: i,
+      type: "file" as const,
+    }));
+    const { files: capped, truncated } = capHfFiles(files);
+    assert(truncated);
+    assertEquals(capped.length, HF_MAX_FILES);
+    for (const f of capped) assert(f.path.endsWith(".safetensors"));
+  });
+
+  it("truncateReadme keeps short readmes and caps long ones", () => {
+    assertEquals(truncateReadme("short"), "short");
+    assertEquals(truncateReadme("   \n "), null);
+    const long = "x".repeat(HF_README_MAX_CHARS + 1);
+    const out = truncateReadme(long);
+    assert(out !== null);
+    assert(out.length <= HF_README_MAX_CHARS + 20);
+    assertMatch(out, /truncated/);
   });
 
   it("resolveFileUrl builds the resolve/main URL", () => {
@@ -187,6 +282,7 @@ describe("huggingface routes", () => {
     state = freshState();
     fake = startFakeHf(state);
     Deno.env.set("HF_API_BASE", fake.url);
+    Deno.env.set("HF_PUBLIC_BASE", fake.publicUrl);
     freshMemoryDb();
     await withServer(async (base) => {
       baseUrl = base;
@@ -205,6 +301,7 @@ describe("huggingface routes", () => {
   afterEach(() => {
     fake.shutdown();
     Deno.env.delete("HF_API_BASE");
+    Deno.env.delete("HF_PUBLIC_BASE");
     closeDb();
   });
 
@@ -221,6 +318,14 @@ describe("huggingface routes", () => {
             `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
           )
         ).status,
+        401,
+      );
+      assertEquals(
+        (await get("/api/v1/models/huggingface/settings")).status,
+        401,
+      );
+      assertEquals(
+        (await post("/api/v1/models/huggingface/settings/test", {})).status,
         401,
       );
       assertEquals((await post("/api/v1/models/from-huggingface", {})).status, 401);
@@ -265,7 +370,7 @@ describe("huggingface routes", () => {
     });
   });
 
-  it("repo returns metadata + files for a known repo", async () => {
+  it("repo returns metadata + recursive files + readme for a known repo", async () => {
     await withServer(async (base) => {
       baseUrl = base;
       const res = await get(
@@ -276,13 +381,62 @@ describe("huggingface routes", () => {
       const body = (await res.json()) as {
         repo: { id: string; license: string | null };
         files: { path: string; size: number; type: string }[];
+        readme: string | null;
+        filesTruncated: boolean;
       };
       assertEquals(body.repo.id, "owner/textgen-v1");
       assertEquals(body.repo.license, "mit");
-      assertEquals(body.files.length, 3); // directory entries filtered out
+      assertEquals(body.files.length, 4); // directory entries filtered out
       const model = body.files.find((f) => f.path === "model.safetensors");
       assert(model);
       assertEquals(model.size, 5_000_000_000);
+      const vae = body.files.find((f) => f.path === "vae/diffusion_pytorch_model.safetensors");
+      assert(vae);
+      assertEquals(vae.size, 300_000_000);
+      assertMatch(body.readme ?? "", /Usage example/);
+      assertEquals(body.filesTruncated, false);
+      // The upstream tree call must be recursive.
+      assertEquals(state.lastTreeSearchParams?.get("recursive"), "true");
+    });
+  });
+
+  it("repo reports readme null when the repo has no README", async () => {
+    state.readme = null;
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get(
+        `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+        adminToken,
+      );
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as { readme: string | null };
+      assertEquals(body.readme, null);
+    });
+  });
+
+  it("repo truncates huge file listings, keeping weight files", async () => {
+    state.files = [
+      ...Array.from({ length: HF_MAX_FILES + 10 }, (_, i) => ({
+        name: `filler/${i}.txt`,
+        size: i,
+        type: "file" as const,
+      })),
+      { name: "deep/weights/model.safetensors", size: 42, type: "file" as const },
+    ];
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get(
+        `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+        adminToken,
+      );
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        files: { path: string }[];
+        filesTruncated: boolean;
+      };
+      assertEquals(body.files.length, HF_MAX_FILES);
+      assertEquals(body.filesTruncated, true);
+      assert(body.files.some((f) => f.path === "deep/weights/model.safetensors"));
     });
   });
 
@@ -324,6 +478,171 @@ describe("huggingface routes", () => {
       if (oldToken === undefined) Deno.env.delete("HF_TOKEN");
       else Deno.env.set("HF_TOKEN", oldToken);
     }
+  });
+
+  it("a stored token takes precedence over the HF_TOKEN env", async () => {
+    const oldToken = Deno.env.get("HF_TOKEN");
+    Deno.env.set("HF_TOKEN", "hf_env_token");
+    try {
+      updateHfToken("hf_stored_token");
+      await withServer(async (base) => {
+        baseUrl = base;
+        const res = await get(
+          `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+          adminToken,
+        );
+        assertEquals(res.status, 200);
+        assertEquals(state.lastAuth, "Bearer hf_stored_token");
+
+        const settings = await get("/api/v1/models/huggingface/settings", adminToken);
+        assertEquals(settings.status, 200);
+        assertEquals((await settings.json()) as Record<string, unknown>, {
+          tokenSet: true,
+          tokenSource: "settings",
+        });
+      });
+      // Clearing the stored token falls back to the env token.
+      updateHfToken("");
+      await withServer(async (base) => {
+        baseUrl = base;
+        const res = await get(
+          `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+          adminToken,
+        );
+        assertEquals(res.status, 200);
+        assertEquals(state.lastAuth, "Bearer hf_env_token");
+      });
+    } finally {
+      if (oldToken === undefined) Deno.env.delete("HF_TOKEN");
+      else Deno.env.set("HF_TOKEN", oldToken);
+    }
+  });
+
+  it("huggingface settings are admin-only and validate the token", async () => {
+    const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
+    createUser(email, await hashPassword("password123"), "Regular User");
+    // HF_TOKEN stays set for the whole test so the "env" source assertions are
+    // stable (clearing the stored token falls back to it).
+    const oldToken = Deno.env.get("HF_TOKEN");
+    Deno.env.set("HF_TOKEN", "hf_env_token");
+    try {
+      await withServer(async (base) => {
+        baseUrl = base;
+        const login = await post("/api/v1/auth/login", {
+          email,
+          password: "password123",
+        });
+        userToken = ((await login.json()) as { token: string }).token;
+
+        assertEquals(
+          (await get("/api/v1/models/huggingface/settings", userToken)).status,
+          403,
+        );
+        assertEquals(
+          (
+            await patch(
+              "/api/v1/models/huggingface/settings",
+              { token: "hf_x" },
+              userToken,
+            )
+          ).status,
+          403,
+        );
+        assertEquals(
+          (await post("/api/v1/models/huggingface/settings/test", {}, userToken)).status,
+          403,
+        );
+
+        // No stored token yet, but HF_TOKEN is set → env source.
+        const view = await get("/api/v1/models/huggingface/settings", adminToken);
+        assertEquals(view.status, 200);
+        assertEquals((await view.json()) as Record<string, unknown>, {
+          tokenSet: false,
+          tokenSource: "env",
+        });
+
+        const stored = await patch(
+          "/api/v1/models/huggingface/settings",
+          { token: "hf_ui_token" },
+          adminToken,
+        );
+        assertEquals(stored.status, 200);
+        assertEquals((await stored.json()) as Record<string, unknown>, {
+          tokenSet: true,
+          tokenSource: "settings",
+        });
+
+        const cleared = await patch(
+          "/api/v1/models/huggingface/settings",
+          { token: null },
+          adminToken,
+        );
+        assertEquals(cleared.status, 200);
+        assertEquals((await cleared.json()) as Record<string, unknown>, {
+          tokenSet: false,
+          tokenSource: "env",
+        });
+
+        assertEquals(
+          (await patch("/api/v1/models/huggingface/settings", {}, adminToken)).status,
+          400,
+        );
+        assertEquals(
+          (await patch("/api/v1/models/huggingface/settings", { token: 42 }, adminToken))
+            .status,
+          400,
+        );
+        assertEquals(
+          (
+            await patch(
+              "/api/v1/models/huggingface/settings",
+              { token: "x".repeat(513) },
+              adminToken,
+            )
+          ).status,
+          400,
+        );
+      });
+    } finally {
+      if (oldToken === undefined) Deno.env.delete("HF_TOKEN");
+      else Deno.env.set("HF_TOKEN", oldToken);
+    }
+  });
+
+  it("huggingface settings test validates the token via whoami", async () => {
+    updateHfToken("hf_ui_token");
+    await withServer(async (base) => {
+      baseUrl = base;
+      const ok = await post("/api/v1/models/huggingface/settings/test", {}, adminToken);
+      assertEquals(ok.status, 200);
+      assertEquals((await ok.json()) as Record<string, unknown>, {
+        ok: true,
+        name: "HF Tester",
+        source: "settings",
+      });
+      assertEquals(state.lastAuth, "Bearer hf_ui_token");
+    });
+  });
+
+  it("huggingface settings test 400s without any token", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await post("/api/v1/models/huggingface/settings/test", {}, adminToken);
+      assertEquals(res.status, 400);
+    });
+  });
+
+  it("huggingface settings test surfaces a rejected token as a 502", async () => {
+    state.whoamiStatus = 401;
+    updateHfToken("hf_bad_token");
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await post("/api/v1/models/huggingface/settings/test", {}, adminToken);
+      assertEquals(res.status, 502);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      assertEquals(body.error.code, "NETWORK_ERROR");
+      assertMatch(body.error.message, /rejected the token/);
+    });
   });
 
   it("maps an upstream 401 to a 502 with an actionable message", async () => {
@@ -385,9 +704,10 @@ describe("huggingface routes", () => {
       assertEquals(body.model.id, "textgen_v1");
       assertEquals(body.model.name, "owner/textgen-v1");
       assertEquals(body.model.source, "url");
+      // resolveFileUrl uses the (env-overridable) public base — the fake here.
       assertEquals(
         body.model.repository_url,
-        "https://huggingface.co/owner/textgen-v1/resolve/main/model.safetensors",
+        `${fake.publicUrl}/owner/textgen-v1/resolve/main/model.safetensors`,
       );
       assertEquals(body.file, "model.safetensors");
       assertEquals(body.repo.id, "owner/textgen-v1");
@@ -443,6 +763,29 @@ describe("huggingface routes", () => {
         adminToken,
       );
       assertEquals(res.status, 400);
+    });
+  });
+
+  it("from-huggingface picks a weight file from a subdirectory", async () => {
+    state.files = [
+      { name: "README.md", size: 10, type: "file" },
+      { name: "unet/diffusion_pytorch_model.safetensors", size: 2_000_000, type: "file" },
+      { name: "vae/diffusion_pytorch_model.safetensors", size: 300_000, type: "file" },
+    ];
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await post(
+        "/api/v1/models/from-huggingface",
+        { repo_id: "owner/textgen-v1" },
+        adminToken,
+      );
+      assertEquals(res.status, 201);
+      const body = (await res.json()) as {
+        file: string;
+        model: { repository_url: string };
+      };
+      assertEquals(body.file, "unet/diffusion_pytorch_model.safetensors");
+      assertMatch(body.model.repository_url, /unet\/diffusion_pytorch_model\.safetensors$/);
     });
   });
 

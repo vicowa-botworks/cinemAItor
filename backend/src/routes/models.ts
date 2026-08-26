@@ -27,10 +27,14 @@ import { requestBenchmark } from "@cinemaItor/services/model_benchmark.ts";
 import { detectHardware, modelRequirementWarnings } from "@cinemaItor/services/hardware.ts";
 import {
   getHuggingFaceRepo,
+  hfEffectiveToken,
   registerModelFromHuggingFace,
   searchHuggingFaceModels,
+  testHfToken,
   validateRepoId,
 } from "@cinemaItor/services/huggingface.ts";
+import { getHfSettingsView, updateHfToken } from "@cinemaItor/db/hf_settings.ts";
+import { logAudit } from "@cinemaItor/services/audit.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
 import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
@@ -127,6 +131,45 @@ function layout() {
   return storageLayout(loadConfig().appDataDir);
 }
 
+function handleHfSettingsGet(ctx: Context): void {
+  requireAdmin(ctx);
+  ctx.response.body = getHfSettingsView();
+}
+
+async function handleHfSettingsUpdate(ctx: Context): Promise<void> {
+  const adminId = requireAdmin(ctx);
+  const body = await readJsonBody(ctx);
+  if (!("token" in body)) throw badRequest("token is required");
+  const token = body.token;
+  if (token !== null && (typeof token !== "string" || token.length > 512)) {
+    throw badRequest("token must be a string of at most 512 characters, or null to clear");
+  }
+  const value = token === null ? "" : token.trim();
+  const view = updateHfToken(value);
+  logAudit(
+    adminId,
+    "hf.settings_update",
+    "setting",
+    value ? "token set" : "token cleared",
+  );
+  ctx.response.body = view;
+}
+
+async function handleHfSettingsTest(ctx: Context): Promise<void> {
+  requireAdmin(ctx);
+  if (!hfEffectiveToken()) {
+    throw badRequest(
+      "No HuggingFace token configured — set one above or via the HF_TOKEN env variable",
+    );
+  }
+  const name = await testHfToken();
+  ctx.response.body = {
+    ok: true,
+    name,
+    source: getHfSettingsView().tokenSource,
+  };
+}
+
 export const modelRouter = new Router()
   .get("/api/v1/models", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
@@ -193,6 +236,15 @@ export const modelRouter = new Router()
     const limit = limitRaw === null ? 12 : Math.min(50, Math.max(1, Number(limitRaw) || 12));
     const results = await searchHuggingFaceModels(query.trim(), filter, limit);
     ctx.response.body = { results };
+  })
+  .get("/api/v1/models/huggingface/settings", authMiddleware, (ctx, _next) => {
+    handleHfSettingsGet(ctx);
+  })
+  .patch("/api/v1/models/huggingface/settings", authMiddleware, async (ctx, _next) => {
+    await handleHfSettingsUpdate(ctx);
+  })
+  .post("/api/v1/models/huggingface/settings/test", authMiddleware, async (ctx, _next) => {
+    await handleHfSettingsTest(ctx);
   })
   .get("/api/v1/models/huggingface/:repoId", authMiddleware, async (ctx, _next) => {
     requireUserId(ctx);
@@ -399,13 +451,56 @@ export const openApiOps: Record<string, OperationMeta> = {
       ...errorResponses(401, 502),
     },
   },
+  "GET /api/v1/models/huggingface/settings": {
+    summary: "HuggingFace token settings (admin)",
+    description: "Where the effective HuggingFace token comes from: the admin-stored " +
+      "token (this settings row), the `HF_TOKEN` env variable, or neither.",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "Token status",
+        schema: ref("HuggingFaceTokenSettings"),
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "PATCH /api/v1/models/huggingface/settings": {
+    summary: "Store or clear the HuggingFace token (admin)",
+    description: "The stored token is forwarded as a Bearer credential to HuggingFace " +
+      "(it takes precedence over the `HF_TOKEN` env variable). Pass `token: null` to clear.",
+    adminOnly: true,
+    requestBody: { schema: ref("HuggingFaceTokenUpdate") },
+    responses: {
+      200: {
+        description: "Updated token status",
+        schema: ref("HuggingFaceTokenSettings"),
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "POST /api/v1/models/huggingface/settings/test": {
+    summary: "Test the effective HuggingFace token (admin)",
+    description: "Calls HuggingFace `/whoami-v2` with the effective token (stored token, " +
+      "else `HF_TOKEN`) and reports the authenticated account.",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "Token accepted",
+        schema: ref("HuggingFaceTokenTest"),
+      },
+      ...errorResponses(400, 401, 403, 502),
+    },
+  },
   "GET /api/v1/models/huggingface/{repoId}": {
     summary: "HuggingFace repo metadata + file listing",
     description: "Repo id is the percent-encoded `owner/name` (e.g. " +
-      "`stabilityai%2Fsd-xl`). Files are the root-level `/tree/main` entries with sizes.",
+      "`stabilityai%2Fsd-xl`). Files are the recursive `/tree/main?recursive=true` entries " +
+      "with sizes (weights in subfolders such as `vae/` or `transformer/` are included; the " +
+      "list is capped at 500 files, weight files always kept — see `filesTruncated`). " +
+      "`readme` is a truncated `README.md` excerpt or null.",
     responses: {
       200: {
-        description: "Repo metadata and files",
+        description: "Repo metadata, files and README excerpt",
         schema: ref("HuggingFaceRepo"),
       },
       ...errorResponses(400, 401, 404, 502),
