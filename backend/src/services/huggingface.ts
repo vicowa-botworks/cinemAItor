@@ -5,6 +5,7 @@ import {
   registerModel,
   type RegisterModelInput,
 } from "../db/models.ts";
+import { getHfToken } from "../db/hf_settings.ts";
 
 /** Public HuggingFace REST API root (metadata only; public repos need no token). */
 export const HF_API_BASE = "https://huggingface.co/api";
@@ -15,8 +16,16 @@ export const HF_PUBLIC_BASE = "https://huggingface.co";
 export function hfApiBase(): string {
   return Deno.env.get("HF_API_BASE") ?? HF_API_BASE;
 }
+/** Effective public site root — `HF_PUBLIC_BASE` env override (tests). */
+export function hfPublicBase(): string {
+  return Deno.env.get("HF_PUBLIC_BASE") ?? HF_PUBLIC_BASE;
+}
 const HF_TIMEOUT_MS = 15_000;
 const LICENSE_PREFIX = "license:";
+/** Hard cap on files returned per repo listing (weight files are always kept). */
+export const HF_MAX_FILES = 500;
+/** README excerpt size kept for the UI + copilot context. */
+export const HF_README_MAX_CHARS = 4000;
 
 export interface HfRepoSummary {
   id: string;
@@ -36,6 +45,8 @@ export interface HfRepoFile {
 export interface HfRepoInfo {
   repo: HfRepoSummary;
   files: HfRepoFile[];
+  readme: string | null;
+  filesTruncated: boolean;
 }
 
 /** Weight file extensions the auto-register heuristic accepts. */
@@ -86,12 +97,20 @@ function normalizeFiles(entries: unknown[]): HfRepoFile[] {
 }
 
 /**
+ * Effective HuggingFace token: the admin-stored token (settings) wins, then the
+ * `HF_TOKEN` env, then none.
+ */
+export function hfEffectiveToken(): string {
+  return getHfToken() || Deno.env.get("HF_TOKEN") || "";
+}
+
+/**
  * Optional auth for HuggingFace. Public repos need no token, but HF has been
- * tightening anonymous access on per-repo endpoints — when `HF_TOKEN` is set
- * it is forwarded as a Bearer token.
+ * tightening anonymous access on per-repo endpoints — when a token is configured
+ * (settings or env) it is forwarded as a Bearer token.
  */
 function hfAuthHeaders(): Record<string, string> {
-  const token = Deno.env.get("HF_TOKEN");
+  const token = hfEffectiveToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -162,7 +181,50 @@ export async function searchHuggingFaceModels(
 }
 
 /**
- * Repo metadata + root-level file listing with sizes (`/tree/main`, non-recursive).
+ * Keep at most `HF_MAX_FILES` entries, always preserving every weight file so
+ * the auto-register heuristic still finds them on huge repos.
+ */
+export function capHfFiles(files: HfRepoFile[]): { files: HfRepoFile[]; truncated: boolean } {
+  if (files.length <= HF_MAX_FILES) return { files, truncated: false };
+  const isWeight = (f: HfRepoFile): boolean =>
+    HF_WEIGHT_EXTENSIONS.some((ext) => f.path.toLowerCase().endsWith(ext));
+  const weights = files.filter(isWeight).slice(0, HF_MAX_FILES);
+  const others = files.filter((f) => !isWeight(f));
+  const head = weights.length < HF_MAX_FILES ? others.slice(0, HF_MAX_FILES - weights.length) : [];
+  return { files: [...weights, ...head], truncated: true };
+}
+
+/** Trim a README to a bounded excerpt for the UI + copilot context. */
+export function truncateReadme(readme: string): string | null {
+  const trimmed = readme.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= HF_README_MAX_CHARS) return trimmed;
+  return `${trimmed.slice(0, HF_README_MAX_CHARS)}\n… (truncated)`;
+}
+
+/**
+ * Best-effort README fetch (`resolve/main/README.md`). Returns null when the
+ * repo has no README or the fetch fails — a missing README never fails the
+ * repo lookup.
+ */
+async function fetchReadme(
+  repoId: string,
+  publicBase: string,
+): Promise<string | null> {
+  try {
+    const res = await hfFetch(`${publicBase}/${repoId}/resolve/main/README.md`);
+    if (!res.ok) return null;
+    const text = await res.text();
+    return truncateReadme(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Repo metadata + recursive file listing with sizes (`/tree/main?recursive=true`,
+ * so weights in subfolders such as `vae/`, `transformer/`, `text_encoder/` are
+ * found) + a truncated README excerpt.
  * The repo id is `owner/name`; each segment is percent-encoded separately — the
  * HuggingFace API rejects a percent-encoded slash (`owner%2Fname`) with HTTP 400
  * ("repo name includes an url-encoded slash"), so the slash must stay literal.
@@ -170,20 +232,26 @@ export async function searchHuggingFaceModels(
 export async function getHuggingFaceRepo(
   repoId: string,
   baseUrl: string = hfApiBase(),
+  publicBase: string = hfPublicBase(),
 ): Promise<HfRepoInfo> {
   validateRepoId(repoId);
   const [owner, name] = repoId.split("/");
   const encoded = `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-  const [meta, tree] = await Promise.all([
+  const [meta, tree, readme] = await Promise.all([
     hfFetchJson(`${baseUrl}/models/${encoded}`),
-    hfFetchJson(`${baseUrl}/models/${encoded}/tree/main`),
+    hfFetchJson(`${baseUrl}/models/${encoded}/tree/main?recursive=true`),
+    fetchReadme(repoId, publicBase),
   ]);
   if (typeof meta !== "object" || meta === null) {
     throw hfError("HuggingFace returned no repo metadata");
   }
+  const allFiles = Array.isArray(tree) ? normalizeFiles(tree) : [];
+  const capped = capHfFiles(allFiles);
   return {
     repo: normalizeRepo(meta as Record<string, unknown>),
-    files: Array.isArray(tree) ? normalizeFiles(tree) : [],
+    files: capped.files,
+    readme,
+    filesTruncated: capped.truncated,
   };
 }
 
@@ -228,7 +296,35 @@ export function pickWeightFile(
 
 /** Download URL for a repo file on the default branch. */
 export function resolveFileUrl(repoId: string, file: string): string {
-  return `${HF_PUBLIC_BASE}/${repoId}/resolve/main/${file}`;
+  return `${hfPublicBase()}/${repoId}/resolve/main/${file}`;
+}
+
+/**
+ * Validate the effective HuggingFace token against `/whoami-v2`. Returns the
+ * account name on success; throws a 502 when the token is rejected or HF is
+ * unreachable.
+ */
+export async function testHfToken(baseUrl: string = hfApiBase()): Promise<string> {
+  const res = await hfFetch(`${baseUrl}/whoami-v2`);
+  if (res.status === 401 || res.status === 403) {
+    throw hfError(
+      "HuggingFace rejected the token (HTTP 401/403) — check that it is a valid access token",
+      `HTTP ${res.status}`,
+    );
+  }
+  if (!res.ok) {
+    throw hfError(`HuggingFace API error (HTTP ${res.status})`, `HTTP ${res.status}`);
+  }
+  try {
+    const data = (await res.json()) as Record<string, unknown>;
+    return typeof data.fullname === "string" && data.fullname
+      ? data.fullname
+      : typeof data.name === "string"
+      ? data.name
+      : "authenticated";
+  } catch {
+    throw hfError("HuggingFace returned a non-JSON response");
+  }
 }
 
 /**

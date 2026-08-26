@@ -309,7 +309,11 @@ describe("llm agent", () => {
       return notFound();
     });
     const oldHfBase = Deno.env.get("HF_API_BASE");
+    const oldHfPublicBase = Deno.env.get("HF_PUBLIC_BASE");
     Deno.env.set("HF_API_BASE", `http://127.0.0.1:${hf.addr.port}/api`);
+    // README fetches go to the public site base — point it at the fake too so
+    // the test never touches the real huggingface.co.
+    Deno.env.set("HF_PUBLIC_BASE", `http://127.0.0.1:${hf.addr.port}`);
     try {
       await withServer(async (base) => {
         baseUrl = base;
@@ -349,6 +353,8 @@ describe("llm agent", () => {
     } finally {
       if (oldHfBase === undefined) Deno.env.delete("HF_API_BASE");
       else Deno.env.set("HF_API_BASE", oldHfBase);
+      if (oldHfPublicBase === undefined) Deno.env.delete("HF_PUBLIC_BASE");
+      else Deno.env.set("HF_PUBLIC_BASE", oldHfPublicBase);
       hf.shutdown();
     }
   });

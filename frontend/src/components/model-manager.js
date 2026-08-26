@@ -789,6 +789,50 @@ export class ModelManager extends LitElement {
       font-size: 13px;
       cursor: pointer;
     }
+
+    .hf-token {
+      margin: 10px 0;
+      padding: 8px 12px;
+      border: 1px solid var(--border, #d0d0d0);
+      border-radius: 8px;
+    }
+
+    .hf-token summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .hf-token-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      align-items: center;
+    }
+
+    .hf-token-form input {
+      flex: 1;
+      min-width: 220px;
+    }
+
+    .hf-readme {
+      margin-top: 8px;
+    }
+
+    .hf-readme pre {
+      margin-top: 8px;
+      max-height: 280px;
+      overflow: auto;
+      padding: 10px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: var(--code-bg, rgba(0, 0, 0, 0.04));
+      border-radius: 6px;
+    }
   `;
 
   static properties = {
@@ -829,6 +873,10 @@ export class ModelManager extends LitElement {
     hfForm: { state: true },
     hfBusy: { state: true },
     hfNotice: { state: true },
+    hfToken: { state: true },
+    hfTokenInput: { state: true },
+    hfTokenBusy: { state: true },
+    hfTokenMsg: { state: true },
   };
 
   constructor() {
@@ -870,6 +918,10 @@ export class ModelManager extends LitElement {
     this.hfForm = { ...EMPTY_HF_FORM };
     this.hfBusy = false;
     this.hfNotice = null;
+    this.hfToken = null;
+    this.hfTokenInput = "";
+    this.hfTokenBusy = false;
+    this.hfTokenMsg = null;
     this._queryTimer = null;
   }
 
@@ -1545,6 +1597,7 @@ export class ModelManager extends LitElement {
           model row — weights are downloaded later by the (consent-gated) install
           action.
         </p>
+        ${this._renderHfTokenPanel()}
         <form
           class="hf-search"
           @submit=${(e) => {
@@ -1602,6 +1655,18 @@ export class ModelManager extends LitElement {
           ? html`
             <div class="hf-repo">
               <h4>${this.hfRepo.repo.id}</h4>
+              ${(this.hfRepo.repo.tags ?? [])
+                .filter((t) => !t.startsWith("license:"))
+                .slice(0, 6)
+                .map((t) => html`<span class="chip">${t}</span>`)}
+              ${this.hfRepo.readme
+                ? html`
+                  <details class="hf-readme">
+                    <summary>README (usage examples)</summary>
+                    <pre>${this.hfRepo.readme}</pre>
+                  </details>
+                `
+                : null}
               <div class="hf-files">
                 ${this.hfRepo.files.map(
                   (f) =>
@@ -1621,6 +1686,11 @@ export class ModelManager extends LitElement {
                     `,
                 )}
               </div>
+              ${this.hfRepo.filesTruncated
+                ? html`<div class="notice">
+                  File listing is capped — weight files are always kept.
+                </div>`
+                : null}
               <div class="reg-grid">
                 <div class="reg-field">
                   <label for="hf-name">Name</label>
@@ -1691,6 +1761,12 @@ export class ModelManager extends LitElement {
                       Register is admin-only
                     </span>
                   `}
+                <button
+                  class="btn btn-secondary"
+                  ?disabled=${this.hfBusy}
+                  @click=${() => this._hfAskCopilot()}>
+                  Ask Model Copilot
+                </button>
               </div>
             </div>
           `
@@ -1730,15 +1806,134 @@ export class ModelManager extends LitElement {
       const res = await api.getHuggingFaceRepo(repoId);
       this.hfRepo = res;
       const weight = res.files.find((f) => /\.(safetensors|gguf|ckpt|bin)$/i.test(f.path));
+      const tag = (res.repo.pipeline_tag ?? "").replace(/-/g, "_");
       this.hfForm = {
         ...EMPTY_HF_FORM,
         file: weight ? weight.path : "",
         name: res.repo.id,
+        tasks: TASK_TYPES.includes(tag) ? [tag] : [],
       };
     } catch (err) {
       this.hfError = err?.message ?? "Could not load the repo";
     } finally {
       this.hfLoadingRepo = false;
+    }
+  }
+
+  _hfAskCopilot() {
+    const repo = this.hfRepo;
+    if (!repo) return;
+    const lines = [`Help me register this HuggingFace repo: ${repo.repo.id}`];
+    if (repo.repo.pipeline_tag) lines.push(`Pipeline: ${repo.repo.pipeline_tag}`);
+    lines.push(`Weight file: ${this.hfForm.file || "auto (largest weight file)"}`);
+    if (repo.readme) lines.push(`README excerpt: ${repo.readme.slice(0, 600)}`);
+    this.copilotInput = lines.join("\n");
+    this.updateComplete.then(() => {
+      this.shadowRoot?.querySelector(".copilot-input textarea")?.focus();
+    });
+  }
+
+  _renderHfTokenPanel() {
+    if (!this.isAdmin) return null;
+    const status = this.hfToken ?? { tokenSet: false, tokenSource: "none" };
+    const hasToken = status.tokenSet || status.tokenSource === "env";
+    const source = status.tokenSource === "settings"
+      ? "stored token"
+      : status.tokenSource === "env"
+      ? "HF_TOKEN env"
+      : "not set";
+    return html`
+      <details class="hf-token">
+        <summary>
+          HuggingFace token
+          <span class="chip ${hasToken ? "enabled" : "disabled"}">${source}</span>
+        </summary>
+        <p class="admin-note">
+          Optional. Forwarded to HuggingFace as a Bearer credential — needed when a
+          repo (or its API) restricts anonymous access. A stored token takes
+          precedence over the HF_TOKEN env variable.
+        </p>
+        <form
+          class="hf-token-form"
+          @submit=${(e) => {
+            e.preventDefault();
+            this._hfTokenSave();
+          }}>
+          <input
+            type="password"
+            placeholder="hf_..."
+            autocomplete="new-password"
+            .value=${this.hfTokenInput}
+            @input=${(e) => (this.hfTokenInput = e.target.value)} />
+          <button
+            class="btn btn-small"
+            type="submit"
+            ?disabled=${this.hfTokenBusy || this.hfTokenInput === ""}>
+            ${this.hfTokenBusy ? "Saving..." : "Save token"}
+          </button>
+          <button
+            class="btn btn-secondary btn-small"
+            type="button"
+            ?disabled=${this.hfTokenBusy || !status.tokenSet}
+            @click=${() => this._hfTokenClear()}>
+            Clear
+          </button>
+          <button
+            class="btn btn-secondary btn-small"
+            type="button"
+            ?disabled=${this.hfTokenBusy || !hasToken}
+            @click=${() => this._hfTokenTest()}>
+            Test
+          </button>
+        </form>
+        ${this.hfTokenMsg
+          ? html`<div class="notice ${this.hfTokenMsg.kind}">${this.hfTokenMsg.text}</div>`
+          : null}
+      </details>
+    `;
+  }
+
+  async _hfTokenSave() {
+    this.hfTokenBusy = true;
+    this.hfTokenMsg = null;
+    try {
+      this.hfToken = await api.updateHuggingFaceToken(this.hfTokenInput.trim());
+      this.hfTokenInput = "";
+      this.hfTokenMsg = { kind: "ok", text: "Token saved." };
+    } catch (err) {
+      this.hfTokenMsg = { kind: "error", text: err?.message ?? "Failed to save the token" };
+    } finally {
+      this.hfTokenBusy = false;
+    }
+  }
+
+  async _hfTokenClear() {
+    this.hfTokenBusy = true;
+    this.hfTokenMsg = null;
+    try {
+      this.hfToken = await api.updateHuggingFaceToken(null);
+      this.hfTokenMsg = { kind: "ok", text: "Stored token cleared." };
+    } catch (err) {
+      this.hfTokenMsg = { kind: "error", text: err?.message ?? "Failed to clear the token" };
+    } finally {
+      this.hfTokenBusy = false;
+    }
+  }
+
+  async _hfTokenTest() {
+    this.hfTokenBusy = true;
+    this.hfTokenMsg = null;
+    try {
+      const res = await api.testHuggingFaceToken();
+      this.hfToken = await api.getHuggingFaceSettings();
+      this.hfTokenMsg = {
+        kind: "ok",
+        text: `Token accepted — authenticated as ${res.name}.`,
+      };
+    } catch (err) {
+      this.hfTokenMsg = { kind: "error", text: err?.message ?? "Token test failed" };
+    } finally {
+      this.hfTokenBusy = false;
     }
   }
 
@@ -1924,8 +2119,21 @@ export class ModelManager extends LitElement {
       await this._loadHardware();
       await this._loadBenchmarks();
       await this._loadLlm();
+      await this._loadHfToken();
     } finally {
       this.loading = false;
+    }
+  }
+
+  async _loadHfToken() {
+    if (!this.isAdmin) {
+      this.hfToken = null;
+      return;
+    }
+    try {
+      this.hfToken = await api.getHuggingFaceSettings();
+    } catch {
+      this.hfToken = null;
     }
   }
 

@@ -2725,13 +2725,52 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
   },
   HuggingFaceRepo: {
     type: "object",
-    required: ["repo", "files"],
+    required: ["repo", "files", "readme", "filesTruncated"],
     properties: {
       repo: { $ref: "#/components/schemas/HuggingFaceRepoSummary" },
       files: {
         type: "array",
         items: { $ref: "#/components/schemas/HuggingFaceRepoFile" },
       },
+      readme: {
+        type: ["string", "null"],
+        description: "Truncated README.md excerpt (usage examples), null when absent",
+      },
+      filesTruncated: {
+        type: "boolean",
+        description: "True when the listing was capped (weight files are always kept)",
+      },
+    },
+  },
+  HuggingFaceTokenSettings: {
+    type: "object",
+    required: ["tokenSet", "tokenSource"],
+    properties: {
+      tokenSet: { type: "boolean" },
+      tokenSource: {
+        type: "string",
+        enum: ["settings", "env", "none"],
+        description: "Where the effective token comes from",
+      },
+    },
+  },
+  HuggingFaceTokenUpdate: {
+    type: "object",
+    required: ["token"],
+    properties: {
+      token: {
+        type: ["string", "null"],
+        description: "New token (max 512 chars), or null to clear",
+      },
+    },
+  },
+  HuggingFaceTokenTest: {
+    type: "object",
+    required: ["ok", "name", "source"],
+    properties: {
+      ok: { type: "boolean" },
+      name: { type: "string", description: "Authenticated HuggingFace account" },
+      source: { type: "string", enum: ["settings", "env"] },
     },
   },
   HuggingFaceRegisterRequest: {

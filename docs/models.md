@@ -15,22 +15,25 @@ task mapping, hardware detection, and requirement warnings.
 
 ## Endpoints
 
-| Method | Endpoint                             | Description                                                    |
-| ------ | ------------------------------------ | -------------------------------------------------------------- |
-| GET    | `/api/v1/models`                     | List (filter: `enabled`, `task_type`, `query`)                 |
-| POST   | `/api/v1/models`                     | Register metadata (admin)                                      |
-| GET    | `/api/v1/models/hardware`            | Detected hardware + requirement warnings for enabled models    |
-| GET    | `/api/v1/models/huggingface/search`  | Search the public HuggingFace catalog (`?q=&filter=&limit=`)   |
-| GET    | `/api/v1/models/huggingface/:repoId` | Repo metadata + root file listing (`:repoId` = `owner%2Fname`) |
-| POST   | `/api/v1/models/from-huggingface`    | Register a model straight from an HF repo (admin)              |
-| GET    | `/api/v1/models/:id`                 | One model                                                      |
-| PATCH  | `/api/v1/models/:id`                 | Update metadata / enable / disable (admin)                     |
-| DELETE | `/api/v1/models/:id`                 | Remove model + installed files (admin)                         |
-| POST   | `/api/v1/models/:id/install`         | Install artifact (admin); network sources need `consent: true` |
-| POST   | `/api/v1/models/:id/verify`          | SHA-256 checksum of installed file vs stored hash              |
-| POST   | `/api/v1/models/:id/health-check`    | Install state, checksum, runtime availability                  |
-| POST   | `/api/v1/models/:id/benchmark`       | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)      |
-| GET    | `/api/v1/models/:id/benchmarks`      | Benchmark results, newest first (latest 20)                    |
+| Method | Endpoint                                   | Description                                                                  |
+| ------ | ------------------------------------------ | ---------------------------------------------------------------------------- |
+| GET    | `/api/v1/models`                           | List (filter: `enabled`, `task_type`, `query`)                               |
+| POST   | `/api/v1/models`                           | Register metadata (admin)                                                    |
+| GET    | `/api/v1/models/hardware`                  | Detected hardware + requirement warnings for enabled models                  |
+| GET    | `/api/v1/models/huggingface/search`        | Search the public HuggingFace catalog (`?q=&filter=&limit=`)                 |
+| GET    | `/api/v1/models/huggingface/:repoId`       | Repo metadata + recursive file listing + README (`:repoId` = `owner%2Fname`) |
+| GET    | `/api/v1/models/huggingface/settings`      | HF token status, masked (`{tokenSet, tokenSource}`) (admin)                  |
+| PATCH  | `/api/v1/models/huggingface/settings`      | Store or clear the HF token (`{token}`) (admin)                              |
+| POST   | `/api/v1/models/huggingface/settings/test` | Validate the effective token via HF `/whoami-v2` (admin)                     |
+| POST   | `/api/v1/models/from-huggingface`          | Register a model straight from an HF repo (admin)                            |
+| GET    | `/api/v1/models/:id`                       | One model                                                                    |
+| PATCH  | `/api/v1/models/:id`                       | Update metadata / enable / disable (admin)                                   |
+| DELETE | `/api/v1/models/:id`                       | Remove model + installed files (admin)                                       |
+| POST   | `/api/v1/models/:id/install`               | Install artifact (admin); network sources need `consent: true`               |
+| POST   | `/api/v1/models/:id/verify`                | SHA-256 checksum of installed file vs stored hash                            |
+| POST   | `/api/v1/models/:id/health-check`          | Install state, checksum, runtime availability                                |
+| POST   | `/api/v1/models/:id/benchmark`             | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)                    |
+| GET    | `/api/v1/models/:id/benchmarks`            | Benchmark results, newest first (latest 20)                                  |
 
 Read endpoints and benchmarks accept any authenticated user (both are measurements only, no assets
 are written); mutations (register/patch/delete/install) require the admin role. Everything is
@@ -64,8 +67,9 @@ distinguished by id/name/version metadata).
 The model-manager page also has a **Browse HuggingFace** panel (all authenticated users can search;
 registering is admin-only). It is a server-side proxy of the **public** HuggingFace REST API —
 `https://huggingface.co/api`, public repos only, 15 s timeout. HF has been restricting anonymous
-per-repo access; when the backend runs with the `HF_TOKEN` environment variable set (a HuggingFace
-access token), it is forwarded as a Bearer credential:
+per-repo access; a HuggingFace access token is forwarded as a Bearer credential. The effective token
+is the one **stored in CinemAItor** (admin, see below) when set, otherwise the `HF_TOKEN`
+environment variable:
 
 - `GET /api/v1/models/huggingface/search?q=&filter=&limit=` — search repo ids; `filter` is the HF
   pipeline tag (e.g. `text-to-image`); limit 1–50 (default 12). The response normalizes each repo to
@@ -73,22 +77,43 @@ access token), it is forwarded as a Bearer credential:
 - `GET /api/v1/models/huggingface/:repoId` — `:repoId` is the percent-encoded `owner/name` on the
   wire (our router decodes it); upstream it is requested with a **literal** slash
   (`/api/models/<owner>/<name>`) — the live HF API rejects `owner%2Fname` with HTTP 400. Returns
-  `{repo: …, files: [{path, size, type}]}` from `/tree/main` (root level, directory entries filtered
-  out).
+  `{repo: {id, likes, downloads, pipeline_tag, tags, license}, files, filesTruncated, readme}`:
+  - `files` — the **recursive** file listing from `/tree/main?recursive=true` (directory entries
+    filtered out), so weight files in subdirectories (`vae/`, `transformer/`, `text_encoder/`, the
+    typical diffusers layout) are discoverable. Capped at 500 files, weight files
+    (`.safetensors`/`.gguf`/`.ckpt`/`.bin`) always kept; `filesTruncated` flags a capped listing.
+  - `readme` — the first ~4,000 characters of the repo's `README.md` (usage examples, model-card
+    notes); `null` when the repo has none or the fetch fails.
+- **HF token settings** (admin) —
+  - `GET /api/v1/models/huggingface/settings` → `{tokenSet, tokenSource}` (`tokenSource`: `settings`
+    | `env` | `none`). The token itself is never returned.
+  - `PATCH /api/v1/models/huggingface/settings` with `{token}` (string of at most 512 chars,
+    trimmed; empty clears) stores the token in the `settings` table (`huggingface_token`, stored raw
+    like the LLM key); `{token: null}` clears it. Validation failure → `400`.
+  - `POST /api/v1/models/huggingface/settings/test` validates the _effective_ token against HF's
+    `/whoami-v2` and returns `{ok, name, source}`; `400` when no token is configured, `502` when HF
+    rejects it (actionable message).
+  - The admin UI shows the status chip, save/clear/test controls, and notes the stored-over-env
+    precedence.
 - `POST /api/v1/models/from-huggingface` (admin) —
   `{repo_id, file?, backend?, task_types?, name?,
   version?, min_vram_mb?, dependencies?, known_limitations?}`.
   The server picks the weight file (explicit `file`, or the largest file among
-  `.safetensors`/`.gguf`/`.ckpt`/`.bin` in the root listing) and registers a model row with
+  `.safetensors`/`.gguf`/`.ckpt`/`.bin` in the recursive listing) and registers a model row with
   `source: "url"` and `repository_url` set to the `resolve/main` URL of that file — the normal
   install flow then downloads it from there (consent-gated, as with any URL source). The model id is
   the slugified last repo segment (`stabilityai/sdxl-base` → `sdxl_base`); if that id is already
   registered the call answers `409` (use the manual form to register the repo under a different id).
   Weights are **not** downloaded by this call.
 
-Errors: `400` bad repo id / no usable weight file / unknown `file`, `404` unknown repo, `409` model
-id already registered, `502` HuggingFace unreachable, timed out, or rejected (upstream `401` — set
-`HF_TOKEN`).
+The repo panel also surfaces the repo's tags and README, prefills the task types from the pipeline
+tag, and offers an **Ask Model Copilot** action that hands the repo context (id, pipeline, selected
+weight file, README excerpt) to the Model Copilot, which can walk the registration through its tool
+harness (mutating tools as approve-gated proposals for admins).
+
+Errors: `400` bad repo id / no usable weight file / unknown `file` / invalid token, `404` unknown
+repo, `409` model id already registered, `502` HuggingFace unreachable, timed out, or rejected
+(upstream `401`/`403` — store a token in the HF token settings or set `HF_TOKEN`).
 
 ## Behavior
 

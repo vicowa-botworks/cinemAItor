@@ -717,6 +717,24 @@ class ApiClient {
     });
   }
 
+  getHuggingFaceSettings() {
+    return this.request("/models/huggingface/settings");
+  }
+
+  updateHuggingFaceToken(token) {
+    return this.request("/models/huggingface/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  testHuggingFaceToken() {
+    return this.request("/models/huggingface/settings/test", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   // --- v1 jobs ---
 
   listJobs(filter = {}) {
