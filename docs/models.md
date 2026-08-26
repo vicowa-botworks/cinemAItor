@@ -63,14 +63,18 @@ distinguished by id/name/version metadata).
 
 The model-manager page also has a **Browse HuggingFace** panel (all authenticated users can search;
 registering is admin-only). It is a server-side proxy of the **public** HuggingFace REST API —
-`https://huggingface.co/api`, no token, public repos only, 15 s timeout:
+`https://huggingface.co/api`, public repos only, 15 s timeout. HF has been restricting anonymous
+per-repo access; when the backend runs with the `HF_TOKEN` environment variable set (a HuggingFace
+access token), it is forwarded as a Bearer credential:
 
 - `GET /api/v1/models/huggingface/search?q=&filter=&limit=` — search repo ids; `filter` is the HF
   pipeline tag (e.g. `text-to-image`); limit 1–50 (default 12). The response normalizes each repo to
   `{id, likes, downloads, pipeline_tag, tags, license}` (license parsed from the `license:*` tag).
-- `GET /api/v1/models/huggingface/:repoId` — `:repoId` is the percent-encoded `owner/name` (the
-  router decodes it). Returns `{repo: …, files: [{path, size, type}]}` from `/tree/main` (root
-  level, directory entries filtered out).
+- `GET /api/v1/models/huggingface/:repoId` — `:repoId` is the percent-encoded `owner/name` on the
+  wire (our router decodes it); upstream it is requested with a **literal** slash
+  (`/api/models/<owner>/<name>`) — the live HF API rejects `owner%2Fname` with HTTP 400. Returns
+  `{repo: …, files: [{path, size, type}]}` from `/tree/main` (root level, directory entries filtered
+  out).
 - `POST /api/v1/models/from-huggingface` (admin) —
   `{repo_id, file?, backend?, task_types?, name?,
   version?, min_vram_mb?, dependencies?, known_limitations?}`.
@@ -83,7 +87,8 @@ registering is admin-only). It is a server-side proxy of the **public** HuggingF
   Weights are **not** downloaded by this call.
 
 Errors: `400` bad repo id / no usable weight file / unknown `file`, `404` unknown repo, `409` model
-id already registered, `502` HuggingFace unreachable or timed out.
+id already registered, `502` HuggingFace unreachable, timed out, or rejected (upstream `401` — set
+`HF_TOKEN`).
 
 ## Behavior
 

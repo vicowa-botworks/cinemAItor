@@ -85,9 +85,22 @@ function normalizeFiles(entries: unknown[]): HfRepoFile[] {
   }).filter((f) => f.type === "file");
 }
 
+/**
+ * Optional auth for HuggingFace. Public repos need no token, but HF has been
+ * tightening anonymous access on per-repo endpoints — when `HF_TOKEN` is set
+ * it is forwarded as a Bearer token.
+ */
+function hfAuthHeaders(): Record<string, string> {
+  const token = Deno.env.get("HF_TOKEN");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function hfFetch(url: string): Promise<Response> {
   try {
-    return await fetch(url, { signal: AbortSignal.timeout(HF_TIMEOUT_MS) });
+    return await fetch(url, {
+      headers: hfAuthHeaders(),
+      signal: AbortSignal.timeout(HF_TIMEOUT_MS),
+    });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
       throw hfError(
@@ -108,6 +121,13 @@ async function hfFetchJson(url: string): Promise<unknown> {
   const res = await hfFetch(url);
   if (res.status === 404) {
     throw notFound(`HuggingFace repo not found: ${new URL(url).pathname}`);
+  }
+  if (res.status === 401) {
+    throw hfError(
+      "HuggingFace rejected the request (HTTP 401) — anonymous per-repo access " +
+        "may be restricted; set HF_TOKEN to a HuggingFace access token and retry",
+      "HTTP 401",
+    );
   }
   if (!res.ok) {
     throw hfError(`HuggingFace API error (HTTP ${res.status})`, `HTTP ${res.status}`);
@@ -143,14 +163,17 @@ export async function searchHuggingFaceModels(
 
 /**
  * Repo metadata + root-level file listing with sizes (`/tree/main`, non-recursive).
- * The repo id may contain one `/` (owner/name); it is percent-encoded.
+ * The repo id is `owner/name`; each segment is percent-encoded separately — the
+ * HuggingFace API rejects a percent-encoded slash (`owner%2Fname`) with HTTP 400
+ * ("repo name includes an url-encoded slash"), so the slash must stay literal.
  */
 export async function getHuggingFaceRepo(
   repoId: string,
   baseUrl: string = hfApiBase(),
 ): Promise<HfRepoInfo> {
   validateRepoId(repoId);
-  const encoded = encodeURIComponent(repoId);
+  const [owner, name] = repoId.split("/");
+  const encoded = `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   const [meta, tree] = await Promise.all([
     hfFetchJson(`${baseUrl}/models/${encoded}`),
     hfFetchJson(`${baseUrl}/models/${encoded}/tree/main`),
