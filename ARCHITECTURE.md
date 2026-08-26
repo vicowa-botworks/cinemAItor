@@ -257,8 +257,10 @@ server.ts (entry point)
    │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows
    │   ├── Hardware detection + requirement warnings (/hardware)
    │   ├── HuggingFace catalog: /huggingface/search, /huggingface/:repoId (recursive file
-   │   │   listing + README), /huggingface/settings (+/test) optional token (stored > env),
-   │   │   POST /from-huggingface registers a url-sourced model row (admin)
+   │   │   listing + README, `main`→`master` branch fallback, entries keyed by `path`),
+   │   │   /huggingface/settings (+/test) optional token (stored > env),
+   │   │   POST /from-huggingface registers a url-sourced model row (admin; `resolve/<branch>`
+   │   │   URL); installs forward the HF token on HF-origin downloads (gated repos)
    │   └── (see docs/models.md)
   ├── Job routes (/api/v1/jobs/*, auth middleware)
   │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery

@@ -47,6 +47,8 @@ export interface HfRepoInfo {
   files: HfRepoFile[];
   readme: string | null;
   filesTruncated: boolean;
+  /** The branch the file listing came from (`main`, or `master` fallback). */
+  branch: string;
 }
 
 /** Weight file extensions the auto-register heuristic accepts. */
@@ -83,13 +85,19 @@ function normalizeRepo(entry: Record<string, unknown>): HfRepoSummary {
   };
 }
 
+/**
+ * Normalize raw `/tree/<branch>` entries. The live HF API keys entries by
+ * `path` (plus `size`, `type`, `oid`) — it never sends `name`; entries missing
+ * `path` are dropped. (We originally parsed `name`, which silently emptied
+ * every real repo listing while fakes that mirrored the bug kept tests green.)
+ */
 function normalizeFiles(entries: unknown[]): HfRepoFile[] {
   return entries.flatMap((e) => {
     if (typeof e !== "object" || e === null) return [];
     const rec = e as Record<string, unknown>;
-    if (typeof rec.name !== "string") return [];
+    if (typeof rec.path !== "string") return [];
     return [{
-      path: rec.name,
+      path: rec.path,
       size: typeof rec.size === "number" ? rec.size : 0,
       type: rec.type === "directory" ? "directory" as const : "file" as const,
     }];
@@ -203,16 +211,17 @@ export function truncateReadme(readme: string): string | null {
 }
 
 /**
- * Best-effort README fetch (`resolve/main/README.md`). Returns null when the
- * repo has no README or the fetch fails — a missing README never fails the
+ * Best-effort README fetch (`resolve/<branch>/README.md`). Returns null when
+ * the repo has no README or the fetch fails — a missing README never fails the
  * repo lookup.
  */
 async function fetchReadme(
   repoId: string,
   publicBase: string,
+  branch: string,
 ): Promise<string | null> {
   try {
-    const res = await hfFetch(`${publicBase}/${repoId}/resolve/main/README.md`);
+    const res = await hfFetch(`${publicBase}/${repoId}/resolve/${branch}/README.md`);
     if (!res.ok) return null;
     const text = await res.text();
     return truncateReadme(text);
@@ -222,9 +231,11 @@ async function fetchReadme(
 }
 
 /**
- * Repo metadata + recursive file listing with sizes (`/tree/main?recursive=true`,
- * so weights in subfolders such as `vae/`, `transformer/`, `text_encoder/` are
- * found) + a truncated README excerpt.
+ * Repo metadata + recursive file listing with sizes
+ * (`/tree/<branch>?recursive=true`, so weights in subfolders such as `vae/`,
+ * `transformer/`, `text_encoder/` are found) + a truncated README excerpt.
+ * The branch is resolved by probing `main`, then `master` (the tree endpoint
+ * 404s on an unknown branch).
  * The repo id is `owner/name`; each segment is percent-encoded separately — the
  * HuggingFace API rejects a percent-encoded slash (`owner%2Fname`) with HTTP 400
  * ("repo name includes an url-encoded slash"), so the slash must stay literal.
@@ -237,21 +248,38 @@ export async function getHuggingFaceRepo(
   validateRepoId(repoId);
   const [owner, name] = repoId.split("/");
   const encoded = `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-  const [meta, tree, readme] = await Promise.all([
+  // Most repos default to `main`, older ones to `master`; the tree endpoint
+  // 404s on an unknown branch, so probe the common defaults in order. The
+  // branch is resolved first (the README fetch needs it) and meta + README are
+  // fetched in parallel afterwards — no promise is left dangling on the error
+  // paths.
+  let branch = "main";
+  let tree: unknown;
+  try {
+    tree = await hfFetchJson(`${baseUrl}/models/${encoded}/tree/main?recursive=true`);
+  } catch (err) {
+    if (err instanceof AppError && err.status === 404) {
+      branch = "master";
+      tree = await hfFetchJson(`${baseUrl}/models/${encoded}/tree/master?recursive=true`);
+    } else {
+      throw err;
+    }
+  }
+  const [metaPayload, readme] = await Promise.all([
     hfFetchJson(`${baseUrl}/models/${encoded}`),
-    hfFetchJson(`${baseUrl}/models/${encoded}/tree/main?recursive=true`),
-    fetchReadme(repoId, publicBase),
+    fetchReadme(repoId, publicBase, branch),
   ]);
-  if (typeof meta !== "object" || meta === null) {
+  if (typeof metaPayload !== "object" || metaPayload === null) {
     throw hfError("HuggingFace returned no repo metadata");
   }
   const allFiles = Array.isArray(tree) ? normalizeFiles(tree) : [];
   const capped = capHfFiles(allFiles);
   return {
-    repo: normalizeRepo(meta as Record<string, unknown>),
+    repo: normalizeRepo(metaPayload as Record<string, unknown>),
     files: capped.files,
     readme,
     filesTruncated: capped.truncated,
+    branch,
   };
 }
 
@@ -294,9 +322,9 @@ export function pickWeightFile(
   return candidates.reduce((best, f) => (f.size > best.size ? f : best)).path;
 }
 
-/** Download URL for a repo file on the default branch. */
-export function resolveFileUrl(repoId: string, file: string): string {
-  return `${hfPublicBase()}/${repoId}/resolve/main/${file}`;
+/** Download URL for a repo file (on the given branch, `main` by default). */
+export function resolveFileUrl(repoId: string, file: string, branch: string = "main"): string {
+  return `${hfPublicBase()}/${repoId}/resolve/${branch}/${file}`;
 }
 
 /**
@@ -373,7 +401,7 @@ export async function registerModelFromHuggingFace(
     version: options.version ?? "1.0",
     backend: backend as RegisterModelInput["backend"],
     source: "url",
-    repository_url: resolveFileUrl(repoId, weightFile),
+    repository_url: resolveFileUrl(repoId, weightFile, info.branch),
     license: info.repo.license ?? undefined,
     vram_requirement_mb: options.min_vram_mb,
     dependencies: options.dependencies,

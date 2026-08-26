@@ -5,6 +5,7 @@ import { storageLayout } from "../storage/paths.ts";
 import { sha256File } from "../storage/checksums.ts";
 import { getModel, type Model, setModelInstalled } from "../db/models.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
+import { hfEffectiveToken, hfPublicBase } from "./huggingface.ts";
 
 // Installed artifacts live at <app_data>/models/<model_id>/model.bin.
 export function modelDir(layout: StorageLayout, modelId: string): string {
@@ -34,6 +35,25 @@ export async function fileExists(path: string): Promise<boolean> {
 export interface InstallResult {
   fileHash: string;
   fileBytes: number;
+}
+
+/**
+ * HuggingFace auth for weight downloads: gated repos (e.g. FLUX.2-dev) 401 on
+ * `resolve/` URLs without a token — even when the token's owner has accepted
+ * the repo's gate. The token is only ever forwarded to the HF origin, never to
+ * arbitrary `repository_url` hosts.
+ */
+function hfAuthForUrl(url: URL): Record<string, string> {
+  const token = hfEffectiveToken();
+  if (!token) return {};
+  try {
+    if (url.origin === new URL(hfPublicBase()).origin) {
+      return { Authorization: `Bearer ${token}` };
+    }
+  } catch {
+    // A malformed HF_PUBLIC_BASE override just means no auth header.
+  }
+  return {};
 }
 
 /** Copy a local source file into the model store (MOD-003). */
@@ -115,6 +135,7 @@ export async function installFromUrl(
   const { maxBytes } = opts;
   const baseDelayMs = opts.retryBaseDelayMs ?? 1000;
   const maxDelayMs = opts.retryMaxDelayMs ?? 30_000;
+  const authHeaders = hfAuthForUrl(parsed);
 
   const target = modelFile(layout, modelId);
   const part = `${target}.part`;
@@ -158,10 +179,12 @@ export async function installFromUrl(
 
     let res: Response;
     try {
-      res = await fetch(
-        parsed,
-        offset > 0 ? { headers: { range: `bytes=${offset}-` } } : undefined,
-      );
+      res = await fetch(parsed, {
+        headers: {
+          ...(offset > 0 ? { range: `bytes=${offset}-` } : {}),
+          ...authHeaders,
+        },
+      });
     } catch {
       // Network-level failure: retry from the current offset.
       await sleep(backoffMs(backoffAttempt++));

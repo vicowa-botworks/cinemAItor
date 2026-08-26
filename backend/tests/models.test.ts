@@ -340,6 +340,52 @@ describe("model manager", () => {
     }
   });
 
+  it("url install forwards the HF token only for the HF origin", async () => {
+    const m = registerModel(userId, {
+      name: "hf-gated-model",
+      version: "1.0",
+      backend: "mock",
+      source: "url",
+      repository_url: "",
+    });
+    const seenAuth: (string | null)[] = [];
+    const payload = new Uint8Array(64).fill(7);
+    const app = new Application();
+    app.use((ctx) => {
+      seenAuth.push(ctx.request.headers.get("authorization"));
+      ctx.response.body = payload;
+      ctx.response.status = 200;
+    });
+    const mock = await mockDownloadServerApp(app);
+    seenAuth.length = 0; // drop the readiness-probe request(s)
+    const oldHfToken = Deno.env.get("HF_TOKEN");
+    const oldHfPublicBase = Deno.env.get("HF_PUBLIC_BASE");
+    Deno.env.set("HF_TOKEN", "hf_test_token_123");
+    try {
+      // Origin matches the HF public base → the token is forwarded so gated
+      // repos (accepted gate + valid token) can download their weights.
+      Deno.env.set("HF_PUBLIC_BASE", mock.url);
+      await installFromUrl(layout, m.id, `${mock.url}/resolve/main/w.safetensors`, {
+        maxBytes: 1024 * 1024,
+      });
+      assertEquals(seenAuth, ["Bearer hf_test_token_123"]);
+
+      // A different origin → the token is never leaked to other hosts.
+      seenAuth.length = 0;
+      Deno.env.set("HF_PUBLIC_BASE", "http://127.0.0.1:9");
+      await installFromUrl(layout, m.id, `${mock.url}/other/w.safetensors`, {
+        maxBytes: 1024 * 1024,
+      });
+      assertEquals(seenAuth, [null]);
+    } finally {
+      if (oldHfToken === undefined) Deno.env.delete("HF_TOKEN");
+      else Deno.env.set("HF_TOKEN", oldHfToken);
+      if (oldHfPublicBase === undefined) Deno.env.delete("HF_PUBLIC_BASE");
+      else Deno.env.set("HF_PUBLIC_BASE", oldHfPublicBase);
+      mock.stop();
+    }
+  });
+
   it("url install rejects oversized payloads", async () => {
     const m = registerT2I();
     const mock = await mockDownloadServer(new Uint8Array(5).fill(1));

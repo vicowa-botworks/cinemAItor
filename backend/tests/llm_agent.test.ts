@@ -302,8 +302,9 @@ describe("llm agent", () => {
         });
       }
       if (parts.length === 6 && parts[4] === "tree" && parts[5] === "main") {
+        // Live HF tree entries are keyed by `path`, never `name`.
         return Response.json([
-          { name: "model.safetensors", size: 5_000_000_000, type: "file" },
+          { path: "model.safetensors", size: 5_000_000_000, type: "file" },
         ]);
       }
       return notFound();
