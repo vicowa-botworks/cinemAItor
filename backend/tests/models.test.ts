@@ -264,6 +264,56 @@ describe("model manager", () => {
     return mockDownloadServerApp(app);
   }
 
+  interface ScriptedRequest {
+    path: string;
+    range: string | null;
+    attempt: number;
+  }
+
+  interface ScriptedResponse {
+    status: number;
+    body?: Uint8Array;
+    /** Advertise this Content-Length; if bigger than the body, simulates a truncated transfer. */
+    truncatedContentLength?: number;
+    contentRange?: string;
+  }
+
+  /** A mock download server driven by a per-path request script. */
+  async function scriptedDownloadServer(
+    script: (req: ScriptedRequest) => ScriptedResponse,
+  ): Promise<{ url: string; requests: ScriptedRequest[]; stop: () => void }> {
+    const requests: ScriptedRequest[] = [];
+    const attempts = new Map<string, number>();
+    const app = new Application();
+    app.use((ctx) => {
+      const path = ctx.request.url.pathname;
+      const attempt = (attempts.get(path) ?? 0) + 1;
+      attempts.set(path, attempt);
+      const req: ScriptedRequest = { path, range: ctx.request.headers.get("range"), attempt };
+      requests.push(req);
+      const res = script(req);
+      ctx.response.status = res.status;
+      if (res.contentRange) ctx.response.headers.set("Content-Range", res.contentRange);
+      if (res.status === 416) {
+        ctx.response.body = new Uint8Array(0);
+        return;
+      }
+      const body = res.body ?? new Uint8Array(0);
+      if (res.truncatedContentLength !== undefined) {
+        ctx.response.headers.set("Content-Length", String(res.truncatedContentLength));
+        ctx.response.body = new ReadableStream({
+          start(c) {
+            c.enqueue(body);
+            c.close();
+          },
+        });
+      } else {
+        ctx.response.body = body;
+      }
+    });
+    return { ...(await mockDownloadServerApp(app)), requests };
+  }
+
   it("installs from a URL source", async () => {
     const m = registerModel(userId, {
       name: "url-model",
@@ -275,12 +325,9 @@ describe("model manager", () => {
     const payload = new Uint8Array([...Array(256).keys()].map((i) => i % 251));
     const mock = await mockDownloadServer(payload);
     try {
-      const result = await installFromUrl(
-        layout,
-        m.id,
-        `${mock.url}/model.bin`,
-        1024 * 1024,
-      );
+      const result = await installFromUrl(layout, m.id, `${mock.url}/model.bin`, {
+        maxBytes: 1024 * 1024,
+      });
       assertEquals(result.fileBytes, 256);
       assertEquals(
         (await verifyModelFile(layout, m.id, result.fileHash)).valid,
@@ -296,7 +343,7 @@ describe("model manager", () => {
     const mock = await mockDownloadServer(new Uint8Array(5).fill(1));
     try {
       await assertRejects(
-        () => installFromUrl(layout, m.id, `${mock.url}/big`, 2),
+        () => installFromUrl(layout, m.id, `${mock.url}/big`, { maxBytes: 2 }),
         Error,
         "exceeds limit",
       );
@@ -311,7 +358,9 @@ describe("model manager", () => {
     for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
     const mock = await mockDownloadServer(payload);
     try {
-      const result = await installFromUrl(layout, m.id, `${mock.url}/model.bin`, 0);
+      const result = await installFromUrl(layout, m.id, `${mock.url}/model.bin`, {
+        maxBytes: 0,
+      });
       assertEquals(result.fileBytes, payload.length);
       assertEquals((await verifyModelFile(layout, m.id, result.fileHash)).valid, true);
       const dirEntries: string[] = [];
@@ -343,7 +392,7 @@ describe("model manager", () => {
     const mock = await mockDownloadServerApp(app);
     try {
       await assertRejects(
-        () => installFromUrl(layout, m.id, `${mock.url}/model.bin`, 2),
+        () => installFromUrl(layout, m.id, `${mock.url}/model.bin`, { maxBytes: 2 }),
         Error,
         "exceeds limit",
       );
@@ -358,29 +407,158 @@ describe("model manager", () => {
     assertEquals(leftovers, []);
   });
 
-  it("url install leaves no partial files when the download fails mid-stream", async () => {
+  it("url install resumes from the part file after a mid-stream failure", async () => {
     const m = registerT2I();
-    const app = new Application();
-    app.use((ctx) => {
-      if (!ctx.request.url.pathname.endsWith("/model.bin")) {
-        ctx.response.body = new Uint8Array(0);
-        return;
+    const payload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const mock = await scriptedDownloadServer((req) => {
+      if (req.path !== "/resume") return { status: 200, body: new Uint8Array(0) };
+      if (req.attempt === 1) {
+        // First pass dies after 4 of 10 bytes.
+        return { status: 200, body: payload.subarray(0, 4), truncatedContentLength: 10 };
       }
-      // Advertised size is far larger than the body that actually arrives.
-      ctx.response.headers.set("Content-Length", "1048576");
-      ctx.response.body = new ReadableStream({
-        start(c) {
-          c.enqueue(new Uint8Array([1, 2, 3]));
-          c.close();
-        },
-      });
+      // Second pass must resume the Range request.
+      return { status: 206, body: payload.subarray(4), contentRange: "bytes 4-9/10" };
     });
-    const mock = await mockDownloadServerApp(app);
+    try {
+      const result = await installFromUrl(layout, m.id, `${mock.url}/resume`, {
+        maxBytes: 0,
+        retryBaseDelayMs: 5,
+        retryMaxDelayMs: 20,
+      });
+      assertEquals(result.fileBytes, 10);
+      const onDisk = new Uint8Array(await Deno.readFile(modelFile(layout, m.id)));
+      assertEquals(onDisk, payload);
+      const res = mock.requests.filter((r) => r.path === "/resume");
+      assertEquals(res.length, 2);
+      assertEquals(res[0].range, null);
+      assertEquals(res[1].range, "bytes=4-");
+      assert(!(await fileExists(`${modelFile(layout, m.id)}.part`)));
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("url install restarts cleanly when the server ignores Range", async () => {
+    const m = registerT2I();
+    const payload = new Uint8Array(10).fill(7);
+    const mock = await scriptedDownloadServer((req) => {
+      if (req.path !== "/full") return { status: 200, body: new Uint8Array(0) };
+      if (req.attempt === 1) {
+        return { status: 200, body: payload.subarray(0, 3), truncatedContentLength: 10 };
+      }
+      // Second pass: the server ignores Range and sends the whole file again.
+      return { status: 200, body: payload };
+    });
+    try {
+      const result = await installFromUrl(layout, m.id, `${mock.url}/full`, {
+        maxBytes: 0,
+        retryBaseDelayMs: 5,
+        retryMaxDelayMs: 20,
+      });
+      assertEquals(result.fileBytes, 10);
+      // Must be the full 10 bytes, not a 3 + 10 concatenation.
+      const onDisk = new Uint8Array(await Deno.readFile(modelFile(layout, m.id)));
+      assertEquals(onDisk, payload);
+      const res = mock.requests.filter((r) => r.path === "/full");
+      assertEquals(res.length, 2);
+      assertEquals(res[1].range, "bytes=3-");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("url install finalizes a complete part file when the server answers 416", async () => {
+    const m = registerT2I();
+    const payload = new Uint8Array(10).fill(42);
+    const mock = await scriptedDownloadServer((req) => {
+      if (req.path !== "/done") return { status: 200, body: new Uint8Array(0) };
+      return { status: 416, contentRange: "bytes */10" };
+    });
+    const partUrl = `${mock.url}/done`;
+    await Deno.mkdir(modelDir(layout, m.id), { recursive: true });
+    await Deno.writeFile(`${modelFile(layout, m.id)}.part`, payload);
+    await Deno.writeTextFile(`${modelFile(layout, m.id)}.part.url`, partUrl);
+    try {
+      const result = await installFromUrl(layout, m.id, `${mock.url}/done`, {
+        maxBytes: 0,
+        retryBaseDelayMs: 5,
+      });
+      assertEquals(result.fileBytes, 10);
+      const onDisk = new Uint8Array(await Deno.readFile(modelFile(layout, m.id)));
+      assertEquals(onDisk, payload);
+      assert(!(await fileExists(`${modelFile(layout, m.id)}.part`)));
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("url install discards a part file left by a different source url", async () => {
+    const m = registerT2I();
+    const payload = new Uint8Array(5).fill(3);
+    const mock = await scriptedDownloadServer((req) => {
+      if (req.path !== "/other") return { status: 200, body: new Uint8Array(0) };
+      return { status: 200, body: payload };
+    });
+    await Deno.mkdir(modelDir(layout, m.id), { recursive: true });
+    await Deno.writeFile(`${modelFile(layout, m.id)}.part`, new Uint8Array(2).fill(99));
+    await Deno.writeTextFile(
+      `${modelFile(layout, m.id)}.part.url`,
+      "https://example.com/some-old-weight.bin",
+    );
+    try {
+      const result = await installFromUrl(layout, m.id, `${mock.url}/other`, {
+        maxBytes: 0,
+        retryBaseDelayMs: 5,
+      });
+      assertEquals(result.fileBytes, 5);
+      const onDisk = new Uint8Array(await Deno.readFile(modelFile(layout, m.id)));
+      assertEquals(onDisk, payload);
+      // The stale part was discarded, so exactly one fresh download happened.
+      assertEquals(mock.requests.filter((r) => r.path === "/other").length, 1);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("url install retries transient 5xx responses before succeeding", async () => {
+    const m = registerT2I();
+    const payload = new Uint8Array(6).fill(9);
+    const mock = await scriptedDownloadServer((req) => {
+      if (req.path !== "/flaky") return { status: 200, body: new Uint8Array(0) };
+      if (req.attempt === 1) return { status: 503, body: new Uint8Array(0) };
+      return { status: 200, body: payload };
+    });
+    try {
+      const result = await installFromUrl(layout, m.id, `${mock.url}/flaky`, {
+        maxBytes: 0,
+        retryBaseDelayMs: 5,
+        retryMaxDelayMs: 20,
+      });
+      assertEquals(result.fileBytes, 6);
+      assertEquals(mock.requests.filter((r) => r.path === "/flaky").length, 2);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("url install leaves no files behind on permanent HTTP errors", async () => {
+    const m = registerT2I();
+    const mock = await scriptedDownloadServer((req) => {
+      if (req.path !== "/missing") return { status: 200, body: new Uint8Array(0) };
+      return { status: 404, body: new Uint8Array(0) };
+    });
     try {
       await assertRejects(
-        () => installFromUrl(layout, m.id, `${mock.url}/model.bin`, 0),
+        () =>
+          installFromUrl(layout, m.id, `${mock.url}/missing`, {
+            maxBytes: 0,
+            retryBaseDelayMs: 5,
+          }),
         Error,
+        "HTTP 404",
       );
+      // Permanent errors are not retried.
+      assertEquals(mock.requests.filter((r) => r.path === "/missing").length, 1);
     } finally {
       mock.stop();
     }

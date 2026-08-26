@@ -59,17 +59,49 @@ export async function installFromLocal(
   return { fileHash, fileBytes: stat.size };
 }
 
+export interface InstallFromUrlOptions {
+  /** Max bytes for the full file; 0 means no limit. */
+  maxBytes: number;
+  /** Base delay between retries in ms; doubles per consecutive failed attempt. */
+  retryBaseDelayMs?: number;
+  /** Cap for the retry delay in ms (default 30000). */
+  retryMaxDelayMs?: number;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Parse a Content-Range header: `bytes <start>-<end>/<total>` (206) or the
+ * 416 form, which carries a bare asterisk in place of the range.
+ */
+function parseContentRange(
+  header: string | null,
+): { start: number; end: number; total: number | null } | null {
+  if (!header) return null;
+  const m = /^bytes (?:(\d+)-(\d+|\*)|\*)\/(\d+|\*)$/.exec(header.trim());
+  if (!m) return null;
+  return {
+    start: m[1] === undefined ? -1 : Number(m[1]),
+    end: m[2] === undefined || m[2] === "*" ? -1 : Number(m[2]),
+    total: m[3] === "*" ? null : Number(m[3]),
+  };
+}
+
 /**
  * Download a model file into the store (MOD-003, network). Streams to a
- * temp file and renames it into place, so arbitrarily large downloads are
- * bounded only by disk space and a failed download never leaves a partial
- * `model.bin` behind. `maxBytes` of 0 means no limit.
+ * stable temp file (`model.bin.part`) and renames it into place when
+ * complete, so arbitrarily large downloads are bounded only by disk space.
+ * A dropped connection or server error keeps the part file and retries with
+ * `Range: bytes=<size>-` on an exponential backoff (no retry limit), so flaky
+ * networks resume where they stopped instead of restarting. Servers that
+ * ignore Range (plain 200) get a clean restart. Permanent failures (bad
+ * URL/protocol, HTTP 4xx, size cap) clean up the part file.
  */
 export async function installFromUrl(
   layout: StorageLayout,
   modelId: string,
   url: string,
-  maxBytes: number,
+  opts: InstallFromUrlOptions,
 ): Promise<InstallResult> {
   let parsed: URL;
   try {
@@ -80,68 +112,201 @@ export async function installFromUrl(
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw badRequest("repository_url must use http or https", "repository_url");
   }
-
-  const res = await fetch(parsed);
-  if (!res.ok) {
-    throw conflict(`Download failed: HTTP ${res.status}`, "repository_url");
-  }
-  const contentLength = Number(res.headers.get("Content-Length") ?? "0");
-  if (maxBytes > 0 && contentLength > maxBytes) {
-    throw badRequest(
-      `Model file exceeds limit of ${maxBytes} bytes`,
-      "repository_url",
-    );
-  }
-  if (!res.body) throw conflict("Download failed: empty response body", "repository_url");
+  const { maxBytes } = opts;
+  const baseDelayMs = opts.retryBaseDelayMs ?? 1000;
+  const maxDelayMs = opts.retryMaxDelayMs ?? 30_000;
 
   const target = modelFile(layout, modelId);
+  const part = `${target}.part`;
+  // Records which source URL produced the part file, so a part left by a
+  // different repository_url is never resumed into a corrupt model.
+  const partUrl = `${target}.part.url`;
   await Deno.mkdir(modelDir(layout, modelId), { recursive: true });
-  const tmp = `${target}.part-${crypto.randomUUID()}`;
-  let file: Deno.FsFile | null = null;
-  try {
-    file = await Deno.open(tmp, { write: true, create: true, truncate: true });
-    let total = 0;
-    const reader = res.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (maxBytes > 0 && total > maxBytes) {
-          await reader.cancel().catch(() => {});
-          throw badRequest(
-            `Model file exceeds limit of ${maxBytes} bytes`,
-            "repository_url",
-          );
-        }
-        await file.write(value);
-      }
+  if (await fileExists(target)) {
+    // A finished install replaces whatever a crashed run left behind.
+    await Deno.remove(part).catch(() => {});
+    await Deno.remove(partUrl).catch(() => {});
+  }
+  if (await fileExists(part)) {
+    const prior = await fileExists(partUrl) ? (await Deno.readTextFile(partUrl)).trim() : "";
+    if (prior !== url) {
+      await Deno.remove(part).catch(() => {});
+      await Deno.remove(partUrl).catch(() => {});
     }
-    await file.close();
-    file = null;
-    await Deno.rename(tmp, target);
+  }
+
+  const backoffMs = (attempt: number) =>
+    Math.min(maxDelayMs, baseDelayMs * 2 ** Math.min(attempt, 16));
+  const cleanPart = async () => {
+    await Deno.remove(part).catch(() => {});
+    await Deno.remove(partUrl).catch(() => {});
+  };
+
+  let backoffAttempt = 0;
+  for (;;) {
+    let offset = 0;
+    try {
+      offset = (await Deno.stat(part)).size;
+    } catch {
+      offset = 0;
+    }
+    if (maxBytes > 0 && offset > maxBytes) {
+      // A stale part file that can never satisfy the cap.
+      await cleanPart();
+      throw badRequest(`Model file exceeds limit of ${maxBytes} bytes`, "repository_url");
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(
+        parsed,
+        offset > 0 ? { headers: { range: `bytes=${offset}-` } } : undefined,
+      );
+    } catch {
+      // Network-level failure: retry from the current offset.
+      await sleep(backoffMs(backoffAttempt++));
+      continue;
+    }
+
+    if (res.status === 416) {
+      // Our offset is at or past the end of the remote file.
+      const range = parseContentRange(res.headers.get("Content-Range"));
+      if (offset > 0 && range && range.total !== null && range.total === offset) {
+        // The part file is already the complete file.
+        await Deno.rename(part, target);
+        await Deno.remove(partUrl).catch(() => {});
+        const fileHash = await sha256File(target);
+        return { fileHash, fileBytes: offset };
+      }
+      if (offset === 0) {
+        throw conflict("Download failed: HTTP 416", "repository_url");
+      }
+      // The part file disagrees with the remote file: restart it.
+      await cleanPart();
+      backoffAttempt = 0;
+      continue;
+    }
+    if (!res.ok) {
+      if (res.status >= 500) {
+        await res.body?.cancel().catch(() => {});
+        await sleep(backoffMs(backoffAttempt++));
+        continue;
+      }
+      throw conflict(`Download failed: HTTP ${res.status}`, "repository_url");
+    }
+    if (!res.body) {
+      throw conflict("Download failed: empty response body", "repository_url");
+    }
+
+    if (res.status === 200 && offset > 0) {
+      // The server ignored the Range header: start over from scratch.
+      await cleanPart();
+      offset = 0;
+    }
+
+    // Size cap: pre-check the advertised total, then enforce it as bytes
+    // arrive (covers chunked responses without Content-Length).
+    const contentLength = Number(res.headers.get("Content-Length") ?? "0");
+    if (
+      res.status === 200 && contentLength > 0 && maxBytes > 0 && offset + contentLength > maxBytes
+    ) {
+      throw badRequest(`Model file exceeds limit of ${maxBytes} bytes`, "repository_url");
+    }
+    const range = res.status === 206 ? parseContentRange(res.headers.get("Content-Range")) : null;
+    if (range && range.total !== null && maxBytes > 0 && range.total > maxBytes) {
+      await res.body.cancel().catch(() => {});
+      await cleanPart();
+      throw badRequest(`Model file exceeds limit of ${maxBytes} bytes`, "repository_url");
+    }
+
+    if (offset === 0) {
+      await Deno.writeTextFile(partUrl, url).catch(() => {});
+    }
+    const file = offset === 0
+      ? await Deno.open(part, { create: true, truncate: true, write: true })
+      : await Deno.open(part, { append: true });
+    let total = offset;
+    let progress = 0;
+    let capExceeded = false;
+    let streamFailed = false;
+    try {
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          total += value.byteLength;
+          if (maxBytes > 0 && total > maxBytes) {
+            await reader.cancel().catch(() => {});
+            capExceeded = true;
+            break;
+          }
+          progress += value.byteLength;
+          await file.write(value);
+        }
+      }
+    } catch {
+      streamFailed = true;
+    }
+    try {
+      file.close();
+    } catch {
+      // already closed
+    }
+
+    if (capExceeded) {
+      await cleanPart();
+      throw badRequest(`Model file exceeds limit of ${maxBytes} bytes`, "repository_url");
+    }
+    if (streamFailed) {
+      // Keep the part file and resume from the bytes that made it to disk.
+      // New progress resets the backoff so a slow-but-working link settles.
+      if (progress > 0) backoffAttempt = 0;
+      await sleep(backoffMs(backoffAttempt++));
+      continue;
+    }
+
+    if (res.status === 206 && range && range.end < total - 1) {
+      // The server cut the requested range short: ask for the rest.
+      backoffAttempt = 0;
+      continue;
+    }
+
+    await Deno.rename(part, target);
+    await Deno.remove(partUrl).catch(() => {});
     const fileHash = await sha256File(target);
     return { fileHash, fileBytes: total };
-  } finally {
-    if (file) {
-      try {
-        await file.close();
-      } catch {
-        // already closed
-      }
-    }
-    await Deno.remove(tmp, { recursive: false }).catch(() => {});
   }
 }
+
+/**
+ * In-flight installs per model id, so concurrent callers (route + copilot
+ * tool, double-clicked buttons) share one transfer instead of racing on the
+ * same part file.
+ */
+const installsInFlight = new Map<string, Promise<{ model: Model; install: InstallResult }>>();
 
 /**
  * Full install flow for a model row — the install route and the model-copilot
  * `install_model` tool share this. Network sources require explicit consent
  * (MOD-013); optional overrides let the route pass request-body values.
  */
-export async function installModelById(
+export function installModelById(
   modelId: string,
   opts: { consent?: boolean; sourcePath?: string; repositoryUrl?: string } = {},
+): Promise<{ model: Model; install: InstallResult }> {
+  const inFlight = installsInFlight.get(modelId);
+  if (inFlight) return inFlight;
+  const promise = runInstall(modelId, opts).finally(() => {
+    installsInFlight.delete(modelId);
+  });
+  installsInFlight.set(modelId, promise);
+  return promise;
+}
+
+async function runInstall(
+  modelId: string,
+  opts: { consent?: boolean; sourcePath?: string; repositoryUrl?: string },
 ): Promise<{ model: Model; install: InstallResult }> {
   const model = getModel(modelId);
   if (!model) throw notFound("Model not found");
@@ -159,7 +324,9 @@ export async function installModelById(
         "consent",
       );
     }
-    result = await installFromUrl(lay, modelId, repositoryUrl, loadConfig().modelDownloadMaxBytes);
+    result = await installFromUrl(lay, modelId, repositoryUrl, {
+      maxBytes: loadConfig().modelDownloadMaxBytes,
+    });
   } else if (model.source === "mock" || model.backend === "mock") {
     result = { fileHash: model.file_hash ?? "", fileBytes: 0 };
   } else {
