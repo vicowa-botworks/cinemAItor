@@ -77,10 +77,16 @@ environment variable:
 - `GET /api/v1/models/huggingface/:repoId` — `:repoId` is the percent-encoded `owner/name` on the
   wire (our router decodes it); upstream it is requested with a **literal** slash
   (`/api/models/<owner>/<name>`) — the live HF API rejects `owner%2Fname` with HTTP 400. Returns
-  `{repo: {id, likes, downloads, pipeline_tag, tags, license}, files, filesTruncated, readme}`:
-  - `files` — the **recursive** file listing from `/tree/main?recursive=true` (directory entries
+  `{repo: {id, likes, downloads, pipeline_tag, tags, license}, branch, files, filesTruncated,
+   readme}`:
+  - `branch` — the branch the listing was read from. Most repos default to `main`; older repos
+    default to `master`. The tree endpoint 404s on an unknown branch, so the service probes `main`
+    and falls back to `master` (both are then used for the README fetch and the registered
+    `repository_url`).
+  - `files` — the **recursive** file listing from `/tree/<branch>?recursive=true` (directory entries
     filtered out), so weight files in subdirectories (`vae/`, `transformer/`, `text_encoder/`, the
-    typical diffusers layout) are discoverable. Capped at 500 files, weight files
+    typical diffusers layout) are discoverable. Live HF tree entries are keyed by `path` (never
+    `name`); entries not matching that shape are dropped. Capped at 500 files, weight files
     (`.safetensors`/`.gguf`/`.ckpt`/`.bin`) always kept; `filesTruncated` flags a capped listing.
   - `readme` — the first ~4,000 characters of the repo's `README.md` (usage examples, model-card
     notes); `null` when the repo has none or the fetch fails.
@@ -100,11 +106,19 @@ environment variable:
   version?, min_vram_mb?, dependencies?, known_limitations?}`.
   The server picks the weight file (explicit `file`, or the largest file among
   `.safetensors`/`.gguf`/`.ckpt`/`.bin` in the recursive listing) and registers a model row with
-  `source: "url"` and `repository_url` set to the `resolve/main` URL of that file — the normal
+  `source: "url"` and `repository_url` set to the `resolve/<branch>` URL of that file — the normal
   install flow then downloads it from there (consent-gated, as with any URL source). The model id is
   the slugified last repo segment (`stabilityai/sdxl-base` → `sdxl_base`); if that id is already
   registered the call answers `409` (use the manual form to register the repo under a different id).
   Weights are **not** downloaded by this call.
+
+  **Gated repos:** HF gates the weight _downloads_ (`resolve/...`) even when the metadata and file
+  tree are publicly readable, and requires the caller's token to have accepted the gate (anonymous
+  `resolve` requests get a 401). The install flow therefore forwards the effective HF token
+  (`Authorization: Bearer …`) on any download whose URL origin matches the HF public base (default
+  `https://huggingface.co`, `HF_PUBLIC_BASE` in tests) — never to other hosts. A token configured
+  via the HF token settings or `HF_TOKEN` env makes gated-repo installs work once the account has
+  accepted the license on HuggingFace.
 
 The repo panel also surfaces the repo's tags and README, prefills the task types from the pipeline
 tag, and offers an **Ask Model Copilot** action that hands the repo context (id, pipeline, selected

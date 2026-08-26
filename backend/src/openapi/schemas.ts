@@ -2725,9 +2725,13 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
   },
   HuggingFaceRepo: {
     type: "object",
-    required: ["repo", "files", "readme", "filesTruncated"],
+    required: ["repo", "branch", "files", "readme", "filesTruncated"],
     properties: {
       repo: { $ref: "#/components/schemas/HuggingFaceRepoSummary" },
+      branch: {
+        type: "string",
+        description: "Repo branch the listing came from (`main`, falling back to `master`)",
+      },
       files: {
         type: "array",
         items: { $ref: "#/components/schemas/HuggingFaceRepoFile" },

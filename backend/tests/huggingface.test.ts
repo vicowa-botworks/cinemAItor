@@ -17,7 +17,8 @@ import {
 } from "../src/services/huggingface.ts";
 
 interface FakeHfFile {
-  name: string;
+  // The live HF tree API keys entries by `path` (never `name`).
+  path: string;
   size: number;
   type: "file" | "directory";
 }
@@ -28,6 +29,9 @@ interface FakeHfState {
   readme: string | null;
   lastSearchParams: URLSearchParams | null;
   lastTreeSearchParams: URLSearchParams | null;
+  /** The branch the fake serves the tree for; other branches 404 like live HF. */
+  treeBranch: string;
+  treeRequests: string[];
   whoamiStatus: number;
   whoamiBody: Record<string, unknown>;
   calls: number;
@@ -55,15 +59,17 @@ function freshState(): FakeHfState {
       },
     ],
     files: [
-      { name: "README.md", size: 2048, type: "file" },
-      { name: "model.safetensors", size: 5_000_000_000, type: "file" },
-      { name: "small.bin", size: 1_000_000, type: "file" },
-      { name: "subdir", size: 0, type: "directory" },
-      { name: "vae/diffusion_pytorch_model.safetensors", size: 300_000_000, type: "file" },
+      { path: "README.md", size: 2048, type: "file" },
+      { path: "model.safetensors", size: 5_000_000_000, type: "file" },
+      { path: "small.bin", size: 1_000_000, type: "file" },
+      { path: "subdir", size: 0, type: "directory" },
+      { path: "vae/diffusion_pytorch_model.safetensors", size: 300_000_000, type: "file" },
     ],
     readme: "# textgen-v1\n\nUsage example: `pipe(prompt)` renders a clip.\n",
     lastSearchParams: null,
     lastTreeSearchParams: null,
+    treeBranch: "main",
+    treeRequests: [],
     whoamiStatus: 200,
     whoamiBody: { name: "hf_tester", fullname: "HF Tester" },
     calls: 0,
@@ -83,10 +89,9 @@ function startFakeHf(
       state.calls += 1;
       const parts = url.pathname.split("/").filter(Boolean);
       const notFound = () => Response.json({ error: "Not found" }, { status: 404 });
-      // README on the public site base: /<owner>/<name>/resolve/main/README.md
+      // README on the public site base: /<owner>/<name>/resolve/<branch>/README.md
       if (
-        parts.length === 5 && parts[2] === "resolve" && parts[3] === "main" &&
-        parts[4] === "README.md"
+        parts.length === 5 && parts[2] === "resolve" && parts[4] === "README.md"
       ) {
         state.lastAuth = req.headers.get("authorization");
         if (state.readme === null) return notFound();
@@ -126,8 +131,10 @@ function startFakeHf(
       const repo = state.repos.find((r) => r.id === repoId);
       if (!repo) return notFound();
       if (parts.length === 4) return Response.json(repo);
-      if (parts.length === 6 && parts[4] === "tree" && parts[5] === "main") {
+      if (parts.length === 6 && parts[4] === "tree") {
+        state.treeRequests.push(parts[5] ?? "");
         state.lastTreeSearchParams = url.searchParams;
+        if (parts[5] !== state.treeBranch) return notFound();
         return Response.json(state.files);
       }
       return notFound();
@@ -400,6 +407,46 @@ describe("huggingface routes", () => {
     });
   });
 
+  it("repo listings only accept the live HF tree contract (entries keyed by `path`)", async () => {
+    // Live HF tree entries carry `path` (+ size/type/oid) and never `name`.
+    // Entries in the old (wrong) shape must be dropped, not silently trusted.
+    state.files = [
+      { name: "model.safetensors", size: 100, type: "file" },
+      { path: "real.safetensors", size: 200, type: "file" },
+    ] as unknown as FakeHfFile[];
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get(
+        `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+        adminToken,
+      );
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as { files: { path: string }[] };
+      assertEquals(body.files.map((f) => f.path), ["real.safetensors"]);
+    });
+  });
+
+  it("repo falls back to the master branch when main has no tree", async () => {
+    state.treeBranch = "master";
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get(
+        `/api/v1/models/huggingface/${encodeURIComponent("owner/textgen-v1")}`,
+        adminToken,
+      );
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        files: { path: string }[];
+        branch: string;
+        readme: string | null;
+      };
+      assertEquals(body.branch, "master");
+      assert(body.files.length > 0);
+      assertMatch(body.readme ?? "", /Usage example/);
+      assertEquals(state.treeRequests, ["main", "master"]);
+    });
+  });
+
   it("repo reports readme null when the repo has no README", async () => {
     state.readme = null;
     await withServer(async (base) => {
@@ -417,11 +464,11 @@ describe("huggingface routes", () => {
   it("repo truncates huge file listings, keeping weight files", async () => {
     state.files = [
       ...Array.from({ length: HF_MAX_FILES + 10 }, (_, i) => ({
-        name: `filler/${i}.txt`,
+        path: `filler/${i}.txt`,
         size: i,
         type: "file" as const,
       })),
-      { name: "deep/weights/model.safetensors", size: 42, type: "file" as const },
+      { path: "deep/weights/model.safetensors", size: 42, type: "file" as const },
     ];
     await withServer(async (base) => {
       baseUrl = base;
@@ -754,7 +801,7 @@ describe("huggingface routes", () => {
   });
 
   it("from-huggingface 400s when the repo has no weight file", async () => {
-    state.files = [{ name: "README.md", size: 10, type: "file" }];
+    state.files = [{ path: "README.md", size: 10, type: "file" }];
     await withServer(async (base) => {
       baseUrl = base;
       const res = await post(
@@ -768,9 +815,9 @@ describe("huggingface routes", () => {
 
   it("from-huggingface picks a weight file from a subdirectory", async () => {
     state.files = [
-      { name: "README.md", size: 10, type: "file" },
-      { name: "unet/diffusion_pytorch_model.safetensors", size: 2_000_000, type: "file" },
-      { name: "vae/diffusion_pytorch_model.safetensors", size: 300_000, type: "file" },
+      { path: "README.md", size: 10, type: "file" },
+      { path: "unet/diffusion_pytorch_model.safetensors", size: 2_000_000, type: "file" },
+      { path: "vae/diffusion_pytorch_model.safetensors", size: 300_000, type: "file" },
     ];
     await withServer(async (base) => {
       baseUrl = base;
