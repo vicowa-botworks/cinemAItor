@@ -198,8 +198,10 @@ app-root (main router)
   injection. Every request is guarded by an AbortController timeout (120 s default) so a dead or
   restarting server fails with a clear `TIMEOUT` ApiError instead of hanging the UI forever;
   legitimately long endpoints override it (`timeoutMs` — raw uploads 30 min, media streams 5 min,
-  LLM loops + backups 15 min, synchronous model installs and copilot proposal approval unlimited —
-  approval executes the mutating tool, which may be the same multi-GB install; see `api.js`)
+  LLM loops + backups 15 min, synchronous model installs, copilot proposal approval, and model
+  verify/health-check unlimited — approval executes the mutating tool, which may be the same
+  multi-GB install, and verify/health-check may run a full-file SHA-256 over multi-GB models; see
+  `api.js`)
 
 ### Backend Architecture
 
@@ -264,6 +266,8 @@ server.ts (entry point)
 ├── Model routes (/api/v1/models/*, auth middleware, admin for mutations)
   │   ├── Registry, install/verify (SHA-256; URL installs stream to a temp file,
   │   │   resumable via HTTP Range with backoff-retry), remove, enable/disable, /:id/health-check
+  │   │   (health check re-hashes only when the `model.bin.verified` sidecar — size+mtime+hash of
+  │   │   the last successful full verify — is stale, so unchanged multi-GB models check instantly)
    │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)
    │   │   + /:id/benchmarks (GET); deterministic per-task prompts, 2 candidates each,
    │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows

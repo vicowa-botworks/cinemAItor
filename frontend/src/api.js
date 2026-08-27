@@ -647,14 +647,18 @@ class ApiClient {
   }
 
   verifyModel(id) {
+    // Full-file SHA-256 over multi-GB models can run for minutes.
     return this.request(`/models/${encodeURIComponent(id)}/verify`, {
       method: "POST",
+      timeoutMs: 0,
     });
   }
 
   healthCheckModel(id) {
+    // May trigger a full-file SHA-256 over a multi-GB model (minutes).
     return this.request(`/models/${encodeURIComponent(id)}/health-check`, {
       method: "POST",
+      timeoutMs: 0,
     });
   }
 
