@@ -232,6 +232,26 @@ describe("skills (db)", () => {
     }
   });
 
+  it("normalizes HF dashed task type aliases in the assistant block", () => {
+    const def = parseSkillDefinition(defOverrides({
+      assistant: {
+        // Alias + its canonical duplicate collapse to one entry.
+        model_task_types: ["text-to-video", "text_to_video"],
+        guidance: "Use motion verbs.",
+      },
+    }));
+    assertEquals(def.assistant?.model_task_types, ["text_to_video"]);
+
+    assertThrows(
+      () =>
+        parseSkillDefinition(defOverrides({
+          assistant: { model_task_types: ["dance-off"], guidance: "g" },
+        })),
+      Error,
+      "unknown task type",
+    );
+  });
+
   it("persists the assistant block through create and version snapshots", () => {
     const skill = createSkill(
       "assistant-skill",

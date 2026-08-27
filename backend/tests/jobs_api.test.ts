@@ -347,6 +347,48 @@ describe("jobs api", () => {
     });
   });
 
+  it("normalizes HF dashed job_type aliases", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const i2iId = registerModel(ownerId, {
+          name: "i2i-model",
+          version: "1",
+          backend: "mock",
+          task_types: ["image_to_image"],
+          enabled: true,
+        }).id;
+
+        const res = await post(
+          `/api/v1/jobs`,
+          {
+            job_type: "image-to-image",
+            model_id: i2iId,
+            asset_id: assetId,
+            prompt_text: "x",
+          },
+          ownerToken,
+        );
+        assertEquals(res.status, 201);
+        const job = ((await res.json()) as { job: JobBody }).job;
+        assertEquals(job.job_type, "image_to_image");
+
+        // The normalized type is matched against the model's canonical list.
+        const resT2i = await post(
+          `/api/v1/jobs`,
+          {
+            job_type: "text-to-image",
+            model_id: i2iId,
+            asset_id: assetId,
+            prompt_text: "x",
+          },
+          ownerToken,
+        );
+        assertEquals(resT2i.status, 400);
+      })();
+    });
+  });
+
   it("cancels queued jobs and rejects cancelling finished jobs", async () => {
     await withServer((base) => {
       baseUrl = base;

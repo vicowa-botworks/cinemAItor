@@ -16,6 +16,22 @@ export const MODEL_TASK_TYPES = [
 ] as const;
 export type ModelTaskType = (typeof MODEL_TASK_TYPES)[number];
 
+// HuggingFace pipeline tags use dashes for the image/video family (e.g.
+// "image-to-image"). The Model Copilot (and manual API calls) may echo those
+// names, so the validation boundaries accept them and normalize to the
+// canonical underscore forms stored in the database.
+export const TASK_TYPE_ALIASES: Record<string, ModelTaskType> = {
+  "text-to-image": "text_to_image",
+  "image-to-image": "image_to_image",
+  "image-to-video": "image_to_video",
+  "text-to-video": "text_to_video",
+};
+
+export function canonicalTaskType(task: string): ModelTaskType | null {
+  if (MODEL_TASK_TYPES.includes(task as ModelTaskType)) return task as ModelTaskType;
+  return TASK_TYPE_ALIASES[task] ?? null;
+}
+
 export const MODEL_SOURCES = ["local", "url", "mock"] as const;
 export type ModelSource = (typeof MODEL_SOURCES)[number];
 
@@ -174,14 +190,17 @@ export function rowToModel(row: Record<string, unknown>): Model {
 
 function validateTaskTypes(value: string[] | undefined, field: string): string[] {
   if (value === undefined) return [];
+  const canonical: string[] = [];
   for (const task of value) {
-    if (!MODEL_TASK_TYPES.includes(task as ModelTaskType)) {
+    const mapped = canonicalTaskType(task);
+    if (!mapped) {
       throw badRequest(
         `${field} contains unknown task type: ${task}. Allowed: ${MODEL_TASK_TYPES.join(", ")}`,
       );
     }
+    if (!canonical.includes(mapped)) canonical.push(mapped);
   }
-  return value;
+  return canonical;
 }
 
 function logAudit(

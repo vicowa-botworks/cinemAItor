@@ -1,7 +1,7 @@
 import { getDb } from "./database.ts";
 import { badRequest, forbidden, notFound } from "../errors.ts";
 import { getUserById } from "./schema.ts";
-import { MODEL_TASK_TYPES, type ModelTaskType } from "./models.ts";
+import { canonicalTaskType, MODEL_TASK_TYPES } from "./models.ts";
 
 // ---------------------------------------------------------------------------
 // Definition shape (v1: JSON only, audio generation steps, no code execution)
@@ -244,7 +244,7 @@ function parseAssistant(raw: unknown): SkillAssistantBlock | null {
   }
   const obj = raw as Record<string, unknown>;
 
-  let modelTaskTypes: string[] = [];
+  const modelTaskTypes: string[] = [];
   const rawTaskTypes = obj.model_task_types;
   if (rawTaskTypes !== undefined) {
     if (!Array.isArray(rawTaskTypes)) {
@@ -254,16 +254,15 @@ function parseAssistant(raw: unknown): SkillAssistantBlock | null {
     // array is accepted as "not specified" (a block with no task types and no
     // guidance/examples is still rejected below).
     for (const task of rawTaskTypes) {
-      if (
-        typeof task !== "string" || !MODEL_TASK_TYPES.includes(task as ModelTaskType)
-      ) {
+      const mapped = typeof task === "string" ? canonicalTaskType(task) : null;
+      if (!mapped) {
         throw badRequest(
           `assistant.model_task_types contains unknown task type: ${task}. ` +
             `Allowed: ${MODEL_TASK_TYPES.join(", ")}`,
         );
       }
+      if (!modelTaskTypes.includes(mapped)) modelTaskTypes.push(mapped);
     }
-    modelTaskTypes = [...new Set(rawTaskTypes as string[])];
   }
 
   let guidance: string | null = null;

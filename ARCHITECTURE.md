@@ -262,9 +262,14 @@ server.ts (entry point)
    │   ├── HuggingFace catalog: /huggingface/search, /huggingface/:repoId (recursive file
    │   │   listing + README, `main`→`master` branch fallback, entries keyed by `path`),
    │   │   /huggingface/settings (+/test) optional token (stored > env),
-   │   │   POST /from-huggingface registers a url-sourced model row (admin; `resolve/<branch>`
-   │   │   URL); installs forward the HF token on HF-origin downloads (gated repos)
-   │   └── (see docs/models.md)
+    │   │   POST /from-huggingface registers a url-sourced model row (admin; `resolve/<branch>`
+    │   │   URL); installs forward the HF token on HF-origin downloads (gated repos)
+    │   ├── Task-type normalization: the canonical task types use underscores, but every
+    │   │   validation boundary (model register/update, skill `model_task_types`, job
+    │   │   `job_type`) also accepts the dashed HF pipeline-tag aliases
+    │   │   (`text-to-image`, `image-to-image`, `image-to-video`, `text-to-video`) and
+    │   │   normalizes to canonical before storage (HF tags the Model Copilot sees use dashes)
+    │   └── (see docs/models.md)
   ├── Job routes (/api/v1/jobs/*, auth middleware)
   │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per

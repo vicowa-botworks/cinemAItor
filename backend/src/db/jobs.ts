@@ -1,6 +1,9 @@
 import { getDb } from "./database.ts";
 import { badRequest } from "../errors.ts";
 import { emitJobProgress, emitJobStatus } from "../services/job_events.ts";
+import { canonicalTaskType, MODEL_TASK_TYPES } from "./models.ts";
+
+export { MODEL_TASK_TYPES };
 
 export const JOB_STATUSES = [
   "queued",
@@ -17,17 +20,6 @@ export const TERMINAL_JOB_STATUSES: JobStatus[] = [
   "failed",
   "cancelled",
 ];
-
-export const MODEL_TASK_TYPES = [
-  "text_to_image",
-  "image_to_image",
-  "image_to_video",
-  "text_to_video",
-  "audio",
-  "music",
-  "voice",
-  "transcribe",
-] as const;
 
 export interface GenerationJob {
   id: string;
@@ -227,16 +219,15 @@ export function listJobEvents(jobId: string): JobEvent[] {
 }
 
 export function createJob(userId: number, input: CreateJobInput): GenerationJob {
-  if (input.job_type === PROXY_JOB_TYPE || input.job_type === AUDIO_CLEANUP_JOB_TYPE) {
+  // Normalize HF-style dashed task names (e.g. "image-to-image") to the
+  // canonical underscore forms before validation and storage.
+  const jobType = canonicalTaskType(input.job_type) ?? input.job_type;
+  if (jobType === PROXY_JOB_TYPE || jobType === AUDIO_CLEANUP_JOB_TYPE) {
     // Media-engine jobs run ffmpeg directly; no model involved.
-  } else if (input.job_type === BENCHMARK_JOB_TYPE) {
+  } else if (jobType === BENCHMARK_JOB_TYPE) {
     if (!input.model_id) throw badRequest("model_id is required");
   } else {
-    if (
-      !MODEL_TASK_TYPES.includes(
-        input.job_type as (typeof MODEL_TASK_TYPES)[number],
-      )
-    ) {
+    if (!MODEL_TASK_TYPES.includes(jobType as (typeof MODEL_TASK_TYPES)[number])) {
       throw badRequest(
         `job_type must be one of: ${
           MODEL_TASK_TYPES.join(", ")
@@ -267,7 +258,7 @@ export function createJob(userId: number, input: CreateJobInput): GenerationJob 
     input.scene_id ?? null,
     input.shot_id ?? null,
     input.storyboard_panel_id ?? null,
-    input.job_type,
+    jobType,
     input.model_id ?? null,
     input.model_version ?? null,
     input.prompt_version_id ?? null,
@@ -280,7 +271,7 @@ export function createJob(userId: number, input: CreateJobInput): GenerationJob 
     userId,
     now,
   );
-  addJobEvent(id, "created", "Job created", { user_id: userId, job_type: input.job_type });
+  addJobEvent(id, "created", "Job created", { user_id: userId, job_type: jobType });
   emitJobStatus(id, "queued");
   return getJob(id) as GenerationJob;
 }

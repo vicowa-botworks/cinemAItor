@@ -149,6 +149,32 @@ describe("model manager", () => {
     );
   });
 
+  it("normalizes HF dashed task type aliases to canonical underscores", () => {
+    const m = registerT2I("dashed", {
+      task_types: ["image-to-image", "text_to_image", "text-to-image"],
+    });
+    const fetched = getModel(m.id);
+    assert(fetched);
+    // Aliases normalize; duplicates collapse to the first canonical order.
+    assertEquals(fetched.task_types, ["image_to_image", "text_to_image"]);
+
+    const updated = updateModel(userId, m.id, { task_types: ["image-to-video"] });
+    assert(updated);
+    assertEquals(updated.task_types, ["image_to_video"]);
+
+    assertThrows(
+      () =>
+        registerModel(userId, {
+          name: "bad-alias",
+          version: "1",
+          backend: "mock",
+          task_types: ["foo-bar"],
+        }),
+      Error,
+      "unknown task type",
+    );
+  });
+
   it("task mapping returns only usable models for a task", () => {
     const m1 = registerT2I("t2i-model");
     const m2 = registerModel(userId, {

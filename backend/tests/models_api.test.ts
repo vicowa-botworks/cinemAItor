@@ -179,6 +179,42 @@ describe("models api", () => {
     });
   });
 
+  it("normalizes HF dashed task type aliases on registration", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const res = await registerModel({
+          name: "hf-dashed",
+          version: "1.0",
+          backend: "local_cli",
+          source: "local",
+          source_path: sourceFile,
+          license: "OpenRAIL",
+          task_types: ["image-to-image", "text_to_image"],
+        });
+        assertEquals(res.status, 201);
+        const model = (await res.json()) as ModelBody;
+        assertEquals(model.task_types, ["image_to_image", "text_to_image"]);
+
+        const byTask = await get("/api/v1/models?task_type=image_to_image", adminToken);
+        assertEquals(((await byTask.json()) as ModelBody[]).length, 1);
+
+        // Unknown dashed names still 400.
+        assertEquals(
+          (
+            await registerModel({
+              name: "x",
+              version: "1",
+              backend: "mock",
+              task_types: ["foo-bar"],
+            })
+          ).status,
+          400,
+        );
+      })();
+    });
+  });
+
   it("validates registration input", async () => {
     await withServer((base) => {
       baseUrl = base;

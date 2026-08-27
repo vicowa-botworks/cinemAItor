@@ -13,7 +13,7 @@ import {
   MODEL_TASK_TYPES,
   retryJob,
 } from "@cinemaItor/db/jobs.ts";
-import { getModel } from "@cinemaItor/db/models.ts";
+import { canonicalTaskType, getModel } from "@cinemaItor/db/models.ts";
 import {
   getAssetById,
   getAssetVersionByNumber,
@@ -182,11 +182,10 @@ export const jobRouter = new Router()
     const userId = requireUserId(ctx);
     const body = await readJsonBody(ctx);
 
-    const jobType = body.job_type;
-    if (
-      typeof jobType !== "string" ||
-      !MODEL_TASK_TYPES.includes(jobType as (typeof MODEL_TASK_TYPES)[number])
-    ) {
+    // Accept canonical task types plus HF-style dashed aliases (normalized).
+    const rawJobType = body.job_type;
+    const jobType = typeof rawJobType === "string" ? canonicalTaskType(rawJobType) : null;
+    if (!jobType) {
       throw badRequest(`job_type must be one of: ${MODEL_TASK_TYPES.join(", ")}`);
     }
     const modelId = body.model_id;
