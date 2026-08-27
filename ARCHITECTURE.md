@@ -128,8 +128,15 @@ app-root (main router)
 │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
  │   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
- │   │              with approve/reject proposal cards; approving a mutating proposal refreshes
- │   │              the registered-model list so the change is visible without a page reload)
+  │   │              with approve/reject proposal cards; approving a mutating proposal refreshes
+  │   │              the registered-model list so the change is visible without a page reload;
+  │   │              install/remove confirm through confirm-dialog — the modal stays open with a
+  │   │              spinner ("Installing…") while the multi-GB download runs)
+├── confirm-dialog (reusable controlled confirmation modal: host-owned `open`,
+│   │              `confirm`/`cancel` events, `tone` default|danger, `busy` mode that
+│   │              suppresses dismissal (buttons/Escape/overlay) and shows a spinner +
+│   │              `busyLabel` on the confirm button; first consumer: model-manager
+│   │              install/remove)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)

@@ -22,6 +22,7 @@ function state(): State {
 const BOOT_COMPONENTS = [
   "app-root",
   "login-form",
+  "confirm-dialog",
   "project-list",
   "asset-list",
   "asset-generate",

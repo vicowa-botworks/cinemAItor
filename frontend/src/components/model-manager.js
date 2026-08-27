@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import "./confirm-dialog.js";
 
 const TASK_TYPES = [
   "text_to_image",
@@ -877,6 +878,8 @@ export class ModelManager extends LitElement {
     hfTokenInput: { state: true },
     hfTokenBusy: { state: true },
     hfTokenMsg: { state: true },
+    confirmState: { state: true },
+    confirmBusy: { state: true },
   };
 
   constructor() {
@@ -922,6 +925,8 @@ export class ModelManager extends LitElement {
     this.hfTokenInput = "";
     this.hfTokenBusy = false;
     this.hfTokenMsg = null;
+    this.confirmState = null;
+    this.confirmBusy = false;
     this._queryTimer = null;
   }
 
@@ -1169,6 +1174,23 @@ export class ModelManager extends LitElement {
               Install, enable/disable, and remove require the admin role.
               Health checks and verification are available to all users.
             </p>
+          `
+          : null}
+
+        ${this.confirmState
+          ? html`
+            <confirm-dialog
+              ?open=${true}
+              title=${this._confirmSpec().title}
+              message=${this._confirmSpec().message}
+              confirmLabel=${this._confirmSpec().confirmLabel}
+              cancelLabel="Cancel"
+              tone=${this._confirmSpec().tone}
+              ?busy=${this.confirmBusy}
+              busyLabel=${this._confirmSpec().busyLabel}
+              @confirm=${() => this._confirmAccept()}
+              @cancel=${() => this._confirmDismiss()}
+            ></confirm-dialog>
           `
           : null}
       </div>
@@ -2375,15 +2397,64 @@ export class ModelManager extends LitElement {
     }
   }
 
-  async _install(m, needsConsent) {
-    if (
-      needsConsent &&
-      !window.confirm(
-        `Download "${m.name}" from network source ${m.repository_url}?\n\nThis requires explicit consent because it downloads a file from the network.`,
-      )
-    ) {
-      return;
+  _install(m, needsConsent) {
+    this._runConfirm({ kind: "install", model: m, needsConsent });
+  }
+
+  _remove(m) {
+    this._runConfirm({ kind: "remove", model: m });
+  }
+
+  _runConfirm(state) {
+    this.confirmState = state;
+    this.confirmBusy = false;
+  }
+
+  _confirmSpec() {
+    const st = this.confirmState;
+    if (!st) return null;
+    if (st.kind === "install") {
+      return {
+        title: "Install model",
+        message: st.needsConsent
+          ? `Download "${st.model.name}" from ${st.model.repository_url}?\n\nThe weights are downloaded from the network. Large models can take a long time — the download runs until it finishes.`
+          : `Install "${st.model.name}"?`,
+        confirmLabel: "Install",
+        tone: "default",
+        busyLabel: "Installing…",
+      };
     }
+    return {
+      title: "Remove model",
+      message: `Remove "${st.model.name}" and its installed files?`,
+      confirmLabel: "Remove",
+      tone: "danger",
+      busyLabel: "Removing…",
+    };
+  }
+
+  async _confirmAccept() {
+    const st = this.confirmState;
+    if (!st) return;
+    this.confirmBusy = true;
+    try {
+      if (st.kind === "install") {
+        await this._doInstall(st.model, st.needsConsent);
+      } else {
+        await this._doRemove(st.model);
+      }
+      this.confirmState = null;
+    } finally {
+      this.confirmBusy = false;
+    }
+  }
+
+  _confirmDismiss() {
+    if (this.confirmBusy) return;
+    this.confirmState = null;
+  }
+
+  async _doInstall(m, needsConsent) {
     this.busyId = m.id;
     this.notice = null;
     this.error = "";
@@ -2403,10 +2474,7 @@ export class ModelManager extends LitElement {
     }
   }
 
-  async _remove(m) {
-    if (!window.confirm(`Remove "${m.name}" and its installed files?`)) {
-      return;
-    }
+  async _doRemove(m) {
     this.busyId = m.id;
     this.notice = null;
     this.error = "";
