@@ -7,7 +7,8 @@ chat endpoint) acts as a creative and operational helper:
 - **Assist** — one-shot creative help: write scripts (Fountain-lite), design scenes, enhance
   generation prompts (model- and skill-aware)
 - **Model Copilot** — bounded tool-calling loop where the LLM can look up HuggingFace models,
-  inspect the registry, and probe ComfyUI; mutating actions require explicit user approval
+  inspect the registry, probe ComfyUI, and set up `local_cli` runtimes (runner scripts + Python
+  virtualenvs); mutating actions require explicit user approval
 - **HuggingFace** — server-side proxy of the public HF API + auto-register a model row from a repo
   (install remains the consent-gated install flow)
 
@@ -160,6 +161,8 @@ per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, pr
 
 - `list_models` `{task_type?}`
 - `model_info` `{model_id}`
+- `model_files` `{model_id}` — lists the model's storage directory (weights, runner scripts,
+  `.venv`)
 - `list_skills` `{assistant_only?}`
 - `huggingface_search` `{query, limit?}`
 - `huggingface_model_info` `{repo_id}`
@@ -168,8 +171,15 @@ per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, pr
 **Mutating tools (admin-only, never auto-executed):**
 
 - `register_model`
-  `{name, model_id?, backend, task_types, file_url?, repository_url?, version?, min_vram_mb?, dependencies?, known_limitations?}`
+  `{name, model_id?, backend, task_types, file_url?, repository_url?, version?, min_vram_mb?, dependencies?, known_limitations?, default_settings?}`
 - `register_model_from_huggingface` `{repo_id, file?, backend?, task_types?, name?, version?}`
+- `update_model` `{model_id, task_types?, default_settings?, enabled?}` — re-validates adapter
+  settings when `default_settings` or `backend` are touched (see `docs/models.md`)
+- `write_model_file` `{model_id, filename, content}` — writes a text file (e.g. `runner.py`) into
+  the model's directory; basenames only, `model.bin*` and `.venv` are reserved, 256 KB max
+- `install_model_deps` `{model_id, packages}` — creates `<modelDir>/.venv` (base interpreter
+  `python3`, overridable via `MODEL_VENV_PYTHON`) and pip-installs the packages into it; returns the
+  venv python path to use as the `local_cli` `command`
 - `install_model` `{model_id}`
 - `remove_model` `{model_id}`
 
@@ -185,3 +195,15 @@ executed).
 
 Both answer `404` for unknown/expired proposals, `403` for non-admins, and `409` when the proposal
 is no longer pending.
+
+**Local-cli model setup.** The copilot's system prompt carries a setup playbook: a `local_cli` model
+only works when its `default_settings.command` is an existing executable and every file its `args`
+reference exists, so when the user asks to set up (or repair) one the copilot proposes the steps in
+order — inspect the repo/weights (`huggingface_model_info` / `model_files`), `write_model_file` a
+minimal runner script (takes `--prompt/--seed`/`--image`, writes the `--output` path),
+`install_model_deps` to build the `.venv` (multi-GB pip downloads are normal; the result carries the
+venv python path), then `register_model` / `update_model` with `command` = that venv python, `args`
+referencing the runner script by absolute path with the `{prompt}/{seed}/{output}` (`{input:0}` for
+reference images) placeholders, and a device flag matching the detected hardware (`cuda` when the
+GPU has sufficient free VRAM, `cpu` otherwise). Every file the copilot writes (scripts, `.venv`)
+lives inside the model's own storage directory, so removing the model removes its runtime too.

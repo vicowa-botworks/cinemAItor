@@ -1553,14 +1553,27 @@ export class ModelManager extends LitElement {
     `;
   }
 
+  _proposalArgsDisplay(args) {
+    // Truncate long string values (e.g. a full runner script in a
+    // write_model_file proposal) so the card stays readable.
+    const display = {};
+    for (const [key, value] of Object.entries(args)) {
+      display[key] = typeof value === "string" && value.length > 240
+        ? `${value.slice(0, 240)} … (${value.length} chars)`
+        : value;
+    }
+    return JSON.stringify(display);
+  }
+
   _renderProposal(p) {
     const busy = this.copilotProposalBusy === p.id;
     const isPending = p.status === "pending";
+    const argsDisplay = this._proposalArgsDisplay(p.args ?? {});
     return html`
       <div class="copilot-proposal ${isPending ? "" : "done"}">
         <span class="tool">${p.tool}</span>
-        <span class="args" title=${JSON.stringify(p.args)}>
-          ${JSON.stringify(p.args)}
+        <span class="args" title=${argsDisplay}>
+          ${argsDisplay}
         </span>
         ${isPending && this.isAdmin
           ? html`
@@ -1591,6 +1604,13 @@ export class ModelManager extends LitElement {
     }
     if (tool === "install_model") return "install job enqueued";
     if (tool === "remove_model") return "model removed";
+    if (tool === "update_model") {
+      return `updated "${result.model?.name ?? result.model?.id ?? "?"}"`;
+    }
+    if (tool === "write_model_file") return `wrote ${result.path ?? "file"}`;
+    if (tool === "install_model_deps") {
+      return `venv ready (${(result.packages ?? []).length} package(s))`;
+    }
     return "";
   }
 
