@@ -6,6 +6,8 @@ import {
   MODEL_TASK_TYPES,
   registerModel,
   type RegisterModelInput,
+  updateModel,
+  type UpdateModelInput,
 } from "../db/models.ts";
 import { listSkills } from "../db/skills.ts";
 import { storageLayout } from "../storage/paths.ts";
@@ -17,6 +19,7 @@ import {
 } from "./huggingface.ts";
 import { describeHardware, detectHardware } from "./hardware.ts";
 import { installModelById, removeModelFiles } from "./model_files.ts";
+import { listModelFiles, setupModelVenv, writeModelFile } from "./model_runtime.ts";
 import { chatLlm, type LlmMessage, type LlmToolCall, type LlmToolDef } from "./llm_client.ts";
 
 export const AGENT_MAX_TOOL_ITERATIONS = 8;
@@ -28,12 +31,16 @@ const COMFYUI_TIMEOUT_MS = 10_000;
 export type AgentToolName =
   | "list_models"
   | "model_info"
+  | "model_files"
   | "list_skills"
   | "huggingface_search"
   | "huggingface_model_info"
   | "comfyui_status"
   | "register_model"
   | "register_model_from_huggingface"
+  | "update_model"
+  | "write_model_file"
+  | "install_model_deps"
   | "install_model"
   | "remove_model";
 
@@ -42,15 +49,17 @@ const TASK_TYPES_HELP = `Task types the model covers. Allowed: ${MODEL_TASK_TYPE
 const SETTINGS_HELP = {
   type: "object",
   description: "Adapter settings. REQUIRED for local_cli: 'command' (string, the executable run " +
-    "per candidate) + 'args' (string[] with {prompt}/{seed}/{output} placeholders; " +
-    "{output} is the path the command must write the result file to). REQUIRED for " +
-    "comfyui: 'endpoint' (http(s) server URL) + 'workflow' (ComfyUI prompt graph with " +
-    "{{prompt}}/{{seed}} placeholders). Optional for both: 'timeout_seconds'.",
+    "per candidate) + 'args' (string[] with {prompt}/{seed}/{output} placeholders, plus " +
+    "{input:0}..{input:7} for reference image inputs; {output} is the path the command must " +
+    "write the result file to). REQUIRED for comfyui: 'endpoint' (http(s) server URL) + " +
+    "'workflow' (ComfyUI prompt graph with {{prompt}}/{{seed}} placeholders). Optional for " +
+    "both: 'timeout_seconds'.",
 };
 
 export const READ_ONLY_AGENT_TOOLS: readonly AgentToolName[] = [
   "list_models",
   "model_info",
+  "model_files",
   "list_skills",
   "huggingface_search",
   "huggingface_model_info",
@@ -60,6 +69,9 @@ export const READ_ONLY_AGENT_TOOLS: readonly AgentToolName[] = [
 const MUTATING_AGENT_TOOLS: readonly AgentToolName[] = [
   "register_model",
   "register_model_from_huggingface",
+  "update_model",
+  "write_model_file",
+  "install_model_deps",
   "install_model",
   "remove_model",
 ] as const;
@@ -90,6 +102,15 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
     required: ["model_id"],
     properties: { model_id: stringProperty("Registered model id") },
   }),
+  toolDef(
+    "model_files",
+    "List the files stored for a registered model (weights, runner scripts, .venv).",
+    {
+      type: "object",
+      required: ["model_id"],
+      properties: { model_id: stringProperty("Registered model id") },
+    },
+  ),
   toolDef("list_skills", "List skills (optionally only those with assistant prompt guidance).", {
     type: "object",
     properties: { assistant_only: { type: "boolean" } },
@@ -146,6 +167,53 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       default_settings: SETTINGS_HELP,
     },
   }),
+  toolDef(
+    "update_model",
+    "Update a registered model's editable fields (task_types, default_settings, enabled). " +
+      "Use to fix or complete a model's adapter settings without re-registering.",
+    {
+      type: "object",
+      required: ["model_id"],
+      properties: {
+        model_id: stringProperty("Registered model id"),
+        task_types: stringArrayProperty(TASK_TYPES_HELP),
+        default_settings: SETTINGS_HELP,
+        enabled: { type: "boolean" },
+      },
+    },
+  ),
+  toolDef(
+    "write_model_file",
+    "Write a text file (e.g. a Python runner script or requirements notes) into a model's " +
+      "storage directory so a local_cli command can reference it by absolute path.",
+    {
+      type: "object",
+      required: ["model_id", "filename", "content"],
+      properties: {
+        model_id: stringProperty("Registered model id"),
+        filename: stringProperty(
+          "Basename only, e.g. 'runner.py' (no slashes; 'model.bin*' and '.venv' are reserved)",
+        ),
+        content: stringProperty("Full file content (UTF-8, max 256 KB)"),
+      },
+    },
+  ),
+  toolDef(
+    "install_model_deps",
+    "Create a Python virtualenv inside the model's directory and pip-install the given " +
+      "packages into it (multi-GB downloads are normal). Returns the venv python path to use " +
+      "as the local_cli 'command'.",
+    {
+      type: "object",
+      required: ["model_id", "packages"],
+      properties: {
+        model_id: stringProperty("Registered model id"),
+        packages: stringArrayProperty(
+          "pip requirements, e.g. ['torch', 'diffusers'] (name + optional version spec)",
+        ),
+      },
+    },
+  ),
   toolDef("install_model", "Download + store a model's weights (consent is the user's approval).", {
     type: "object",
     required: ["model_id"],
@@ -417,6 +485,10 @@ export async function runTool(
       if (!model) throw notFound(`Unknown model id '${id}'`);
       return model;
     }
+    case "model_files": {
+      const id = argStringRequired(args, "model_id");
+      return listModelFiles(id);
+    }
     case "list_skills": {
       const assistantOnly = argBool(args, "assistant_only") ?? false;
       return listSkills(assistantOnly).map((s) => ({
@@ -466,6 +538,42 @@ export async function runTool(
         default_settings: argObject(args, "default_settings"),
       });
       return { ...result, installed: false, note: "Weights not downloaded — install_model next" };
+    }
+    case "update_model": {
+      const id = argStringRequired(args, "model_id");
+      const patch: UpdateModelInput = {};
+      const taskTypes = argStringArray(args, "task_types");
+      if (taskTypes) patch.task_types = taskTypes;
+      const settings = argObject(args, "default_settings");
+      if (settings) patch.default_settings = settings;
+      const enabled = argBool(args, "enabled");
+      if (enabled !== undefined) patch.enabled = enabled;
+      if (Object.keys(patch).length === 0) {
+        throw badRequest(
+          "Provide at least one field to update (task_types, default_settings, enabled)",
+          "patch",
+        );
+      }
+      const updated = updateModel(ctx.userId, id, patch);
+      if (!updated) throw notFound(`Unknown model id '${id}'`);
+      return { model: updated };
+    }
+    case "write_model_file": {
+      const id = argStringRequired(args, "model_id");
+      if (!getModel(id)) throw notFound(`Unknown model id '${id}'`);
+      const filename = argStringRequired(args, "filename");
+      const content = args["content"];
+      if (typeof content !== "string") throw badRequest("content is required", "content");
+      return await writeModelFile(id, filename, content);
+    }
+    case "install_model_deps": {
+      const id = argStringRequired(args, "model_id");
+      if (!getModel(id)) throw notFound(`Unknown model id '${id}'`);
+      const packages = argStringArray(args, "packages");
+      if (!packages || packages.length === 0) {
+        throw badRequest("packages is required", "packages");
+      }
+      return await setupModelVenv(id, packages);
     }
     case "install_model": {
       const id = argStringRequired(args, "model_id");
@@ -548,6 +656,12 @@ export async function copilotSystemPrompt(): Promise<string> {
     `This server runs on: ${describeHardware(hardware)}.`,
     "Use that hardware as the ground truth when judging whether a model fits: compare the model's weight/VRAM needs against the free VRAM (or RAM for CPU-only), and only warn about it not fitting when the numbers actually say so — prefer quantized or smaller variants when it genuinely would not fit.",
     "Use the tools to look things up before answering. When the user asks you to register or install a model, call the matching tool — the action is only executed after the user explicitly approves your proposal.",
+    "Setting up a local_cli model: it only works when its default_settings 'command' is an existing executable and every file its 'args' reference exists. When the user wants to set up (or repair) a local_cli model, propose these steps in order: " +
+    "(1) huggingface_model_info and/or model_files to see what the repo/weights actually are; " +
+    "(2) write_model_file a small runner script (e.g. 'runner.py') that loads the weights, takes --prompt/--seed (and --image for reference inputs) and writes the result to the --output path — keep it minimal and standard (a diffusers pipeline script for diffusers-format repos); " +
+    "(3) install_model_deps to build a .venv with the packages the script needs — its result carries the venv python path; " +
+    "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders ({input:0} for reference images) and a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
+    "Never leave a local_cli model whose command or referenced script is missing — if you are unsure what the runtime needs, propose the setup steps instead of guessing.",
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
   ].join("\n");
 }

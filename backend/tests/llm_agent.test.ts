@@ -1,8 +1,11 @@
+import { dirname, join } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import { closeDb } from "../src/db/database.ts";
 import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
+import { storageLayout } from "../src/storage/paths.ts";
+import { modelDir } from "../src/services/model_files.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
 // Scripted fake LLM: each call pops the next response (tool call or final
@@ -435,6 +438,9 @@ describe("llm agent", () => {
         const mutating of [
           "register_model",
           "register_model_from_huggingface",
+          "update_model",
+          "write_model_file",
+          "install_model_deps",
           "install_model",
           "remove_model",
         ]
@@ -442,6 +448,7 @@ describe("llm agent", () => {
         assertEquals(names.includes(mutating), false, mutating);
       }
       assertEquals(names.includes("list_models"), true);
+      assertEquals(names.includes("model_files"), true);
 
       // A mutating call that slips through is refused, not proposed.
       script = [
@@ -557,5 +564,304 @@ describe("llm agent", () => {
     } finally {
       comfy.shutdown();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runtime tools: write_model_file, install_model_deps, update_model,
+// model_files — the copilot's local_cli setup path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fake `python3` for install_model_deps tests: `python3 -m venv <dir>`
+ * creates a fake venv whose bin/python is itself a fake pip runner, and
+ * `... -m pip install ...` echoes each requirement.
+ */
+const FAKE_PYTHON_SH = `#!/usr/bin/env bash
+if [ "$2" = "venv" ]; then
+  dir="$3"
+  mkdir -p "$dir/bin"
+  cat > "$dir/bin/python" <<'INNER'
+#!/usr/bin/env bash
+for pkg in "\${@:5}"; do echo "Collecting $pkg"; done
+exit 0
+INNER
+  chmod +x "$dir/bin/python"
+  exit 0
+fi
+for pkg in "\${@:5}"; do echo "Collecting $pkg"; done
+exit 0
+`;
+
+describe("llm agent runtime tools", () => {
+  let appDataDir = "";
+  let fakePython = "";
+  const oldVenvPython = Deno.env.get("MODEL_VENV_PYTHON");
+
+  /** One agent turn that ends in a proposal for the given tool; returns its id. */
+  async function makeProposalFor(tool: string, args: unknown): Promise<string> {
+    script = [
+      { toolCalls: [{ id: `call_${tool}`, name: tool, args }] },
+      { content: "ok" },
+    ];
+    const res = await post("/api/v1/llm/agent", {
+      history: [{ role: "user", content: `use ${tool}` }],
+    }, adminToken);
+    assertEquals(res.status, 200);
+    const body = (await res.json()) as { proposals: Array<{ id: string }> };
+    assertEquals(body.proposals.length, 1);
+    return body.proposals[0].id;
+  }
+
+  async function approve(id: string): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await post(`/api/v1/llm/proposals/${id}/approve`, {}, adminToken);
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  async function registerModel(name: string, extra: Record<string, unknown> = {}): Promise<string> {
+    const res = await post("/api/v1/models", {
+      name,
+      version: "1.0.0",
+      backend: "mock",
+      task_types: ["text_to_image"],
+      ...extra,
+    }, adminToken);
+    assertEquals(res.status, 201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  beforeEach(async () => {
+    appDataDir = Deno.makeTempDirSync({ prefix: "cinemaitor_agent_rt_" });
+    Deno.env.set("APP_DATA_DIR", appDataDir);
+    script = [];
+    llm = startScriptedLlm();
+    freshMemoryDb();
+    await withServer(async (base) => {
+      baseUrl = base;
+      const health = await fetchWithRetry(`${baseUrl}/api/v1/health`);
+      assertEquals(health.status, 200);
+      const res = await post("/api/v1/auth/bootstrap", {
+        email: `admin.${Math.random().toString(36).slice(2)}@example.com`,
+        password: "password123",
+        display_name: "Studio Admin",
+      });
+      assertEquals(res.status, 201);
+      adminToken = ((await res.json()) as { token: string }).token;
+      await setLlmEndpoint(llm.url);
+    });
+  });
+
+  afterEach(async () => {
+    llm.shutdown();
+    closeDb();
+    if (oldVenvPython === undefined) Deno.env.delete("MODEL_VENV_PYTHON");
+    else Deno.env.set("MODEL_VENV_PYTHON", oldVenvPython);
+    if (fakePython) await Deno.remove(dirname(fakePython), { recursive: true });
+    fakePython = "";
+    await Deno.remove(appDataDir, { recursive: true });
+  });
+
+  it("model_files is read-only and reports an empty runtime for a fresh model", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Fresh Model");
+      script = [
+        { toolCalls: [{ id: "call_files", name: "model_files", args: { model_id: id } }] },
+        { content: "No files yet." },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "what files does it have?" }],
+      }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as { steps: Array<{ status: string }> };
+      assertEquals(body.steps[0].status, "ok");
+      // The tool result reached the LLM on the next call.
+      assertEquals(llm.requests.length, 2);
+      const toolMsg = (llm.requests[1].messages as Array<Record<string, unknown>>)
+        .find((m) => m.role === "tool");
+      const report = JSON.parse(String(toolMsg?.content)) as {
+        files: unknown[];
+        has_weights: boolean;
+        has_venv: boolean;
+      };
+      assertEquals(report.files, []);
+      assertEquals(report.has_weights, false);
+      assertEquals(report.has_venv, false);
+    });
+  });
+
+  it("write_model_file proposal writes the script on approval; bad names 400", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Scripted Model");
+      const dir = modelDir(storageLayout(appDataDir), id);
+      const content = "import sys\nprint('runner', sys.argv)\n";
+
+      const okId = await makeProposalFor("write_model_file", {
+        model_id: id,
+        filename: "runner.py",
+        content,
+      });
+      const ok = await approve(okId);
+      assertEquals(ok.status, 200);
+      const result = ok.body.result as { path: string; bytes: number };
+      assert(result.path.startsWith(`${dir}/runner.py`));
+      assertEquals(result.bytes, content.length);
+      assertEquals(await Deno.readTextFile(join(dir, "runner.py")), content);
+
+      // Path traversal is rejected and the proposal stays pending.
+      const badId = await makeProposalFor("write_model_file", {
+        model_id: id,
+        filename: "../evil.py",
+        content: "x",
+      });
+      assertEquals((await approve(badId)).status, 400);
+      const rejected = await post(`/api/v1/llm/proposals/${badId}/reject`, {}, adminToken);
+      assertEquals(rejected.status, 200);
+
+      // App-owned files are reserved.
+      for (const reserved of ["model.bin", "model.bin.verified", ".venv"]) {
+        const resId = await makeProposalFor("write_model_file", {
+          model_id: id,
+          filename: reserved,
+          content: "x",
+        });
+        assertEquals((await approve(resId)).status, 400);
+        assertEquals(
+          (await post(`/api/v1/llm/proposals/${resId}/reject`, {}, adminToken)).status,
+          200,
+        );
+      }
+    });
+  });
+
+  it("install_model_deps builds a .venv and reuses it on the second run", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Venv Model");
+      const dir = modelDir(storageLayout(appDataDir), id);
+      const binDir = Deno.makeTempDirSync({ prefix: "fakepy_" });
+      fakePython = join(binDir, "python3");
+      await Deno.writeTextFile(fakePython, FAKE_PYTHON_SH);
+      await Deno.chmod(fakePython, 0o755);
+      Deno.env.set("MODEL_VENV_PYTHON", fakePython);
+
+      const first = await makeProposalFor("install_model_deps", {
+        model_id: id,
+        packages: ["torch", "diffusers==0.32.0"],
+      });
+      const ok1 = await approve(first);
+      assertEquals(ok1.status, 200);
+      const result1 = ok1.body.result as {
+        venv_python: string;
+        created_venv: boolean;
+        output_tail: string;
+      };
+      assertEquals(result1.venv_python, join(dir, ".venv", "bin", "python"));
+      assertEquals(result1.created_venv, true);
+      assertExists(result1.venv_python);
+      assertMatch(result1.output_tail, /Collecting torch/);
+      assertMatch(result1.output_tail, /Collecting diffusers==0\.32\.0/);
+
+      const second = await makeProposalFor("install_model_deps", {
+        model_id: id,
+        packages: ["accelerate"],
+      });
+      const ok2 = await approve(second);
+      assertEquals(ok2.status, 200);
+      assertEquals(
+        (ok2.body.result as { created_venv: boolean }).created_venv,
+        false,
+      );
+
+      // pip option injection is rejected before anything runs.
+      const bad = await makeProposalFor("install_model_deps", {
+        model_id: id,
+        packages: ["--index-url", "http://evil.example"],
+      });
+      const okBad = await approve(bad);
+      assertEquals(okBad.status, 400);
+      assertMatch(
+        String((okBad.body.error as { message?: string }).message ?? ""),
+        /invalid pip requirement/,
+      );
+      assertEquals(
+        (await post(`/api/v1/llm/proposals/${bad}/reject`, {}, adminToken)).status,
+        200,
+      );
+    });
+  });
+
+  it("update_model proposal patches settings and task types; invalid settings 400", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Patch Me", {
+        backend: "local_cli",
+        default_settings: { command: "python3" },
+      });
+
+      const okId = await makeProposalFor("update_model", {
+        model_id: id,
+        task_types: ["text_to_image", "image_to_image"],
+        default_settings: {
+          command: "/opt/venvs/flux/bin/python",
+          args: ["runner.py", "--prompt", "{prompt}", "--seed", "{seed}", "--output", "{output}"],
+        },
+      });
+      const ok = await approve(okId);
+      assertEquals(ok.status, 200);
+      const fetched = await get(`/api/v1/models/${id}`, adminToken);
+      const model = (await fetched.json()) as {
+        task_types: string[];
+        default_settings: Record<string, unknown>;
+      };
+      assertEquals(model.task_types, ["text_to_image", "image_to_image"]);
+      assertEquals(
+        (model.default_settings as { command: string }).command,
+        "/opt/venvs/flux/bin/python",
+      );
+
+      // Re-validation on settings touch: a local_cli command that is not a
+      // non-blank string is refused, proposal stays pending.
+      const badId = await makeProposalFor("update_model", {
+        model_id: id,
+        default_settings: { command: "   " },
+      });
+      const okBad = await approve(badId);
+      assertEquals(okBad.status, 400);
+      assertEquals(
+        (await post(`/api/v1/llm/proposals/${badId}/reject`, {}, adminToken)).status,
+        200,
+      );
+    });
+  });
+
+  it("non-admins never see the runtime mutating tools", async () => {
+    const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
+    createUser(email, await hashPassword("password123"), "Regular User");
+    await withServer(async (base) => {
+      baseUrl = base;
+      const login = await post("/api/v1/auth/login", { email, password: "password123" });
+      const userToken = ((await login.json()) as { token: string }).token;
+      script = [
+        { toolCalls: [{ id: "call_1", name: "list_models", args: {} }] },
+        { content: "No models yet." },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "list models" }],
+      }, userToken);
+      assertEquals(res.status, 200);
+      const names = toolNamesInRequest(0);
+      for (
+        const mutating of [
+          "update_model",
+          "write_model_file",
+          "install_model_deps",
+        ]
+      ) {
+        assertEquals(names.includes(mutating), false, mutating);
+      }
+      assertEquals(names.includes("model_files"), true);
+    });
   });
 });
