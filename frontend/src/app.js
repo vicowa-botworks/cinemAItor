@@ -13,6 +13,7 @@ import "./components/asset-generate.js";
 import "./components/asset-reference-picker.js";
 import "./components/prompt-editor.js";
 import "./components/model-manager.js";
+import "./components/confirm-dialog.js";
 import "./components/job-monitor.js";
 import "./components/skills-list.js";
 import "./components/storyboard-list.js";
