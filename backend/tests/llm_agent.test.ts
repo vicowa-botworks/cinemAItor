@@ -593,6 +593,24 @@ for pkg in "\${@:5}"; do echo "Collecting $pkg"; done
 exit 0
 `;
 
+/** Like FAKE_PYTHON_SH, but the venv's pip install sleeps ~0.5 s. */
+const FAKE_PYTHON_SLOW_SH = `#!/usr/bin/env bash
+if [ "$2" = "venv" ]; then
+  dir="$3"
+  mkdir -p "$dir/bin"
+  cat > "$dir/bin/python" <<'INNER'
+#!/usr/bin/env bash
+sleep 0.5
+for pkg in "\${@:5}"; do echo "Collecting $pkg"; done
+exit 0
+INNER
+  chmod +x "$dir/bin/python"
+  exit 0
+fi
+for pkg in "\${@:5}"; do echo "Collecting $pkg"; done
+exit 0
+`;
+
 describe("llm agent runtime tools", () => {
   let appDataDir = "";
   let fakePython = "";
@@ -789,6 +807,94 @@ describe("llm agent runtime tools", () => {
         (await post(`/api/v1/llm/proposals/${bad}/reject`, {}, adminToken)).status,
         200,
       );
+    });
+  });
+
+  it("a duplicate approve 409s while the approved tool is still executing", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Slow Install");
+      const binDir = Deno.makeTempDirSync({ prefix: "fakepy_slow_" });
+      fakePython = join(binDir, "python3");
+      await Deno.writeTextFile(fakePython, FAKE_PYTHON_SLOW_SH);
+      await Deno.chmod(fakePython, 0o755);
+      Deno.env.set("MODEL_VENV_PYTHON", fakePython);
+
+      const pid = await makeProposalFor("install_model_deps", {
+        model_id: id,
+        packages: ["requests"],
+      });
+      const first = post(`/api/v1/llm/proposals/${pid}/approve`, {}, adminToken);
+      // The fake pip install sleeps ~0.5 s, so the approval is in flight
+      // well before the duplicate lands.
+      await new Promise((r) => setTimeout(r, 200));
+      const dup = await post(`/api/v1/llm/proposals/${pid}/approve`, {}, adminToken);
+      assertEquals(dup.status, 409);
+      assertMatch(
+        String(((await dup.json()) as { error?: { message?: string } }).error?.message ?? ""),
+        /in progress/,
+      );
+      // Rejecting an in-flight proposal is refused the same way.
+      assertEquals(
+        (await post(`/api/v1/llm/proposals/${pid}/reject`, {}, adminToken)).status,
+        409,
+      );
+      // The original approval still completes.
+      const res = await first;
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        proposal: { status: string; in_flight: boolean };
+      };
+      assertEquals(body.proposal.status, "approved");
+      assertEquals(body.proposal.in_flight, false);
+    });
+  });
+
+  it("GET /proposals lists the caller's proposals with live status", async () => {
+    const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
+    createUser(email, await hashPassword("password123"), "Regular User");
+    await withServer(async (base) => {
+      baseUrl = base;
+      const login = await post("/api/v1/auth/login", { email, password: "password123" });
+      const userToken = ((await login.json()) as { token: string }).token;
+
+      const id = await registerModel("Listed Model");
+      const pid = await makeProposalFor("write_model_file", {
+        model_id: id,
+        filename: "runner.py",
+        content: "print('hi')\n",
+      });
+
+      // The creator sees the pending proposal.
+      const res = await get("/api/v1/llm/proposals", adminToken);
+      assertEquals(res.status, 200);
+      const list = (await res.json()) as {
+        proposals: Array<Record<string, unknown>>;
+      };
+      const p = list.proposals.find((x) => x.id === pid);
+      assertExists(p);
+      assertEquals(p.status, "pending");
+      assertEquals(p.tool, "write_model_file");
+
+      // Other users do not see proposals that are not theirs.
+      const other = await get("/api/v1/llm/proposals", userToken);
+      assertEquals(other.status, 200);
+      const otherList = (await other.json()) as {
+        proposals: Array<Record<string, unknown>>;
+      };
+      assertEquals(otherList.proposals.some((x) => x.id === pid), false);
+
+      // After approval the list reflects the settled state + result.
+      const ok = await approve(pid);
+      assertEquals(ok.status, 200);
+      const after = (await (await get("/api/v1/llm/proposals", adminToken)).json()) as {
+        proposals: Array<Record<string, unknown>>;
+      };
+      const p2 = after.proposals.find((x) => x.id === pid);
+      assertExists(p2);
+      assertEquals(p2.status, "approved");
+      assertEquals(p2.in_flight, false);
+      assertExists(p2.result);
     });
   });
 

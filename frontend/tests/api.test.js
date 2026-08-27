@@ -1216,6 +1216,12 @@ describe("ApiClient", () => {
       assert(captured[0].options.signal === undefined);
     });
 
+    it("llmListProposals gets the caller's proposals with the default timeout", async () => {
+      await api.llmListProposals();
+      assertEquals(captured[0].url, "/api/v1/llm/proposals");
+      assert(captured[0].options.signal instanceof AbortSignal);
+    });
+
     it("verifyModel and healthCheckModel disable the timeout (full-file hashes)", async () => {
       await api.verifyModel("m-1");
       await api.healthCheckModel("m-1");

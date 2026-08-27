@@ -2679,7 +2679,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
   },
   LlmProposal: {
     type: "object",
-    required: ["id", "tool", "args", "status", "created_at", "expires_at"],
+    required: ["id", "tool", "args", "status", "created_at", "expires_at", "user_id"],
     properties: {
       id: { type: "string" },
       tool: {
@@ -2689,12 +2689,24 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
           "register_model_from_huggingface",
           "install_model",
           "remove_model",
+          "write_model_file",
+          "install_model_deps",
+          "update_model",
         ],
       },
       args: { type: "object" },
       status: { type: "string", enum: ["pending", "approved", "rejected"] },
       created_at: { type: "string" },
       expires_at: { type: "string" },
+      user_id: { type: "integer", description: "User who created the proposal" },
+      in_flight: {
+        type: "boolean",
+        description: "True while the approved tool call is executing (status is still 'pending')",
+      },
+      started_at: {
+        type: "string",
+        description: "Set when the approved tool call started executing",
+      },
       result: { type: ["object", "null"], nullable: true },
     },
   },
