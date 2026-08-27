@@ -280,6 +280,51 @@ describe("llm agent", () => {
     });
   });
 
+  it("approve normalizes HF dashed task types in a register_model proposal", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint(llm.url);
+      // The copilot's context carries HF's dashed pipeline tags, so the LLM
+      // may propose dashed task types; approval must normalize to canonical.
+      script = [
+        {
+          toolCalls: [{
+            id: "call_dashed",
+            name: "register_model",
+            args: {
+              name: "Dashed Tasks",
+              backend: "mock",
+              task_types: ["image-to-image", "text_to_image"],
+            },
+          }],
+        },
+        { content: "ok" },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "register the dashed model" }],
+      }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as { proposals: Array<{ id: string }> };
+      assertEquals(body.proposals.length, 1);
+
+      const approved = await post(
+        `/api/v1/llm/proposals/${body.proposals[0].id}/approve`,
+        {},
+        adminToken,
+      );
+      assertEquals(approved.status, 200);
+      const approvedBody = (await approved.json()) as {
+        result: { model: { task_types: string[] } };
+      };
+      assertEquals(approvedBody.result.model.task_types, ["image_to_image", "text_to_image"]);
+
+      const list = await get("/api/v1/models", adminToken);
+      const models = (await list.json()) as Array<Record<string, unknown>>;
+      const stored = models.find((m) => m.name === "Dashed Tasks");
+      assertEquals(stored?.task_types, ["image_to_image", "text_to_image"]);
+    });
+  });
+
   it("register_model_from_huggingface proposal registers on approval", async () => {
     // Fake HuggingFace endpoint (repo metadata + file tree), following the
     // fake-HF pattern from huggingface.test.ts: the base carries the /api

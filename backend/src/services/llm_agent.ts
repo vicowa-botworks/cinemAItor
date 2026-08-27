@@ -3,6 +3,7 @@ import {
   deleteModel,
   getModel,
   listModels,
+  MODEL_TASK_TYPES,
   registerModel,
   type RegisterModelInput,
 } from "../db/models.ts";
@@ -35,6 +36,8 @@ export type AgentToolName =
   | "register_model_from_huggingface"
   | "install_model"
   | "remove_model";
+
+const TASK_TYPES_HELP = `Task types the model covers. Allowed: ${MODEL_TASK_TYPES.join(", ")}`;
 
 export const READ_ONLY_AGENT_TOOLS: readonly AgentToolName[] = [
   "list_models",
@@ -111,7 +114,7 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       name: stringProperty("Display name"),
       model_id: stringProperty("Explicit model id (lowercase, default: generated)"),
       backend: stringProperty("mock | local_cli | comfyui | local_http"),
-      task_types: stringArrayProperty("Task types the model covers"),
+      task_types: stringArrayProperty(TASK_TYPES_HELP),
       file_url: stringProperty("Direct download URL for the weights (source: url)"),
       repository_url: stringProperty("Download URL for the weights (source: url)"),
       version: stringProperty("Version string"),
@@ -127,7 +130,7 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       repo_id: stringProperty("Repo id, 'owner/name'"),
       file: stringProperty("Weight file (default: largest .safetensors/.gguf/.ckpt/.bin)"),
       backend: stringProperty("mock | local_cli | comfyui | local_http (default: local_cli)"),
-      task_types: stringArrayProperty("Task types the model covers"),
+      task_types: stringArrayProperty(TASK_TYPES_HELP),
       name: stringProperty("Display name (default: repo id)"),
       version: stringProperty("Version string (default: 1.0)"),
     },

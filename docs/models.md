@@ -62,6 +62,13 @@ The server validates the backend, source, and task types against the same allowl
 `400` with the allowed values on mismatch; duplicate registrations are allowed (models are
 distinguished by id/name/version metadata).
 
+**Task-type aliases:** the canonical task types use underscores. HuggingFace pipeline tags use
+dashes for the image/video family, and the Model Copilot's context carries those tags — so every
+validation boundary (model register/update, skill `model_task_types`, job `job_type`) also accepts
+the dashed aliases `text-to-image`, `image-to-image`, `image-to-video`, `text-to-video` and
+normalizes them to the canonical forms before validation and storage. An alias and its canonical
+duplicate collapse to one entry; anything unknown still answers `400` with the allowed list.
+
 ## Browsing HuggingFace
 
 The model-manager page also has a **Browse HuggingFace** panel (all authenticated users can search;
