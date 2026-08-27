@@ -1,6 +1,6 @@
 import type { StorageLayout } from "../storage/paths.ts";
 import type { Model } from "../db/models.ts";
-import { fileExists, verifyModelFile } from "./model_files.ts";
+import { fileExists, readVerificationRecord, verifyModelFile } from "./model_files.ts";
 import { modelFile } from "./model_files.ts";
 
 export interface HealthResult {
@@ -59,6 +59,11 @@ export interface HealthCheckOptions {
  * simulated runtime and is healthy without files. Remote backends (comfyui,
  * local_http) do not require a local model file — the endpoint probe is the
  * runtime check; a local file is verified when one is present.
+ *
+ * File integrity: a full SHA-256 over a multi-GB model takes minutes, so the
+ * check consults the verification sidecar (size + mtime + hash of the file at
+ * last successful full verification) and skips the re-hash when the file is
+ * unchanged. The explicit verify endpoint (POST /:id/verify) always re-hashes.
  */
 export async function checkModelHealth(
   layout: StorageLayout,
@@ -82,10 +87,29 @@ export async function checkModelHealth(
     return { status: "error", message: "Model is not installed (file missing)" };
   }
 
+  // "File verified" (full hash ran now) or "File unchanged since last
+  // verification" (sidecar fast path); null when no file/hash to check.
+  let fileNote: string | null = null;
   if (filePresent && model.file_hash) {
-    const verify = await verifyModelFile(layout, model.id, model.file_hash);
-    if (!verify.valid) {
-      return { status: "error", message: verify.message };
+    const record = await readVerificationRecord(layout, model.id);
+    let unchanged = false;
+    if (record && record.hash === model.file_hash) {
+      try {
+        const stat = await Deno.stat(file);
+        unchanged = record.size === stat.size &&
+          record.mtimeMs === (stat.mtime?.getTime() ?? 0);
+      } catch {
+        unchanged = false;
+      }
+    }
+    if (unchanged) {
+      fileNote = "File unchanged since last verification";
+    } else {
+      const verify = await verifyModelFile(layout, model.id, model.file_hash);
+      if (!verify.valid) {
+        return { status: "error", message: verify.message };
+      }
+      fileNote = "File verified";
     }
   }
 
@@ -95,7 +119,7 @@ export async function checkModelHealth(
         return { status: "error", message: `Missing runtime dependency: ${dep}` };
       }
     }
-    return { status: "ok", message: "File verified and CLI runtime available" };
+    return { status: "ok", message: `${fileNote ?? "Model installed"} and CLI runtime available` };
   }
 
   if (remoteBackend) {
@@ -110,17 +134,17 @@ export async function checkModelHealth(
       return {
         status: "ok",
         message: filePresent
-          ? `File verified and backend reachable at ${endpoint}`
+          ? `${fileNote ?? "File present"} and backend reachable at ${endpoint}`
           : `Backend reachable at ${endpoint} (remote runtime, no local file required)`,
       };
     }
     return {
       status: "ok",
       message: filePresent
-        ? "File verified (no HTTP endpoint configured for probe)"
+        ? `${fileNote ?? "Model installed"} (no HTTP endpoint configured for probe)`
         : "No local file and no HTTP endpoint configured for probe",
     };
   }
 
-  return { status: "ok", message: "Model installed" };
+  return { status: "ok", message: fileNote ?? "Model installed" };
 }

@@ -76,6 +76,7 @@ export async function installFromLocal(
   await Deno.mkdir(modelDir(layout, modelId), { recursive: true });
   await Deno.copyFile(sourcePath, target);
   const fileHash = await sha256File(target);
+  await recordVerification(layout, modelId, target, fileHash);
   return { fileHash, fileBytes: stat.size };
 }
 
@@ -298,6 +299,7 @@ export async function installFromUrl(
     await Deno.rename(part, target);
     await Deno.remove(partUrl).catch(() => {});
     const fileHash = await sha256File(target);
+    await recordVerification(layout, modelId, target, fileHash);
     return { fileHash, fileBytes: total };
   }
 }
@@ -386,7 +388,72 @@ export interface VerifyResult {
   message: string;
 }
 
-/** Checksum validation (MOD-004). */
+/**
+ * Sidecar recording the file state (size + mtime + hash) at the moment of the
+ * last successful full checksum verification. Lets the health check skip the
+ * full re-hash when the file is byte-for-byte the one that was verified
+ * (size + mtime identical); the explicit verify endpoint always re-hashes.
+ */
+export interface VerificationRecord {
+  size: number;
+  mtimeMs: number;
+  hash: string;
+}
+
+export function verificationRecordFile(layout: StorageLayout, modelId: string): string {
+  return modelFile(layout, modelId) + ".verified";
+}
+
+export async function readVerificationRecord(
+  layout: StorageLayout,
+  modelId: string,
+): Promise<VerificationRecord | null> {
+  try {
+    const parsed = JSON.parse(await Deno.readTextFile(verificationRecordFile(layout, modelId)));
+    if (
+      typeof parsed?.size === "number" && typeof parsed?.mtimeMs === "number" &&
+      typeof parsed?.hash === "string"
+    ) {
+      return { size: parsed.size, mtimeMs: parsed.mtimeMs, hash: parsed.hash };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeVerificationRecord(
+  layout: StorageLayout,
+  modelId: string,
+  record: VerificationRecord,
+): Promise<void> {
+  await Deno.mkdir(modelDir(layout, modelId), { recursive: true });
+  await Deno.writeTextFile(
+    verificationRecordFile(layout, modelId),
+    JSON.stringify(record),
+  );
+}
+
+/** Best-effort: record the file's size + mtime + hash at verification time. */
+async function recordVerification(
+  layout: StorageLayout,
+  modelId: string,
+  file: string,
+  hash: string,
+): Promise<void> {
+  try {
+    const stat = await Deno.stat(file);
+    await writeVerificationRecord(layout, modelId, {
+      size: stat.size,
+      mtimeMs: stat.mtime?.getTime() ?? 0,
+      hash,
+    });
+  } catch {
+    // A record write failure just means the next check re-hashes.
+  }
+}
+
+/** Checksum validation (MOD-004). Always performs a full file hash. */
 export async function verifyModelFile(
   layout: StorageLayout,
   modelId: string,
@@ -411,6 +478,9 @@ export async function verifyModelFile(
     };
   }
   const valid = fileHash === expectedHash;
+  if (valid) {
+    await recordVerification(layout, modelId, file, fileHash);
+  }
   return {
     valid,
     fileHash,

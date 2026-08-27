@@ -2060,7 +2060,7 @@ export class ModelManager extends LitElement {
                     ? `"${m.name}": health OK — ${res.message}`
                     : `"${m.name}": ${res.message}`,
               )}>
-            Health check
+            ${busy ? "Checking…" : "Health check"}
           </button>
           <button
             class="btn-small"
@@ -2074,7 +2074,7 @@ export class ModelManager extends LitElement {
                     ? `"${m.name}": ${res.message}`
                     : `"${m.name}": verification failed — ${res.message}`,
               )}>
-            Verify checksum
+            ${busy ? "Verifying…" : "Verify checksum"}
           </button>
           <button
             class="btn-small"

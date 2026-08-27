@@ -152,14 +152,25 @@ repo, `409` model id already registered, `502` HuggingFace unreachable, timed ou
   up the part file, so nothing partial is left behind. The size is uncapped by default — set
   `MODEL_DOWNLOAD_MAX_SIZE` (bytes, 0 = unlimited) to enforce a limit (a part file already beyond
   the cap is removed and the install fails).
-- **Verify**: re-hashes the installed file and compares to the stored hash; when no hash was stored
-  yet, verify records the current hash.
+- **Verify**: always re-hashes the installed file (a full SHA-256 — minutes for multi-GB models) and
+  compares to the stored hash; when no hash was stored yet, verify records the current hash. A
+  successful full verification also refreshes the verification sidecar (below).
+- **Verification sidecar** (`model.bin.verified`, JSON `{size, mtimeMs, hash}`): written at install
+  time and after every successful full verification, recording the file's size + mtime at the moment
+  its hash matched. The health check consults it first: when the file's size and mtime are
+  unchanged, the re-hash is skipped (the file is the one that was verified) and the result says
+  "File unchanged since last verification". Any size/mtime change triggers a full re-hash, so a
+  rewritten or truncated file is caught. Trade-off: a same-size tamper with a restored mtime is
+  trusted until the next real modification — the explicit Verify action always re-hashes.
 - **Health check** per backend:
   - `mock` → always ok (simulated).
-  - `local_cli` → file exists + checksum ok + all `dependencies` resolvable on `PATH`.
+  - `local_cli` → file exists + checksum ok (full re-hash, or sidecar fast path) + all
+    `dependencies` resolvable on `PATH`.
   - `comfyui` / `local_http` → (if `default_settings.endpoint` is set) the endpoint answers — the
     runtime is remote, so no local file is required; a local file is still checksum-verified when
-    one is present. Result is persisted (`health_status`, `health_error`, `health_checked_at`).
+    one is present. Result is persisted (`health_status`, `health_error`, `health_checked_at`). The
+    diagnostics models report (`GET /api/v1/diagnostics/models`) runs the same checks, so the
+    sidecar keeps it fast for large models too.
 - **Hardware detection** (`detectHardware` in `services/hardware.ts`): platform, CPU count, and
   total RAM come from `/proc` (Linux) or `sysctl` (macOS); the GPU is detected via
   `nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version` (3s timeout, first GPU on

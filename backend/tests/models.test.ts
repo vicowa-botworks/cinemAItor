@@ -21,6 +21,7 @@ import {
   installFromUrl,
   modelDir,
   modelFile,
+  readVerificationRecord,
   removeModelFiles,
   verifyModelFile,
 } from "../src/services/model_files.ts";
@@ -441,7 +442,7 @@ describe("model manager", () => {
       for await (const entry of Deno.readDir(modelDir(layout, m.id))) {
         dirEntries.push(entry.name);
       }
-      assertEquals(dirEntries, ["model.bin"]);
+      assertEquals([...dirEntries].sort(), ["model.bin", "model.bin.verified"]);
     } finally {
       mock.stop();
     }
@@ -715,6 +716,57 @@ describe("model manager", () => {
     const updated = setModelHealth(installedRow.id, "error", "boom");
     assertEquals(updated?.health_status, "error");
     assertEquals(updated?.health_error, "boom");
+  });
+
+  it("health check: verification sidecar skips the re-hash for unchanged files", async () => {
+    const m = registerModel(userId, {
+      name: "cache-model",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+    });
+    const src = await writeSourceFile("cache-src.bin", new Uint8Array([1, 2, 3]));
+    const res = await installFromLocal(layout, m.id, src);
+    const row = setModelInstalled(m.id, res.fileHash);
+    assert(row);
+    const file = modelFile(layout, m.id);
+
+    // Install seeds the record; the health check takes the fast path.
+    const record = await readVerificationRecord(layout, m.id);
+    assert(record);
+    assertEquals(record.hash, row.file_hash);
+    const first = await checkModelHealth(layout, row);
+    assertEquals(first.status, "ok");
+    assert(first.message.includes("unchanged since last verification"));
+
+    // Same size + restored mtime -> the record is trusted (documented
+    // trade-off; the explicit verify endpoint always re-hashes).
+    const before = await Deno.stat(file);
+    await Deno.writeFile(file, new Uint8Array([9, 9, 9]));
+    await Deno.utime(file, before.atime ?? new Date(0), before.mtime ?? new Date(0));
+    const trusted = await checkModelHealth(layout, row);
+    assertEquals(trusted.status, "ok");
+    assert(trusted.message.includes("unchanged since last verification"));
+
+    // A real rewrite changes the mtime -> full re-hash -> mismatch caught.
+    await Deno.writeFile(file, new Uint8Array([4, 5, 6, 7]));
+    const stale = await checkModelHealth(layout, row);
+    assertEquals(stale.status, "error");
+    assert(stale.message.includes("mismatch"));
+
+    // Restoring the file triggers a full re-hash and refreshes the record.
+    await Deno.copyFile(src, file);
+    const restored = await checkModelHealth(layout, row);
+    assertEquals(restored.status, "ok");
+    assert(restored.message.includes("File verified"));
+    const fresh = await readVerificationRecord(layout, m.id);
+    assert(fresh);
+    assertEquals(fresh.hash, row.file_hash);
+
+    // The explicit verify always performs a full hash (no fast path).
+    const full = await verifyModelFile(layout, m.id, row.file_hash);
+    assertEquals(full.valid, true);
+    assertEquals(full.message, "Checksum matches");
   });
 
   it("health check: remote backends are healthy without a local file", async () => {

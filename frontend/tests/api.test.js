@@ -1216,6 +1216,14 @@ describe("ApiClient", () => {
       assert(captured[0].options.signal === undefined);
     });
 
+    it("verifyModel and healthCheckModel disable the timeout (full-file hashes)", async () => {
+      await api.verifyModel("m-1");
+      await api.healthCheckModel("m-1");
+      for (const entry of captured) {
+        assert(entry.options.signal === undefined);
+      }
+    });
+
     it("uploadAsset arms the extended upload timeout", async () => {
       const file = new File(["bytes"], "a.png", { type: "image/png" });
       await api.uploadAsset("a-1", file);
