@@ -749,6 +749,12 @@ class ApiClient {
     });
   }
 
+  llmListProposals() {
+    // Fast read; used to re-sync proposal cards after an approve/reject error
+    // so a dropped long-running approval converges on server-side state.
+    return this.request("/llm/proposals");
+  }
+
   searchHuggingFace({ q = "", filter = "", limit = 12 } = {}) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);

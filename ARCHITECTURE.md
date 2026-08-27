@@ -402,7 +402,11 @@ server.ts (entry point)
   │   │   VRAM, from the 60s-cached detectHardware) so it judges model fit from real
   │   │   numbers; read-only tools auto-execute, mutating tools (admin-only) create
   │   │   in-memory proposals executed only after explicit approval
-  │   │   (POST /api/v1/llm/proposals/:id/approve). Local-cli runtime setup tools:
+  │   │   (POST /api/v1/llm/proposals/:id/approve). Approvals are single-flight: the
+  │   │   proposal is in_flight while the tool executes (duplicate approve/reject
+  │   │   409s), and GET /api/v1/llm/proposals lists live status (in_flight +
+  │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.
+  │   │   Local-cli runtime setup tools:
   │   │   model_files (read-only listing), write_model_file (runner scripts into the
   │   │   model dir), install_model_deps (.venv + pip install, returns the venv
   │   │   python path), update_model (fix settings/task types on an existing row) —

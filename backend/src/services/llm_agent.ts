@@ -248,6 +248,12 @@ export interface AgentProposal {
   status: "pending" | "approved" | "rejected";
   created_at: string;
   expires_at: string;
+  /** User who created the proposal (via an agent turn). */
+  user_id: number;
+  /** True while the approved tool call is executing (status is still "pending"). */
+  in_flight?: boolean;
+  /** Set when the approved tool call started executing. */
+  started_at?: string;
   result?: Record<string, unknown> | null;
 }
 
@@ -266,6 +272,7 @@ function pruneProposals(now = Date.now()): void {
 export function createProposal(
   tool: AgentToolName,
   args: Record<string, unknown>,
+  userId: number,
 ): AgentProposal {
   pruneProposals();
   const proposal: AgentProposal = {
@@ -275,6 +282,7 @@ export function createProposal(
     status: "pending",
     created_at: nowIso(),
     expires_at: new Date(Date.now() + PROPOSAL_TTL_MS).toISOString(),
+    user_id: userId,
   };
   proposals.set(proposal.id, proposal);
   return proposal;
@@ -284,6 +292,9 @@ function findPendingProposal(id: string): AgentProposal {
   pruneProposals();
   const proposal = proposals.get(id);
   if (!proposal) throw notFound("Proposal not found or expired");
+  if (proposal.in_flight) {
+    throw conflict("Proposal is already in progress");
+  }
   if (proposal.status !== "pending") {
     throw conflict(`Proposal is already ${proposal.status}`);
   }
@@ -302,9 +313,21 @@ export async function approveProposal(
 ): Promise<{ proposal: AgentProposal; result: Record<string, unknown> | null }> {
   const proposal = findPendingProposal(id);
   if (!isAdmin) throw forbidden("Admin role required to approve proposals");
-  const result = (await runTool(proposal.tool, proposal.args, { userId, isAdmin })) as
-    | Record<string, unknown>
-    | null;
+  // Mark in-flight BEFORE executing so a duplicate approve (double-click,
+  // second tab, client retry) fails fast with 409 instead of starting a
+  // second concurrent execution of the same tool call.
+  proposal.in_flight = true;
+  proposal.started_at = nowIso();
+  let result: Record<string, unknown> | null;
+  try {
+    result = (await runTool(proposal.tool, proposal.args, { userId, isAdmin })) as
+      | Record<string, unknown>
+      | null;
+  } catch (err) {
+    proposal.in_flight = false;
+    throw err;
+  }
+  proposal.in_flight = false;
   proposal.status = "approved";
   proposal.result = result;
   return { proposal, result };
@@ -323,6 +346,12 @@ export function rejectProposal(
 export function listPendingProposals(): AgentProposal[] {
   pruneProposals();
   return [...proposals.values()].filter((p) => p.status === "pending");
+}
+
+/** Proposals visible to a user: their own, plus everything for admins. */
+export function listProposals(userId: number, isAdmin: boolean): AgentProposal[] {
+  pruneProposals();
+  return [...proposals.values()].filter((p) => isAdmin || p.user_id === userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +782,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         step.summary = "Mutating tools require the admin role";
         messages.push(toolMessage(call, JSON.stringify({ error: step.summary })));
       } else if (isMutatingAgentTool(name)) {
-        const proposal = createProposal(name as AgentToolName, args);
+        const proposal = createProposal(name as AgentToolName, args, opts.userId);
         created.push(proposal);
         step.status = "proposal";
         step.proposal_id = proposal.id;

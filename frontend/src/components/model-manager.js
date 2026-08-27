@@ -933,7 +933,8 @@ export class ModelManager extends LitElement {
     copilotInput: { state: true },
     copilotBusy: { state: true },
     copilotError: { state: true },
-    copilotProposalBusy: { state: true },
+    copilotBusyProposals: { state: true },
+    copilotBusySince: { state: true },
     showRegister: { state: true },
     regBusy: { state: true },
     regForm: { state: true },
@@ -984,7 +985,8 @@ export class ModelManager extends LitElement {
     this.copilotInput = "";
     this.copilotBusy = false;
     this.copilotError = "";
-    this.copilotProposalBusy = null;
+    this.copilotBusyProposals = [];
+    this.copilotBusySince = {};
     this.showRegister = false;
     this.regBusy = false;
     this.regForm = { ...EMPTY_REG_FORM };
@@ -1566,8 +1568,12 @@ export class ModelManager extends LitElement {
   }
 
   _renderProposal(p) {
-    const busy = this.copilotProposalBusy === p.id;
     const isPending = p.status === "pending";
+    // Busy = a local approve/reject call is in flight, or the server reports
+    // the approved tool call is executing (survives reloads / re-syncs).
+    const busy = this.copilotBusyProposals.includes(p.id) || p.in_flight === true;
+    const since = this._proposalSinceLabel(p);
+    const busyLabel = busy ? (since ? `Running… since ${since}` : "Running…") : "Approve";
     const argsDisplay = this._proposalArgsDisplay(p.args ?? {});
     return html`
       <div class="copilot-proposal ${isPending ? "" : "done"}">
@@ -1581,8 +1587,8 @@ export class ModelManager extends LitElement {
               class="btn btn-small"
               ?disabled=${busy}
               @click=${() => this._copilotApprove(p)}>
-              ${busy ? "Running..." : "Approve"}
-            </button>
+                  ${busyLabel}
+                </button>
             <button
               class="btn btn-secondary btn-small"
               ?disabled=${busy}
@@ -1661,39 +1667,85 @@ export class ModelManager extends LitElement {
     });
   }
 
+  _markProposalBusy(id) {
+    this.copilotBusyProposals = [...this.copilotBusyProposals, id];
+    this.copilotBusySince = { ...this.copilotBusySince, [id]: new Date().toISOString() };
+  }
+
+  _clearProposalBusy(id) {
+    if (!this.copilotBusyProposals.includes(id)) return;
+    this.copilotBusyProposals = this.copilotBusyProposals.filter((x) => x !== id);
+    const since = { ...this.copilotBusySince };
+    delete since[id];
+    this.copilotBusySince = since;
+  }
+
+  /** Local start time, falling back to the server's started_at. */
+  _proposalSinceLabel(p) {
+    const iso = this.copilotBusySince[p.id] || p.started_at;
+    if (!iso) return "";
+    const t = new Date(iso);
+    return Number.isNaN(t.getTime()) ? "" : t.toLocaleTimeString();
+  }
+
+  /**
+   * Re-sync proposal cards from the server after an approve/reject error: a
+   * long-running approval may have completed (or still be executing) even
+   * though this client's request failed or a duplicate landed. Returns the
+   * error message to show (empty when the server state already settles it).
+   */
+  async _syncProposalError(id, err, fallback) {
+    let list = null;
+    try {
+      list = (await api.llmListProposals()).proposals;
+    } catch {
+      list = null;
+    }
+    if (Array.isArray(list)) {
+      for (const p of list) this._setProposal(p);
+      const p = list.find((x) => x.id === id);
+      if (p && (p.status !== "pending" || p.in_flight)) return "";
+    }
+    return err.message || fallback;
+  }
+
   async _copilotApprove(proposal) {
-    this.copilotProposalBusy = proposal.id;
+    const id = proposal.id;
+    this._markProposalBusy(id);
     this.copilotError = "";
     try {
-      const { proposal: updated, result } = await api.llmApproveProposal(proposal.id);
+      const { proposal: updated, result } = await api.llmApproveProposal(id);
       this._setProposal({ ...updated, result: result ?? updated.result });
       // Every mutating copilot tool changes the model registry (register /
       // install / remove) — refresh the list so the effect is visible without
       // a page reload.
       await this._loadModels();
     } catch (err) {
-      this.copilotError = err.message || "Approval failed.";
+      this.copilotError = await this._syncProposalError(id, err, "Approval failed.");
     } finally {
-      this.copilotProposalBusy = null;
+      this._clearProposalBusy(id);
     }
   }
 
   async _copilotReject(proposal) {
-    this.copilotProposalBusy = proposal.id;
+    const id = proposal.id;
+    this._markProposalBusy(id);
     this.copilotError = "";
     try {
-      const { proposal: updated } = await api.llmRejectProposal(proposal.id);
+      const { proposal: updated } = await api.llmRejectProposal(id);
       this._setProposal(updated);
     } catch (err) {
-      this.copilotError = err.message || "Rejecting the proposal failed.";
+      this.copilotError = await this._syncProposalError(id, err, "Rejecting the proposal failed.");
     } finally {
-      this.copilotProposalBusy = null;
+      this._clearProposalBusy(id);
     }
   }
 
   _copilotClear() {
     this.copilot = [];
     this.copilotError = "";
+    this.copilotBusyProposals = [];
+    this.copilotBusySince = {};
   }
 
   _renderHfPanel() {

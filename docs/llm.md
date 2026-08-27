@@ -46,6 +46,7 @@ require admin; reading settings requires admin; every authenticated user can rea
 | POST   | `/api/v1/llm/agent`                 | authenticated | Model Copilot: `{history, model?}` → `{reply, model, iterations, truncated, steps[], proposals[]}` |
 | POST   | `/api/v1/llm/proposals/:id/approve` | admin         | Execute a pending mutating-tool proposal → `{proposal, result}`                                    |
 | POST   | `/api/v1/llm/proposals/:id/reject`  | admin         | Reject a pending proposal → `{proposal}`                                                           |
+| GET    | `/api/v1/llm/proposals`             | authenticated | The caller's proposals with live status (`in_flight`, `started_at`); admins see all                |
 
 ### Error mapping (chat / test / assist / agent)
 
@@ -184,17 +185,31 @@ per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, pr
 - `remove_model` `{model_id}`
 
 When the model calls a mutating tool, the harness creates a **proposal**
-(`{id, tool, args, status, created_at, expires_at}` — in-memory, 1 h TTL, never persisted) and
-appends a tool message telling the model the action awaits user approval. Non-admin users only
-receive read-only tools in the schema (a stray mutating call still fails the step, it is not
-executed).
+(`{id, tool, args, status, created_at, expires_at, user_id, in_flight?, started_at?}` — in-memory, 1
+h TTL, never persisted) and appends a tool message telling the model the action awaits user
+approval. Non-admin users only receive read-only tools in the schema (a stray mutating call still
+fails the step, it is not executed).
 
 - `POST /api/v1/llm/proposals/:id/approve` — re-checks admin + validation and executes the stored
-  call, answering `{proposal, result}` (the executed proposal with its result attached).
+  call, answering `{proposal, result}` (the executed proposal with its result attached). Execution
+  is **single-flight**: the approval sets `in_flight` before the tool runs, so a duplicate approve
+  or reject (double-click, second tab, client retry) gets `409` instead of starting a second
+  concurrent run — important for `install_model_deps`, where two pip installs into the same `.venv`
+  would corrupt it. The status flips to `approved` only after the tool succeeds; a failed tool
+  clears `in_flight` and leaves the proposal pending so it can be retried.
 - `POST /api/v1/llm/proposals/:id/reject` — closes it, answering `{proposal}`.
+- `GET /api/v1/llm/proposals` — the caller's proposals with their current status (admins see all).
+  `in_flight: true` + `started_at` are set while the approved tool call executes, so a reloaded page
+  or a dropped request still knows a long install is running server-side.
 
-Both answer `404` for unknown/expired proposals, `403` for non-admins, and `409` when the proposal
-is no longer pending.
+Both mutation endpoints answer `404` for unknown/expired proposals, `403` for non-admins, and `409`
+when the proposal is no longer pending or is already in progress.
+
+The Model Copilot UI re-syncs its proposal cards from the list endpoint after an approve/reject
+error: a long-running approval whose client-side request was dropped (or a duplicate that got the
+`409`) converges on the server-side state — the card shows the settled result, or stays busy
+(`Running… since HH:MM`) while the server-side run is still executing — instead of stranding stale,
+re-clickable buttons.
 
 **Local-cli model setup.** The copilot's system prompt carries a setup playbook: a `local_cli` model
 only works when its `default_settings.command` is an existing executable and every file its `args`

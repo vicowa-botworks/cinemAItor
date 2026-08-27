@@ -16,7 +16,12 @@ import {
   unauthorized,
 } from "@cinemaItor/errors.ts";
 import { chatLlm, type LlmMessage, testLlmConnection } from "@cinemaItor/services/llm_client.ts";
-import { approveProposal, rejectProposal, runAgent } from "@cinemaItor/services/llm_agent.ts";
+import {
+  approveProposal,
+  listProposals,
+  rejectProposal,
+  runAgent,
+} from "@cinemaItor/services/llm_agent.ts";
 import {
   ASSIST_PURPOSES,
   type AssistPurpose,
@@ -422,6 +427,11 @@ function handleRejectProposal(ctx: Context): void {
   ctx.response.body = { proposal };
 }
 
+function handleListProposals(ctx: Context): void {
+  const userId = requireUserId(ctx);
+  ctx.response.body = { proposals: listProposals(userId, isAdminUser(userId)) };
+}
+
 // ---------------------------------------------------------------------------
 // Router + OpenAPI metadata
 // ---------------------------------------------------------------------------
@@ -436,6 +446,7 @@ export const router = new Router()
   .post("/api/v1/llm/chat", authMiddleware, handleChat)
   .post("/api/v1/llm/assist", authMiddleware, handleAssist)
   .post("/api/v1/llm/agent", authMiddleware, handleAgent)
+  .get("/api/v1/llm/proposals", authMiddleware, handleListProposals)
   .post("/api/v1/llm/proposals/:id/approve", authMiddleware, handleApproveProposal)
   .post("/api/v1/llm/proposals/:id/reject", authMiddleware, handleRejectProposal);
 
@@ -729,6 +740,26 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(401, 403, 404, 409),
+    },
+  },
+  "GET /api/v1/llm/proposals": {
+    summary: "List copilot proposals (the caller's own; admins see all)",
+    description: "Returns in-memory proposals with their current status, including " +
+      "in_flight (the approved tool call is executing) and started_at. The Model Copilot " +
+      "UI re-syncs proposal cards from this endpoint after an approve/reject error, so a " +
+      "dropped long-running approval still converges on the server-side state.",
+    responses: {
+      200: {
+        description: "The caller's proposals",
+        schema: {
+          type: "object",
+          required: ["proposals"],
+          properties: {
+            proposals: { type: "array", items: ref("LlmProposal") },
+          },
+        },
+      },
+      ...errorResponses(401),
     },
   },
 };
