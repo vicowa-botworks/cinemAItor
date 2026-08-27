@@ -266,6 +266,7 @@ export const modelRouter = new Router()
       min_vram_mb: optionalInt(body, "min_vram_mb"),
       dependencies: stringArray(body, "dependencies"),
       known_limitations: stringArray(body, "known_limitations"),
+      default_settings: jsonObject(body, "default_settings"),
     });
     ctx.response.status = 201;
     ctx.response.body = result;

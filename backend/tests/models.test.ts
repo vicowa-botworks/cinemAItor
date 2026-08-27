@@ -90,7 +90,7 @@ describe("model manager", () => {
       license: "OpenRAIL",
       task_types: ["text_to_image"],
       output_types: ["image"],
-      default_settings: { steps: 20 },
+      default_settings: { command: "sd-runner", steps: 20 },
       vram_requirement_mb: 4096,
       dependencies: ["python3"],
       ...extra,
@@ -101,7 +101,7 @@ describe("model manager", () => {
     const m1 = registerT2I("alpha", { enabled: true });
     registerT2I("beta", {
       task_types: ["image_to_video"],
-      default_settings: { endpoint: "http://127.0.0.1:9999" },
+      default_settings: { command: "i2v-runner", endpoint: "http://127.0.0.1:9999" },
     });
     registerT2I("gamma", { enabled: false });
 
@@ -119,7 +119,7 @@ describe("model manager", () => {
     assertEquals(fetched.name, "alpha");
     assertEquals(fetched.backend, "local_cli");
     assertEquals(fetched.task_types, ["text_to_image"]);
-    assertEquals(fetched.default_settings, { steps: 20 });
+    assertEquals(fetched.default_settings, { command: "sd-runner", steps: 20 });
     assertEquals(fetched.license, "OpenRAIL");
     assertEquals(fetched.enabled, true);
     assertEquals(fetched.installed_at, null);
@@ -147,6 +147,112 @@ describe("model manager", () => {
         }),
       Error,
       "unknown task type",
+    );
+  });
+
+  it("rejects backends registered without their required settings", () => {
+    assertThrows(
+      () => registerModel(userId, { name: "x", version: "1", backend: "local_cli" }),
+      Error,
+      "require a 'command'",
+    );
+    assertThrows(
+      () =>
+        registerModel(userId, {
+          name: "x",
+          version: "1",
+          backend: "local_cli",
+          default_settings: { command: "   " },
+        }),
+      Error,
+      "require a 'command'",
+    );
+    assertThrows(
+      () =>
+        registerModel(userId, {
+          name: "y",
+          version: "1",
+          backend: "comfyui",
+          default_settings: { endpoint: "http://127.0.0.1:8188" },
+        }),
+      Error,
+      "non-empty 'workflow'",
+    );
+    assertThrows(
+      () =>
+        registerModel(userId, {
+          name: "z",
+          version: "1",
+          backend: "comfyui",
+          default_settings: { workflow: { "1": {} } },
+        }),
+      Error,
+      "an 'endpoint' http(s) URL",
+    );
+    const ok = registerModel(userId, {
+      name: "valid",
+      version: "1",
+      backend: "local_cli",
+      default_settings: { command: "runner", args: ["--out", "{output}"] },
+    });
+    assertEquals(ok.default_settings.command, "runner");
+  });
+
+  it("only re-validates settings on update when settings or backend are touched", () => {
+    const m = registerModel(userId, {
+      name: "updatable",
+      version: "1",
+      backend: "local_cli",
+      default_settings: { command: "runner" },
+    });
+    // Unrelated edits pass without re-validating settings.
+    const renamed = updateModel(userId, m.id, { name: "renamed" });
+    assert(renamed);
+    // Clearing the command is rejected.
+    assertThrows(
+      () => updateModel(userId, m.id, { default_settings: { steps: 20 } }),
+      Error,
+      "require a 'command'",
+    );
+    // Switching backend to local_cli without a command is rejected.
+    const asMock = updateModel(userId, m.id, {
+      backend: "mock",
+      default_settings: {},
+    });
+    assert(asMock);
+    assertThrows(
+      () => updateModel(userId, m.id, { backend: "local_cli" }),
+      Error,
+      "require a 'command'",
+    );
+    // Switching back with valid settings works.
+    const back = updateModel(userId, m.id, {
+      backend: "local_cli",
+      default_settings: { command: "other" },
+    });
+    assert(back);
+    assertEquals(back.backend, "local_cli");
+    assertEquals(back.default_settings, { command: "other" });
+  });
+
+  it("lets unrelated edits through on a legacy broken local_cli row", () => {
+    // Pre-fix databases may hold local_cli rows without a command; edits that
+    // don't touch settings/backend must not be blocked by that legacy state.
+    const db = getDb();
+    const now = new Date().toISOString();
+    (
+      db.prepare(
+        `INSERT INTO models (id, name, version, backend, task_types_json, default_settings_json, created_at, updated_at)
+         VALUES ('legacy-broken', 'legacy', '1', 'local_cli', '[]', '{}', ?, ?)`,
+      ) as { run: (...params: unknown[]) => unknown }
+    ).run(now, now);
+    const renamed = updateModel(userId, "legacy-broken", { name: "legacy-renamed" });
+    assert(renamed);
+    assertEquals(renamed.name, "legacy-renamed");
+    assertThrows(
+      () => updateModel(userId, "legacy-broken", { default_settings: { steps: 5 } }),
+      Error,
+      "require a 'command'",
     );
   });
 
@@ -184,6 +290,7 @@ describe("model manager", () => {
       backend: "local_cli",
       task_types: ["image_to_video"],
       enabled: false,
+      default_settings: { command: "i2v-runner" },
     });
     const t2i = findModelsForTask("text_to_image");
     assertEquals(t2i.map((m) => m.id), [m1.id]);
@@ -201,12 +308,12 @@ describe("model manager", () => {
     const reenabled = updateModel(userId, m.id, {
       enabled: true,
       license: "MIT",
-      default_settings: { steps: 30 },
+      default_settings: { command: "sd-runner", steps: 30 },
     });
     assert(reenabled);
     assertEquals(reenabled.enabled, true);
     assertEquals(reenabled.license, "MIT");
-    assertEquals(reenabled.default_settings, { steps: 30 });
+    assertEquals(reenabled.default_settings, { command: "sd-runner", steps: 30 });
 
     assertEquals(
       updateModel(userId, "missing-id", { enabled: true }),
@@ -668,6 +775,7 @@ describe("model manager", () => {
       version: "1.0",
       backend: "local_cli",
       task_types: ["text_to_image"],
+      default_settings: { command: "sd-runner" },
     });
     const src = await writeSourceFile("health-src.bin", new Uint8Array([5, 5]));
     const res = await installFromLocal(layout, installed.id, src);
@@ -683,6 +791,7 @@ describe("model manager", () => {
       backend: "local_cli",
       task_types: ["text_to_image"],
       dependencies: ["definitely_not_a_real_command_xyz"],
+      default_settings: { command: "sd-runner" },
     });
     const src2 = await writeSourceFile("nd-src.bin", new Uint8Array([7]));
     const r2 = await installFromLocal(layout, noDep.id, src2);
@@ -724,6 +833,7 @@ describe("model manager", () => {
       version: "1.0",
       backend: "local_cli",
       task_types: ["text_to_image"],
+      default_settings: { command: "sd-runner" },
     });
     const src = await writeSourceFile("cache-src.bin", new Uint8Array([1, 2, 3]));
     const res = await installFromLocal(layout, m.id, src);
@@ -749,7 +859,14 @@ describe("model manager", () => {
     assert(trusted.message.includes("unchanged since last verification"));
 
     // A real rewrite changes the mtime -> full re-hash -> mismatch caught.
+    // Set the mtime explicitly: two writes can land in the same mtime
+    // granularity tick on a fast machine, which would take the fast path.
     await Deno.writeFile(file, new Uint8Array([4, 5, 6, 7]));
+    await Deno.utime(
+      file,
+      before.atime ?? new Date(0),
+      new Date((before.mtime?.getTime() ?? 0) + 60_000),
+    );
     const stale = await checkModelHealth(layout, row);
     assertEquals(stale.status, "error");
     assert(stale.message.includes("mismatch"));

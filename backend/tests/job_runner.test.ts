@@ -317,6 +317,7 @@ describe("job runner", () => {
       backend: "local_cli",
       task_types: ["text_to_image"],
       enabled: true,
+      default_settings: { command: "sd-runner" },
     });
     const asset = canvasAsset();
     const job = createJob(ownerId, {

@@ -140,7 +140,7 @@ describe("models api", () => {
           license: "OpenRAIL",
           task_types: ["text_to_image"],
           output_types: ["image"],
-          default_settings: { steps: 20 },
+          default_settings: { command: "sd-runner", steps: 20 },
           vram_requirement_mb: 8192,
           dependencies: ["python3"],
         });
@@ -151,7 +151,7 @@ describe("models api", () => {
         assertEquals(model.enabled, true);
         assertEquals(model.installed_at, null);
         assertEquals(model.license, "OpenRAIL");
-        assertEquals(model.default_settings, { steps: 20 });
+        assertEquals(model.default_settings, { command: "sd-runner", steps: 20 });
 
         const list = await get("/api/v1/models", adminToken);
         assertEquals(list.status, 200);
@@ -191,6 +191,7 @@ describe("models api", () => {
           source_path: sourceFile,
           license: "OpenRAIL",
           task_types: ["image-to-image", "text_to_image"],
+          default_settings: { command: "sd-runner" },
         });
         assertEquals(res.status, 201);
         const model = (await res.json()) as ModelBody;
@@ -235,6 +236,21 @@ describe("models api", () => {
           ).status,
           400,
         );
+        assertEquals(
+          (await registerModel({ name: "x", version: "1", backend: "local_cli" })).status,
+          400,
+        );
+        assertEquals(
+          (
+            await registerModel({
+              name: "y",
+              version: "1",
+              backend: "comfyui",
+              default_settings: { endpoint: "http://127.0.0.1:8188" },
+            })
+          ).status,
+          400,
+        );
       })();
     });
   });
@@ -250,6 +266,7 @@ describe("models api", () => {
           source: "local",
           source_path: sourceFile,
           task_types: ["text_to_image"],
+          default_settings: { command: "sd-runner" },
         });
         const model = (await reg.json()) as ModelBody;
 
@@ -298,6 +315,7 @@ describe("models api", () => {
           version: "1",
           backend: "local_cli",
           task_types: ["text_to_image"],
+          default_settings: { command: "sd-runner" },
         })).json() as Promise<ModelBody>;
         const bareModel = await bare;
         const noSource = await post(

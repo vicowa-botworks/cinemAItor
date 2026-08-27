@@ -2793,6 +2793,11 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       min_vram_mb: { type: "integer" },
       dependencies: { type: "array", items: { type: "string" } },
       known_limitations: { type: "array", items: { type: "string" } },
+      default_settings: {
+        type: "object",
+        description: "Adapter settings (local_cli needs 'command' + 'args' with " +
+          "{prompt}/{seed}/{output}; comfyui needs 'endpoint' + 'workflow')",
+      },
     },
   },
 };
