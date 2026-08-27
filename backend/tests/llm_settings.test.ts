@@ -26,7 +26,7 @@ describe("llm settings store", () => {
       model: "",
       temperature: "",
       maxTokens: "",
-      timeoutSeconds: 60,
+      timeoutSeconds: 300,
     });
     assertEquals(isLlmConfigured(), false);
   });
