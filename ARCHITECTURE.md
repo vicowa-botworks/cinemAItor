@@ -123,7 +123,10 @@ app-root (main router)
 │   │                 unit-tested)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, per-model benchmark run + results
-│   │              table (WS 14), admin-gated registration form + install/enable/remove,
+│   │              table (WS 14) — the Benchmark button is disabled (with an explanatory
+│   │              tooltip) when a model has no input-less task type to benchmark,
+│   │              admin-gated registration form + install/enable/remove + inline task-type
+│   │              editor (PATCH task_types on an existing model),
 │   │              LLM assistant settings panel + connection test (docs/llm.md),
 │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional

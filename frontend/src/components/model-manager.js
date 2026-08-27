@@ -15,6 +15,16 @@ const TASK_TYPES = [
 
 const BACKENDS = ["mock", "local_cli", "comfyui", "local_http"];
 
+/** Task types the v1 benchmark can run without a source asset (must mirror
+ * BENCHMARKABLE_TASKS in backend/src/services/model_benchmark.ts). */
+const BENCHMARKABLE_TASKS = [
+  "text_to_image",
+  "text_to_video",
+  "audio",
+  "music",
+  "voice",
+];
+
 const HF_FILTERS = [
   ["", "All"],
   ["text-to-image", "Text to image"],
@@ -632,6 +642,36 @@ export class ModelManager extends LitElement {
       cursor: pointer;
     }
 
+    .task-editor {
+      margin: 10px 0 2px;
+      padding: 10px 12px;
+      border: 1px solid var(--color-border, rgba(128, 128, 128, 0.25));
+      border-radius: 6px;
+      background: rgba(128, 128, 128, 0.07);
+    }
+
+    .task-edit-btn {
+      margin-left: 4px;
+      padding: 1px 8px;
+      font-size: 11px;
+      color: var(--color-text-muted);
+      background: transparent;
+      border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .task-editor-actions {
+      margin-left: auto;
+      display: inline-flex;
+      gap: 8px;
+    }
+
+    .btn-quiet {
+      color: var(--color-text-muted);
+      background: transparent;
+    }
+
     .reg-advanced {
       margin-top: 14px;
       font-size: 13px;
@@ -850,6 +890,8 @@ export class ModelManager extends LitElement {
     query: { state: true },
     benchmarks: { state: true },
     benchBusyId: { state: true },
+    taskEditorId: { state: true },
+    taskDraft: { state: true },
     llm: { state: true },
     llmConfigured: { state: true },
     llmDraft: { state: true },
@@ -897,6 +939,8 @@ export class ModelManager extends LitElement {
     this.query = "";
     this.benchmarks = {};
     this.benchBusyId = null;
+    this.taskEditorId = null;
+    this.taskDraft = [];
     this.llm = null;
     this.llmConfigured = false;
     this.llmDraft = null;
@@ -2022,7 +2066,19 @@ export class ModelManager extends LitElement {
             ${m.task_types.length > 0
               ? m.task_types.map((t) => html`<span class="chip">${t}</span>`)
               : html`<span>—</span>`}
+            ${this.isAdmin
+              ? html`
+                <button
+                  class="btn-small btn-quiet task-edit-btn"
+                  ?disabled=${busy || this.busyId === m.id}
+                  title="Edit task types"
+                  @click=${() => this._openTaskEditor(m)}>
+                  ${this.taskEditorId === m.id ? "Close" : "Edit"}
+                </button>
+              `
+              : null}
           </div>
+          ${this.taskEditorId === m.id ? this._renderTaskEditor(m) : null}
           ${m.vram_requirement_mb !== null
             ? html`<span>VRAM ≥ ${this._fmtMb(m.vram_requirement_mb)}</span>`
             : null}
@@ -2081,11 +2137,16 @@ export class ModelManager extends LitElement {
             ?disabled=${this.busyId === m.id ||
               this.benchBusyId === m.id ||
               !m.installed_at ||
-              !m.enabled}
+              !m.enabled ||
+              this._benchmarkableTasks(m).length === 0}
             title=${!m.installed_at
               ? "Install the model first"
               : !m.enabled
               ? "Enable the model first"
+              : this._benchmarkableTasks(m).length === 0
+              ? `No benchmarkable task types (benchmarkable: ${
+                BENCHMARKABLE_TASKS.join(", ")
+              }; model supports: ${m.task_types.join(", ") || "none"}). Edit tasks to add one.`
               : "Run a deterministic benchmark job for each input-less task type"}
             @click=${() => this._runBenchmark(m)}>
             ${this.benchBusyId === m.id ? "Benchmarking..." : "Benchmark"}
@@ -2128,6 +2189,77 @@ export class ModelManager extends LitElement {
     return label
       ? html`<span class="model-settings" title=${JSON.stringify(s)}>${label}</span>`
       : html``;
+  }
+
+  _renderTaskEditor(m) {
+    const draft = this.taskDraft;
+    return html`
+      <div class="reg-tasks task-editor">
+        <span class="reg-tasks-label">Task types:</span>
+        ${TASK_TYPES.map(
+          (t) =>
+            html`
+              <label>
+                <input
+                  type="checkbox"
+                  .checked=${draft.includes(t)}
+                  @change=${() => this._toggleTaskDraft(t)} />
+                ${t}
+              </label>
+            `,
+        )}
+        <span class="task-editor-actions">
+          <button
+            class="btn-small"
+            ?disabled=${this.busyId === m.id}
+            @click=${() => this._saveTaskTypes(m)}>
+            ${this.busyId === m.id ? "Saving…" : "Save tasks"}
+          </button>
+          <button class="btn-small btn-quiet" @click=${() => this._closeTaskEditor()}>
+            Cancel
+          </button>
+        </span>
+      </div>
+    `;
+  }
+
+  _openTaskEditor(m) {
+    if (this.taskEditorId === m.id) {
+      this._closeTaskEditor();
+      return;
+    }
+    this.taskEditorId = m.id;
+    this.taskDraft = [...(m.task_types || [])];
+  }
+
+  _closeTaskEditor() {
+    this.taskEditorId = null;
+    this.taskDraft = [];
+  }
+
+  _toggleTaskDraft(t) {
+    const set = new Set(this.taskDraft);
+    if (set.has(t)) set.delete(t);
+    else set.add(t);
+    this.taskDraft = TASK_TYPES.filter((x) => set.has(x));
+  }
+
+  async _saveTaskTypes(m) {
+    this.busyId = m.id;
+    this.error = "";
+    try {
+      await api.updateModel(m.id, { task_types: this.taskDraft });
+      this._closeTaskEditor();
+      this.notice = {
+        kind: "ok",
+        text: `"${m.name}" task types updated.`,
+      };
+      await this._loadModels();
+    } catch (err) {
+      this.error = err.message || "Failed to update task types.";
+    } finally {
+      this.busyId = null;
+    }
   }
 
   _onQueryInput(e) {
@@ -2280,7 +2412,7 @@ export class ModelManager extends LitElement {
       model: d.model.trim(),
       temperature: d.temperature.trim(),
       max_tokens: d.max_tokens.trim(),
-      timeout_seconds: Number(d.timeout_seconds) || 60,
+      timeout_seconds: Number(d.timeout_seconds) || 300,
     };
     if (d.api_key.trim() !== "") update.api_key = d.api_key.trim();
     this.llm = await api.updateLlmSettings(update);
@@ -2562,6 +2694,10 @@ export class ModelManager extends LitElement {
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
+  }
+
+  _benchmarkableTasks(m) {
+    return BENCHMARKABLE_TASKS.filter((t) => (m.task_types || []).includes(t));
   }
 
   _healthLabel(m) {

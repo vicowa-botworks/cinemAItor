@@ -24,7 +24,7 @@ export function getLlmSettings(): LlmSettings {
     model: getSetting(PREFIX + "model", ""),
     temperature: getSetting(PREFIX + "temperature", ""),
     maxTokens: getSetting(PREFIX + "max_tokens", ""),
-    timeoutSeconds: Number(getSetting(PREFIX + "timeout_seconds", "60")),
+    timeoutSeconds: Number(getSetting(PREFIX + "timeout_seconds", "300")),
   };
 }
 
