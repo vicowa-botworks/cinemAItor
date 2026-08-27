@@ -127,8 +127,9 @@ app-root (main router)
 │   │              LLM assistant settings panel + connection test (docs/llm.md),
 │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
-│   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
-│   │              with approve/reject proposal cards)
+ │   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
+ │   │              with approve/reject proposal cards; approving a mutating proposal refreshes
+ │   │              the registered-model list so the change is visible without a page reload)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
@@ -190,7 +191,8 @@ app-root (main router)
   injection. Every request is guarded by an AbortController timeout (120 s default) so a dead or
   restarting server fails with a clear `TIMEOUT` ApiError instead of hanging the UI forever;
   legitimately long endpoints override it (`timeoutMs` — raw uploads 30 min, media streams 5 min,
-  LLM loops + backups 15 min, synchronous model installs unlimited; see `api.js`)
+  LLM loops + backups 15 min, synchronous model installs and copilot proposal approval unlimited —
+  approval executes the mutating tool, which may be the same multi-GB install; see `api.js`)
 
 ### Backend Architecture
 

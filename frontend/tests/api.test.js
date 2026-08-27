@@ -1211,6 +1211,11 @@ describe("ApiClient", () => {
       assert(captured[0].options.signal === undefined);
     });
 
+    it("llmApproveProposal disables the timeout (approve may run install_model)", async () => {
+      await api.llmApproveProposal("p-1");
+      assert(captured[0].options.signal === undefined);
+    });
+
     it("uploadAsset arms the extended upload timeout", async () => {
       const file = new File(["bytes"], "a.png", { type: "image/png" });
       await api.uploadAsset("a-1", file);

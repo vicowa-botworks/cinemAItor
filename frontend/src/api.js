@@ -732,6 +732,9 @@ class ApiClient {
     return this.request(`/llm/proposals/${encodeURIComponent(id)}/approve`, {
       method: "POST",
       body: JSON.stringify({}),
+      // The approved tool may be install_model — the same synchronous
+      // multi-GB download the direct install action performs (no timeout).
+      timeoutMs: 0,
     });
   }
 

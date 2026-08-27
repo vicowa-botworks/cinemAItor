@@ -1548,6 +1548,10 @@ export class ModelManager extends LitElement {
     try {
       const { proposal: updated, result } = await api.llmApproveProposal(proposal.id);
       this._setProposal({ ...updated, result: result ?? updated.result });
+      // Every mutating copilot tool changes the model registry (register /
+      // install / remove) — refresh the list so the effect is visible without
+      // a page reload.
+      await this._loadModels();
     } catch (err) {
       this.copilotError = err.message || "Approval failed.";
     } finally {
