@@ -126,7 +126,8 @@ app-root (main router)
 │   │              table (WS 14) — the Benchmark button is disabled (with an explanatory
 │   │              tooltip) when a model has no input-less task type to benchmark,
 │   │              admin-gated registration form + install/enable/remove + inline task-type
-│   │              editor (PATCH task_types on an existing model),
+│   │              editor (PATCH task_types on an existing model) + per-model
+│   │              default_settings JSON editor (PATCH default_settings),
 │   │              LLM assistant settings panel + connection test (docs/llm.md),
 │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
@@ -267,8 +268,12 @@ server.ts (entry point)
 │   ├── POST /parse (resolve @tokens), GET /audit, GET /:id, POST /:id/replace
 │   └── (see docs/references.md)
 ├── Model routes (/api/v1/models/*, auth middleware, admin for mutations)
-  │   ├── Registry, install/verify (SHA-256; URL installs stream to a temp file,
-  │   │   resumable via HTTP Range with backoff-retry), remove, enable/disable, /:id/health-check
+  │   ├── Registry (register/update validate per-backend default_settings — local_cli
+  │   │   needs 'command', comfyui needs 'endpoint' + 'workflow' — so
+  │   │   misconfigured models are
+  │   │   rejected at registration instead of failing at run time), install/verify
+  │   │   (SHA-256; URL installs stream to a temp file, resumable via HTTP Range with
+  │   │   backoff-retry), remove, enable/disable, /:id/health-check
   │   │   (health check re-hashes only when the `model.bin.verified` sidecar — size+mtime+hash of
   │   │   the last successful full verify — is stale, so unchanged multi-GB models check instantly)
    │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)

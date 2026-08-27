@@ -42,6 +42,7 @@ const EMPTY_HF_FORM = {
   file: "",
   tasks: [],
   vram_requirement_mb: "",
+  default_settings: "",
 };
 
 const SOURCES = ["local", "url", "mock"];
@@ -667,6 +668,20 @@ export class ModelManager extends LitElement {
       gap: 8px;
     }
 
+    .settings-editor-input {
+      flex-basis: 100%;
+      box-sizing: border-box;
+      font-family: var(--font-mono, monospace);
+      font-size: 12px;
+      min-height: 96px;
+      resize: vertical;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.25);
+      color: inherit;
+      border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+      border-radius: 4px;
+    }
+
     .btn-quiet {
       color: var(--color-text-muted);
       background: transparent;
@@ -831,6 +846,20 @@ export class ModelManager extends LitElement {
       cursor: pointer;
     }
 
+    .hf-settings-input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      resize: vertical;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.25);
+      color: inherit;
+      border: 1px solid rgba(128, 128, 128, 0.35);
+      border-radius: 4px;
+    }
+
     .hf-token {
       margin: 10px 0;
       padding: 8px 12px;
@@ -892,6 +921,8 @@ export class ModelManager extends LitElement {
     benchBusyId: { state: true },
     taskEditorId: { state: true },
     taskDraft: { state: true },
+    settingsEditorId: { state: true },
+    settingsDraft: { state: true },
     llm: { state: true },
     llmConfigured: { state: true },
     llmDraft: { state: true },
@@ -941,6 +972,8 @@ export class ModelManager extends LitElement {
     this.benchBusyId = null;
     this.taskEditorId = null;
     this.taskDraft = [];
+    this.settingsEditorId = null;
+    this.settingsDraft = "";
     this.llm = null;
     this.llmConfigured = false;
     this.llmDraft = null;
@@ -1802,6 +1835,25 @@ export class ModelManager extends LitElement {
                     @input=${setForm("vram_requirement_mb")} />
                 </div>
               </div>
+              ${form.backend === "local_cli" || form.backend === "comfyui"
+                ? html`
+                  <div class="reg-field">
+                    <label for="hf-settings">
+                      default_settings (JSON, required for ${form.backend})
+                    </label>
+                    <textarea
+                      id="hf-settings"
+                      class="hf-settings-input"
+                      rows="3"
+                      spellcheck="false"
+                      placeholder=${form.backend === "local_cli"
+                        ? '{"command": "/path/to/runner", "args": ["--prompt", "{prompt}", "--out", "{output}"]}'
+                        : '{"endpoint": "http://127.0.0.1:8188", "workflow": { ... }}'}
+                      .value=${form.default_settings}
+                      @input=${setForm("default_settings")}></textarea>
+                  </div>
+                `
+                : null}
               <div class="hf-tasks">
                 ${TASK_TYPES.map(
                   (t) =>
@@ -1896,6 +1948,10 @@ export class ModelManager extends LitElement {
     const lines = [`Help me register this HuggingFace repo: ${repo.repo.id}`];
     if (repo.repo.pipeline_tag) lines.push(`Pipeline: ${repo.repo.pipeline_tag}`);
     lines.push(`Weight file: ${this.hfForm.file || "auto (largest weight file)"}`);
+    lines.push(`Backend: ${this.hfForm.backend}`);
+    if (this.hfForm.default_settings.trim()) {
+      lines.push(`default_settings: ${this.hfForm.default_settings.trim()}`);
+    }
     if (repo.readme) lines.push(`README excerpt: ${repo.readme.slice(0, 600)}`);
     this.copilotInput = lines.join("\n");
     this.updateComplete.then(() => {
@@ -2024,6 +2080,21 @@ export class ModelManager extends LitElement {
     if (form.vram_requirement_mb !== "") {
       payload.min_vram_mb = Number(form.vram_requirement_mb);
     }
+    if (form.default_settings.trim()) {
+      try {
+        const parsed = JSON.parse(form.default_settings);
+        if (
+          typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+        ) {
+          throw new Error("must be a JSON object");
+        }
+        payload.default_settings = parsed;
+      } catch (err) {
+        this.hfError = `default_settings is not valid JSON: ${err.message}`;
+        this.hfBusy = false;
+        return;
+      }
+    }
     try {
       const res = await api.registerModelFromHuggingFace(payload);
       this.hfNotice = {
@@ -2069,16 +2140,24 @@ export class ModelManager extends LitElement {
             ${this.isAdmin
               ? html`
                 <button
-                  class="btn-small btn-quiet task-edit-btn"
+                  class="btn-small task-edit-btn"
                   ?disabled=${busy || this.busyId === m.id}
                   title="Edit task types"
                   @click=${() => this._openTaskEditor(m)}>
-                  ${this.taskEditorId === m.id ? "Close" : "Edit"}
+                  ${this.taskEditorId === m.id ? "Close" : "Edit tasks"}
+                </button>
+                <button
+                  class="btn-small task-edit-btn"
+                  ?disabled=${busy || this.busyId === m.id}
+                  title="Edit default_settings (JSON)"
+                  @click=${() => this._openSettingsEditor(m)}>
+                  ${this.settingsEditorId === m.id ? "Close" : "Settings"}
                 </button>
               `
               : null}
           </div>
           ${this.taskEditorId === m.id ? this._renderTaskEditor(m) : null}
+          ${this.settingsEditorId === m.id ? this._renderSettingsEditor(m) : null}
           ${m.vram_requirement_mb !== null
             ? html`<span>VRAM ≥ ${this._fmtMb(m.vram_requirement_mb)}</span>`
             : null}
@@ -2223,11 +2302,42 @@ export class ModelManager extends LitElement {
     `;
   }
 
+  _renderSettingsEditor(m) {
+    const hint = m.backend === "local_cli"
+      ? 'local_cli: {"command": "/path/to/runner", "args": ["--prompt", "{prompt}", "--seed", "{seed}", "--out", "{output}"], "timeout_seconds": 600} — placeholders: {prompt} {seed} {candidate} {count} {output} {input:<i>}'
+      : m.backend === "comfyui"
+      ? 'comfyui: {"endpoint": "http://127.0.0.1:8188", "workflow": {…ComfyUI prompt graph…}} — string placeholders: {{prompt}} {{seed}} {{input:<i>}}'
+      : "Free-form JSON object merged into the model's default settings.";
+    return html`
+      <div class="task-editor">
+        <span class="reg-tasks-label">default_settings (JSON):</span>
+        <textarea
+          class="settings-editor-input"
+          spellcheck="false"
+          .value=${this.settingsDraft}
+          @input=${(e) => (this.settingsDraft = e.target.value)}></textarea>
+        <span class="reg-tasks-label">${hint}</span>
+        <span class="task-editor-actions">
+          <button
+            class="btn-small"
+            ?disabled=${this.busyId === m.id}
+            @click=${() => this._saveSettings(m)}>
+            ${this.busyId === m.id ? "Saving…" : "Save settings"}
+          </button>
+          <button class="btn-small btn-quiet" @click=${() => this._closeSettingsEditor()}>
+            Cancel
+          </button>
+        </span>
+      </div>
+    `;
+  }
+
   _openTaskEditor(m) {
     if (this.taskEditorId === m.id) {
       this._closeTaskEditor();
       return;
     }
+    this._closeSettingsEditor();
     this.taskEditorId = m.id;
     this.taskDraft = [...(m.task_types || [])];
   }
@@ -2235,6 +2345,57 @@ export class ModelManager extends LitElement {
   _closeTaskEditor() {
     this.taskEditorId = null;
     this.taskDraft = [];
+  }
+
+  _openSettingsEditor(m) {
+    if (this.settingsEditorId === m.id) {
+      this._closeSettingsEditor();
+      return;
+    }
+    this._closeTaskEditor();
+    this.settingsEditorId = m.id;
+    this.settingsDraft = JSON.stringify(
+      m.default_settings && Object.keys(m.default_settings).length > 0 ? m.default_settings : {},
+      null,
+      2,
+    );
+  }
+
+  _closeSettingsEditor() {
+    this.settingsEditorId = null;
+    this.settingsDraft = "";
+  }
+
+  async _saveSettings(m) {
+    let settings;
+    try {
+      const parsed = JSON.parse(this.settingsDraft || "{}");
+      if (
+        typeof parsed !== "object" || parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        throw new Error("must be a JSON object");
+      }
+      settings = parsed;
+    } catch (err) {
+      this.error = `Default settings is not valid JSON: ${err.message}`;
+      return;
+    }
+    this.busyId = m.id;
+    this.error = "";
+    try {
+      await api.updateModel(m.id, { default_settings: settings });
+      this._closeSettingsEditor();
+      this.notice = {
+        kind: "ok",
+        text: `"${m.name}" settings updated.`,
+      };
+      await this._loadModels();
+    } catch (err) {
+      this.error = err.message || "Failed to update settings.";
+    } finally {
+      this.busyId = null;
+    }
   }
 
   _toggleTaskDraft(t) {

@@ -203,6 +203,40 @@ function validateTaskTypes(value: string[] | undefined, field: string): string[]
   return canonical;
 }
 
+/** Fail fast on backends whose adapter cannot run without required
+ * default_settings (mirrors the runtime checks in services/adapters.ts). */
+function validateBackendSettings(
+  backend: string,
+  settings: Record<string, unknown>,
+): void {
+  if (backend === "local_cli") {
+    const command = settings.command;
+    if (typeof command !== "string" || command.trim() === "") {
+      throw badRequest(
+        "local_cli models require a 'command' string in default_settings " +
+          "(the executable run per candidate; use 'args' for {prompt}/{seed}/{output} placeholders)",
+      );
+    }
+  } else if (backend === "comfyui") {
+    const endpoint = settings.endpoint;
+    if (typeof endpoint !== "string" || !/^https?:\/\/.+/i.test(endpoint)) {
+      throw badRequest(
+        "comfyui models require an 'endpoint' http(s) URL in default_settings " +
+          "(the ComfyUI server address)",
+      );
+    }
+    const workflow = settings.workflow;
+    if (
+      typeof workflow !== "object" || workflow === null ||
+      Array.isArray(workflow) || Object.keys(workflow).length === 0
+    ) {
+      throw badRequest(
+        "comfyui models require a non-empty 'workflow' object in default_settings",
+      );
+    }
+  }
+}
+
 function logAudit(
   userId: number,
   action: string,
@@ -284,6 +318,7 @@ export function registerModel(
     throw badRequest(`source must be one of: ${MODEL_SOURCES.join(", ")}`);
   }
   const taskTypes = validateTaskTypes(input.task_types, "task_types");
+  validateBackendSettings(input.backend, input.default_settings ?? {});
 
   const db = getDb();
   let id: string;
@@ -358,6 +393,15 @@ export function updateModel(
 
   if (patch.backend !== undefined && !MODEL_BACKENDS.includes(patch.backend)) {
     throw badRequest(`backend must be one of: ${MODEL_BACKENDS.join(", ")}`);
+  }
+  // Only re-validate the adapter contract when the caller actually touches the
+  // settings or the backend — otherwise an unrelated edit (e.g. task types) on
+  // an already-misconfigured model would be blocked by its existing settings.
+  if (patch.default_settings !== undefined || patch.backend !== undefined) {
+    validateBackendSettings(
+      patch.backend ?? existing.backend,
+      patch.default_settings ?? existing.default_settings,
+    );
   }
   const taskTypes = patch.task_types !== undefined
     ? validateTaskTypes(patch.task_types, "task_types")

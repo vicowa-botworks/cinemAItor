@@ -732,7 +732,11 @@ describe("huggingface routes", () => {
       baseUrl = base;
       const res = await post(
         "/api/v1/models/from-huggingface",
-        { repo_id: "owner/textgen-v1", task_types: ["text_to_video"] },
+        {
+          repo_id: "owner/textgen-v1",
+          task_types: ["text_to_video"],
+          default_settings: { command: "sd-runner" },
+        },
         adminToken,
       );
       assertEquals(res.status, 201);
@@ -787,13 +791,13 @@ describe("huggingface routes", () => {
       baseUrl = base;
       const first = await post(
         "/api/v1/models/from-huggingface",
-        { repo_id: "owner/textgen-v1" },
+        { repo_id: "owner/textgen-v1", default_settings: { command: "sd-runner" } },
         adminToken,
       );
       assertEquals(first.status, 201);
       const second = await post(
         "/api/v1/models/from-huggingface",
-        { repo_id: "owner/textgen-v1" },
+        { repo_id: "owner/textgen-v1", default_settings: { command: "sd-runner" } },
         adminToken,
       );
       assertEquals(second.status, 409);
@@ -823,7 +827,7 @@ describe("huggingface routes", () => {
       baseUrl = base;
       const res = await post(
         "/api/v1/models/from-huggingface",
-        { repo_id: "owner/textgen-v1" },
+        { repo_id: "owner/textgen-v1", default_settings: { command: "sd-runner" } },
         adminToken,
       );
       assertEquals(res.status, 201);
@@ -841,7 +845,11 @@ describe("huggingface routes", () => {
       baseUrl = base;
       const res = await post(
         "/api/v1/models/from-huggingface",
-        { repo_id: "owner/textgen-v1", file: "small.bin" },
+        {
+          repo_id: "owner/textgen-v1",
+          file: "small.bin",
+          default_settings: { command: "sd-runner" },
+        },
         adminToken,
       );
       assertEquals(res.status, 201);

@@ -62,6 +62,17 @@ The server validates the backend, source, and task types against the same allowl
 `400` with the allowed values on mismatch; duplicate registrations are allowed (models are
 distinguished by id/name/version metadata).
 
+**Adapter settings validation:** the register and update endpoints also validate `default_settings`
+per backend and answer `400` naming the missing key — `local_cli` requires `command` (string;
+`args`, when given, must be a string array), `comfyui` requires `endpoint` (http(s) URL) plus a
+non-empty `workflow` object. This is the difference between a model that registers and a model that
+can actually run: a `local_cli` model without a `command` used to be registered fine and only failed
+later with an opaque adapter error at benchmark/generation time. On updates, the check only runs
+when the payload touches `default_settings` or `backend`, so unrelated PATCHes to an
+already-registered model can't be blocked by a missing setting. The Model Copilot's register tools
+describe the expected settings shape, and the model-manager rows offer a per-model **Settings**
+editor (admin) that round-trips `default_settings` as JSON through the same PATCH.
+
 **Task-type aliases:** the canonical task types use underscores. HuggingFace pipeline tags use
 dashes for the image/video family, and the Model Copilot's context carries those tags — so every
 validation boundary (model register/update, skill `model_task_types`, job `job_type`) also accepts
@@ -110,7 +121,7 @@ environment variable:
     precedence.
 - `POST /api/v1/models/from-huggingface` (admin) —
   `{repo_id, file?, backend?, task_types?, name?,
-  version?, min_vram_mb?, dependencies?, known_limitations?}`.
+  version?, min_vram_mb?, dependencies?, known_limitations?, default_settings?}`.
   The server picks the weight file (explicit `file`, or the largest file among
   `.safetensors`/`.gguf`/`.ckpt`/`.bin` in the recursive listing) and registers a model row with
   `source: "url"` and `repository_url` set to the `resolve/<branch>` URL of that file — the normal
@@ -130,7 +141,10 @@ environment variable:
 The repo panel also surfaces the repo's tags and README, prefills the task types from the pipeline
 tag, and offers an **Ask Model Copilot** action that hands the repo context (id, pipeline, selected
 weight file, README excerpt) to the Model Copilot, which can walk the registration through its tool
-harness (mutating tools as approve-gated proposals for admins).
+harness (mutating tools as approve-gated proposals for admins). For `local_cli` / `comfyui` backends
+the panel shows a `default_settings` JSON field (required — the server applies the same adapter
+settings validation, so a repo registered without a `command`/`endpoint` is rejected up front
+instead of failing later at benchmark or generation time).
 
 Errors: `400` bad repo id / no usable weight file / unknown `file` / invalid token, `404` unknown
 repo, `409` model id already registered, `502` HuggingFace unreachable, timed out, or rejected

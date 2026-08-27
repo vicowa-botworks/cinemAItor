@@ -39,6 +39,15 @@ export type AgentToolName =
 
 const TASK_TYPES_HELP = `Task types the model covers. Allowed: ${MODEL_TASK_TYPES.join(", ")}`;
 
+const SETTINGS_HELP = {
+  type: "object",
+  description: "Adapter settings. REQUIRED for local_cli: 'command' (string, the executable run " +
+    "per candidate) + 'args' (string[] with {prompt}/{seed}/{output} placeholders; " +
+    "{output} is the path the command must write the result file to). REQUIRED for " +
+    "comfyui: 'endpoint' (http(s) server URL) + 'workflow' (ComfyUI prompt graph with " +
+    "{{prompt}}/{{seed}} placeholders). Optional for both: 'timeout_seconds'.",
+};
+
 export const READ_ONLY_AGENT_TOOLS: readonly AgentToolName[] = [
   "list_models",
   "model_info",
@@ -121,6 +130,7 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       min_vram_mb: { type: "integer" },
       dependencies: stringArrayProperty("Required binaries"),
       known_limitations: stringArrayProperty("Known limitations"),
+      default_settings: SETTINGS_HELP,
     },
   }),
   toolDef("register_model_from_huggingface", "Register a model straight from a HuggingFace repo.", {
@@ -133,6 +143,7 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       task_types: stringArrayProperty(TASK_TYPES_HELP),
       name: stringProperty("Display name (default: repo id)"),
       version: stringProperty("Version string (default: 1.0)"),
+      default_settings: SETTINGS_HELP,
     },
   }),
   toolDef("install_model", "Download + store a model's weights (consent is the user's approval).", {
@@ -293,6 +304,20 @@ function argBool(args: Record<string, unknown>, key: string): boolean | undefine
   return value;
 }
 
+function argObject(
+  args: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) return undefined;
+  if (
+    typeof value !== "object" || Array.isArray(value) || Object.keys(value).length === 0
+  ) {
+    throw badRequest(`${key} must be a non-empty JSON object`, key);
+  }
+  return value as Record<string, unknown>;
+}
+
 async function comfyuiStatus(endpoint: string): Promise<Record<string, unknown>> {
   let parsed: URL;
   try {
@@ -355,6 +380,7 @@ function buildRegisterInput(
     vram_requirement_mb: argInt(args, "min_vram_mb"),
     dependencies: argStringArray(args, "dependencies"),
     known_limitations: argStringArray(args, "known_limitations"),
+    default_settings: argObject(args, "default_settings"),
   };
   const explicitId = argString(args, "model_id");
   if (explicitId) input.id = explicitId;
@@ -437,6 +463,7 @@ export async function runTool(
         name: argString(args, "name"),
         version: argString(args, "version"),
         task_types: argStringArray(args, "task_types"),
+        default_settings: argObject(args, "default_settings"),
       });
       return { ...result, installed: false, note: "Weights not downloaded — install_model next" };
     }

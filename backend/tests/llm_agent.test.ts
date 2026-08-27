@@ -369,7 +369,11 @@ describe("llm agent", () => {
             toolCalls: [{
               id: "call_hf",
               name: "register_model_from_huggingface",
-              args: { repo_id: "acme/flux-test", task_types: ["text_to_image"] },
+              args: {
+                repo_id: "acme/flux-test",
+                task_types: ["text_to_image"],
+                default_settings: { command: "flux-runner" },
+              },
             }],
           },
           { content: "I propose to register the Flux repo." },

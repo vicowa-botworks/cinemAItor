@@ -375,6 +375,7 @@ export interface RegisterFromHfOptions {
   min_vram_mb?: number;
   dependencies?: string[];
   known_limitations?: string[];
+  default_settings?: Record<string, unknown>;
 }
 
 /**
@@ -407,6 +408,7 @@ export async function registerModelFromHuggingFace(
     dependencies: options.dependencies,
     known_limitations: options.known_limitations,
     task_types: options.task_types,
+    default_settings: options.default_settings,
   });
   return { model, file: weightFile, repo: info.repo };
 }
