@@ -110,10 +110,10 @@ describe("renderCliArgs", () => {
     assertEquals(out, ["--in0", "/tmp/a.png", "--in1", "/tmp/b.mp4"]);
   });
 
-  it("throws when an input index is out of range", () => {
+  it("throws when an embedded input reference is out of range", () => {
     assertThrows(
       () =>
-        renderCliArgs(["{input:2}"], {
+        renderCliArgs(["--image={input:2}"], {
           prompt: "",
           seed: "1",
           candidate: 0,
@@ -124,6 +124,51 @@ describe("renderCliArgs", () => {
       Error,
       "references input 2",
     );
+  });
+
+  it("drops a bare input token with its flag when the input is absent", () => {
+    const out = renderCliArgs(
+      ["--p", "{prompt}", "--image", "{input:0}", "--out", "{output}"],
+      {
+        prompt: "a lighthouse",
+        seed: "1",
+        candidate: 0,
+        count: 1,
+        inputPaths: [],
+        output: "/tmp/out.png",
+      },
+    );
+    assertEquals(out, ["--p", "a lighthouse", "--out", "/tmp/out.png"]);
+  });
+
+  it("keeps present inputs and drops only the absent ones", () => {
+    const out = renderCliArgs(
+      ["--img0", "{input:0}", "--img1", "{input:1}", "--out", "{output}"],
+      {
+        prompt: "",
+        seed: "1",
+        candidate: 0,
+        count: 1,
+        inputPaths: ["/tmp/a.png"],
+        output: "/tmp/out.png",
+      },
+    );
+    assertEquals(out, ["--img0", "/tmp/a.png", "--out", "/tmp/out.png"]);
+  });
+
+  it("drops a bare input token without a preceding flag", () => {
+    const out = renderCliArgs(
+      ["{prompt}", "{input:0}", "{output}"],
+      {
+        prompt: "a lighthouse",
+        seed: "1",
+        candidate: 0,
+        count: 1,
+        inputPaths: [],
+        output: "/tmp/out.png",
+      },
+    );
+    assertEquals(out, ["a lighthouse", "/tmp/out.png"]);
   });
 
   it("leaves unknown placeholders untouched", () => {

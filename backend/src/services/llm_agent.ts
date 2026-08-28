@@ -50,10 +50,12 @@ const SETTINGS_HELP = {
   type: "object",
   description: "Adapter settings. REQUIRED for local_cli: 'command' (string, the executable run " +
     "per candidate) + 'args' (string[] with {prompt}/{seed}/{output} placeholders, plus " +
-    "{input:0}..{input:7} for reference image inputs; {output} is the path the command must " +
-    "write the result file to). REQUIRED for comfyui: 'endpoint' (http(s) server URL) + " +
-    "'workflow' (ComfyUI prompt graph with {{prompt}}/{{seed}} placeholders). Optional for " +
-    "both: 'timeout_seconds'.",
+    "{input:0}..{input:7} for reference image inputs; a bare {input:<i>} token is optional — " +
+    "dropped together with a flag token directly before it when the job has no such input, so " +
+    "one settings row can serve both text-to-image and image-to-image; {output} is the path " +
+    "the command must write the result file to). REQUIRED for comfyui: 'endpoint' (http(s) " +
+    "server URL) + 'workflow' (ComfyUI prompt graph with {{prompt}}/{{seed}} placeholders). " +
+    "Optional for both: 'timeout_seconds'.",
 };
 
 export const READ_ONLY_AGENT_TOOLS: readonly AgentToolName[] = [
@@ -687,9 +689,9 @@ export async function copilotSystemPrompt(): Promise<string> {
     "Use the tools to look things up before answering. When the user asks you to register or install a model, call the matching tool — the action is only executed after the user explicitly approves your proposal.",
     "Setting up a local_cli model: it only works when its default_settings 'command' is an existing executable and every file its 'args' reference exists. When the user wants to set up (or repair) a local_cli model, propose these steps in order: " +
     "(1) huggingface_model_info and/or model_files to see what the repo/weights actually are; " +
-    "(2) write_model_file a small runner script (e.g. 'runner.py') that loads the weights, takes --prompt/--seed (and --image for reference inputs) and writes the result to the --output path — keep it minimal and standard (a diffusers pipeline script for diffusers-format repos); " +
+    "(2) write_model_file a small runner script (e.g. 'runner.py') that loads the weights, takes --prompt/--seed and an OPTIONAL --image (absent = text-to-image, present = image-to-image) and writes the result to the --output path — keep it minimal and standard (a diffusers pipeline script for diffusers-format repos); " +
     "(3) install_model_deps to build a .venv with the packages the script needs — its result carries the venv python path; " +
-    "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders ({input:0} for reference images) and a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
+    "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders and a BARE '{input:0}' token (as its own args entry, after its flag) for the reference image — the app drops it when a job has no references, so dual t2i/i2i models work from one settings row — plus a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
     "Never leave a local_cli model whose command or referenced script is missing — if you are unsure what the runtime needs, propose the setup steps instead of guessing.",
     "The user approves each proposal AFTER your turn ends — the outcome reaches you as a new message. When it does, continue the plan and propose the next steps; never assume an approval already happened within the current turn, and never re-propose a step that is still pending.",
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
