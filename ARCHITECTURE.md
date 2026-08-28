@@ -403,9 +403,13 @@ server.ts (entry point)
   │   │   numbers; read-only tools auto-execute, mutating tools (admin-only) create
   │   │   in-memory proposals executed only after explicit approval
   │   │   (POST /api/v1/llm/proposals/:id/approve). Approvals are single-flight: the
-  │   │   proposal is in_flight while the tool executes (duplicate approve/reject
-  │   │   409s), and GET /api/v1/llm/proposals lists live status (in_flight +
-  │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.
+   │   │   proposal is in_flight while the tool executes (duplicate approve/reject
+   │   │   409s), and GET /api/v1/llm/proposals lists live status (in_flight +
+   │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.
+   │   │   A turn ends when it creates its proposals, so the UI auto-continues: after each
+   │   │   approval/rejection it sends a follow-up turn (synthetic `auto-continue` message
+   │   │   with outcome + still-pending steps) so multi-step setups chain to completion —
+   │   │   each next action still requires explicit approval (see docs/llm.md).
   │   │   Local-cli runtime setup tools:
   │   │   model_files (read-only listing), write_model_file (runner scripts into the
   │   │   model dir), install_model_deps (.venv + pip install, returns the venv

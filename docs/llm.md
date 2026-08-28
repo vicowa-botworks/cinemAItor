@@ -211,6 +211,15 @@ error: a long-running approval whose client-side request was dropped (or a dupli
 (`Running… since HH:MM`) while the server-side run is still executing — instead of stranding stale,
 re-clickable buttons.
 
+**Auto-continue.** A copilot turn ends when it creates its proposals — approving a proposal only
+executes the tool, it does not resume the conversation. So after each approval/rejection resolves,
+the UI automatically sends one follow-up turn (rendered as a dashed `auto-continue` bubble) whose
+synthetic message reports the outcome, a short result summary, and which steps are still pending
+("do not re-propose those steps"). The copilot then proposes the next planned action for approval
+(or confirms the plan is complete), which is what lets multi-step setups — runner script → venv →
+adapter `update_model` — run to completion without the user typing "continue". Each follow-up is
+still gated on explicit human approval, so the loop can never run unattended.
+
 **Local-cli model setup.** The copilot's system prompt carries a setup playbook: a `local_cli` model
 only works when its `default_settings.command` is an existing executable and every file its `args`
 reference exists, so when the user asks to set up (or repair) one the copilot proposes the steps in
