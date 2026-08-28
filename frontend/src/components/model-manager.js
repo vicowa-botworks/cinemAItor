@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { collectPendingTools, followUpMessage } from "../copilot-followup.js";
 import "./confirm-dialog.js";
 
 const TASK_TYPES = [
@@ -508,6 +509,21 @@ export class ModelManager extends LitElement {
     .copilot-msg.assistant .copilot-bubble {
       background-color: var(--color-surface-hover);
       border: 1px solid var(--color-border);
+    }
+
+    .copilot-msg.user .copilot-bubble.synthetic {
+      background-color: var(--color-surface);
+      border: 1px dashed var(--color-border);
+      color: var(--color-text-muted);
+      font-size: 12px;
+    }
+
+    .copilot-auto-label {
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      opacity: 0.7;
     }
 
     .copilot-steps {
@@ -1548,7 +1564,12 @@ export class ModelManager extends LitElement {
     const proposals = (turn.proposals ?? []).map((p) => this._renderProposal(p));
     return html`
       <div class="copilot-msg ${turn.role}">
-        ${turn.content ? html`<div class="copilot-bubble">${turn.content}</div>` : null}
+        ${turn.synthetic ? html`<div class="copilot-auto-label">auto-continue</div>` : null}
+        ${turn.content
+          ? html`<div class="copilot-bubble ${
+            turn.synthetic ? "synthetic" : ""
+          }">${turn.content}</div>`
+          : null}
         ${steps.length > 0 ? html`<div class="copilot-steps">${steps}</div>` : null}
         ${proposals.length > 0 ? html`<div class="copilot-steps">${proposals}</div>` : null}
       </div>
@@ -1630,10 +1651,15 @@ export class ModelManager extends LitElement {
     const text = this.copilotInput.trim();
     if (!text || this.copilotBusy) return;
     this.copilotInput = "";
+    await this._runCopilotTurn(text);
+  }
+
+  async _runCopilotTurn(text, { synthetic = false } = {}) {
+    if (!text || this.copilotBusy) return;
     this.copilotError = "";
     this.copilot = [
       ...this.copilot,
-      { role: "user", content: text },
+      { role: "user", content: text, synthetic },
       { role: "assistant", content: "", steps: [], proposals: [] },
     ];
     this.copilotBusy = true;
@@ -1650,11 +1676,25 @@ export class ModelManager extends LitElement {
       ];
     } catch (err) {
       // Drop the empty placeholder assistant turn and surface the error.
-      this.copilot = [...this.copilot.slice(0, -2), { role: "user", content: text }];
+      this.copilot = [...this.copilot.slice(0, -2), { role: "user", content: text, synthetic }];
       this.copilotError = err.message || "The Model Copilot request failed.";
     } finally {
       this.copilotBusy = false;
     }
+  }
+
+  /**
+   * After a proposal resolves, send one follow-up turn so a multi-step plan
+   * (runner script -> venv -> adapter update) continues without the user
+   * having to type "continue". The message reports the outcome and which
+   * steps are still pending, so the copilot proposes the next action (or
+   * confirms the plan is complete).
+   */
+  async _copilotFollowUp(tool, verb, summary) {
+    const pending = collectPendingTools(this.copilot);
+    await this._runCopilotTurn(followUpMessage(tool, verb, summary, pending), {
+      synthetic: true,
+    });
   }
 
   _setProposal(proposal) {
@@ -1720,6 +1760,13 @@ export class ModelManager extends LitElement {
       // install / remove) — refresh the list so the effect is visible without
       // a page reload.
       await this._loadModels();
+      // Continue a multi-step plan: the copilot's turn ended when it created
+      // the proposal, so the remaining steps need this follow-up turn.
+      void this._copilotFollowUp(
+        proposal.tool,
+        "approved",
+        this._copilotResultSummary(proposal.tool, result ?? updated.result),
+      );
     } catch (err) {
       this.copilotError = await this._syncProposalError(id, err, "Approval failed.");
     } finally {
@@ -1734,6 +1781,9 @@ export class ModelManager extends LitElement {
     try {
       const { proposal: updated } = await api.llmRejectProposal(id);
       this._setProposal(updated);
+      // Let the copilot adapt the plan (or confirm it is done) instead of
+      // stranding the remaining steps.
+      void this._copilotFollowUp(proposal.tool, "rejected");
     } catch (err) {
       this.copilotError = await this._syncProposalError(id, err, "Rejecting the proposal failed.");
     } finally {

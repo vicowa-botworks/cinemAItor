@@ -6,6 +6,7 @@ import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
 import { modelDir } from "../src/services/model_files.ts";
+import { copilotSystemPrompt } from "../src/services/llm_agent.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
 // Scripted fake LLM: each call pops the next response (tool call or final
@@ -969,5 +970,30 @@ describe("llm agent runtime tools", () => {
       }
       assertEquals(names.includes("model_files"), true);
     });
+  });
+});
+
+describe("copilot system prompt", () => {
+  beforeEach(() => {
+    Deno.env.set("APP_DATA_DIR", Deno.makeTempDirSync({ prefix: "cinemaitor_copilot_prompt_" }));
+    freshMemoryDb();
+  });
+
+  afterEach(() => {
+    closeDb();
+  });
+
+  it("calibrates the model on the approval flow", async () => {
+    const prompt = await copilotSystemPrompt();
+    assertMatch(prompt, /approves each proposal AFTER your turn ends/);
+    assertMatch(prompt, /continue the plan and propose the next steps/);
+    assertMatch(prompt, /never re-propose a step that is still pending/);
+  });
+
+  it("keeps the local_cli setup playbook", async () => {
+    const prompt = await copilotSystemPrompt();
+    assertMatch(prompt, /write_model_file/);
+    assertMatch(prompt, /install_model_deps/);
+    assertMatch(prompt, /venv python path/);
   });
 });
