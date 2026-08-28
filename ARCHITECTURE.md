@@ -295,8 +295,10 @@ server.ts (entry point)
   │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
    │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
-   │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
-   │   │   model default_settings, passes per-job workDir; provenance on produced asset versions
+    │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
+    │   │   model default_settings, passes per-job workDir; HF-origin models (repository_url on
+    │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
+    │   │   runners can fetch gated-repo files; provenance on produced asset versions
   │   ├── Model-less `proxy` jobs (ffmpeg or mock transcode of media proxies); list filter
   │   │   `?job_type=`
   │   ├── WebSocket `/ws/v1/jobs` (?token= auth): pushes job + render progress/status
