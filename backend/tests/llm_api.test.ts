@@ -220,12 +220,23 @@ describe("llm api", () => {
         [{ temperature: "99" }, "temperature range"],
         [{ max_tokens: "0" }, "max tokens range"],
         [{ timeout_seconds: 0 }, "timeout range"],
+        [{ timeout_seconds: 3601 }, "timeout range upper"],
         [{ bogus: 1 }, "unknown key"],
       ];
       for (const [body, label] of cases) {
         const res = await put("/api/v1/llm/settings", body, adminToken);
         assertEquals(res.status, 400, label);
       }
+    });
+  });
+
+  it("accepts a timeout at the 3600 s cap", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await put("/api/v1/llm/settings", { timeout_seconds: 3600 }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as Record<string, unknown>;
+      assertEquals(body.timeoutSeconds, 3600);
     });
   });
 

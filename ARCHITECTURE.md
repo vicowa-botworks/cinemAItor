@@ -202,10 +202,10 @@ app-root (main router)
   injection. Every request is guarded by an AbortController timeout (120 s default) so a dead or
   restarting server fails with a clear `TIMEOUT` ApiError instead of hanging the UI forever;
   legitimately long endpoints override it (`timeoutMs` — raw uploads 30 min, media streams 5 min,
-  LLM loops + backups 15 min, synchronous model installs, copilot proposal approval, and model
-  verify/health-check unlimited — approval executes the mutating tool, which may be the same
-  multi-GB install, and verify/health-check may run a full-file SHA-256 over multi-GB models; see
-  `api.js`)
+  LLM calls 60 min (matching the 3600 s `llm_timeout_seconds` cap) + backups 15 min, synchronous
+  model installs, copilot proposal approval, and model verify/health-check unlimited — approval
+  executes the mutating tool, which may be the same multi-GB install, and verify/health-check may
+  run a full-file SHA-256 over multi-GB models; see `api.js`)
 
 ### Backend Architecture
 
