@@ -231,6 +231,11 @@ export class MockAdapter implements ModelAdapter {
 //   env (string map, optional)   extra env vars (inherited from the server)
 //   output_extension (string)    default derived from the job type
 // Placeholders: {prompt} {seed} {candidate} {count} {output} {input:<i>}
+// A bare {input:<i>} token is an OPTIONAL reference: when the job carries
+// no such input the token — and a lone flag token directly before it — is
+// dropped, so dual t2i/i2i models work from a single settings row.
+// Embedded {input:<i>} references (part of a larger token) still fail the
+// job when the input is absent.
 // ---------------------------------------------------------------------------
 
 export interface CliArgContext {
@@ -243,7 +248,7 @@ export interface CliArgContext {
 }
 
 export function renderCliArgs(args: string[], ctx: CliArgContext): string[] {
-  return args.map((arg) =>
+  const render = (arg: string): string =>
     arg.replace(/\{([a-z]+:[a-z0-9]+|[a-z]+)\}/g, (match, key: string) => {
       if (key === "prompt") return ctx.prompt;
       if (key === "seed") return ctx.seed;
@@ -255,14 +260,27 @@ export function renderCliArgs(args: string[], ctx: CliArgContext): string[] {
         const path = ctx.inputPaths[i];
         if (path === undefined) {
           throw new Error(
-            `Argument '${arg}' references input ${i} but the job has ${ctx.inputPaths.length} input(s)`,
+            `Argument '${arg}' references input ${i} but the job has ${ctx.inputPaths.length} input(s) — use a bare '{input:${i}}' token to make the reference optional`,
           );
         }
         return path;
       }
       return match;
-    })
-  );
+    });
+  const out: string[] = [];
+  for (const arg of args) {
+    // Optional input reference: a bare {input:<i>} token whose input the
+    // job does not carry is dropped together with a lone flag token
+    // directly preceding it, so one settings row can serve both
+    // text->image and image->image jobs (dual-mode models).
+    const bare = arg.match(/^\{input:(\d+)\}$/);
+    if (bare && ctx.inputPaths[Number(bare[1])] === undefined) {
+      if (out.length > 0 && out[out.length - 1].startsWith("-")) out.pop();
+      continue;
+    }
+    out.push(render(arg));
+  }
+  return out;
 }
 
 function settingNumber(

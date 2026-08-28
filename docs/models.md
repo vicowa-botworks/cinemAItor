@@ -240,10 +240,15 @@ Runs a user-configured command, once per candidate:
 | `output_extension`     | string      | Default derived from the job type                                                                                                                           |
 
 `args` placeholders: `{prompt}`, `{seed}`, `{candidate}`, `{count}`, `{output}`, and `{input:<i>}`
-(absolute path of the i-th input file; out-of-range references fail the job before spawning). Each
-candidate is written to a temp file in the job's working directory, read back as the candidate
-bytes, then removed. A non-zero exit fails the job with the last 1500 chars of stderr (stdout as
-fallback). Cancellation kills the child between candidates.
+(absolute path of the i-th input file; out-of-range references fail the job before spawning). A
+**bare** `{input:<i>}` token (the whole `args` entry) is an _optional_ reference: when the job
+carries no such input the token — and a lone flag token directly before it, e.g.
+`["--image", "{input:0}"]` — is dropped from the command line, so one settings row can serve both
+text-to-image and image-to-image jobs (dual-mode models). `{input:<i>}` embedded in a larger token
+still fails the job when the input is absent. Each candidate is written to a temp file in the job's
+working directory, read back as the candidate bytes, then removed. A non-zero exit fails the job
+with the last 1500 chars of stderr (stdout as fallback). Cancellation kills the child between
+candidates.
 
 Example:
 
