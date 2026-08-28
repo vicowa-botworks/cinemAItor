@@ -21,6 +21,7 @@ import {
   generateAudioCleanup,
 } from "./audio_cleanup.ts";
 import { executeBenchmarkJob } from "./model_benchmark.ts";
+import { hfTokenForUrl } from "./huggingface.ts";
 import { analyzeAudioFile, buildAudioMetadata } from "./audio_info.ts";
 import { getModel, touchModelLastUsed } from "../db/models.ts";
 import {
@@ -394,6 +395,7 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
           inputs: inputRefs,
           promptText: job.prompt_text,
           workDir: store.layout.cache,
+          hfToken: hfTokenForUrl(model.repository_url),
         },
         hooks,
       );

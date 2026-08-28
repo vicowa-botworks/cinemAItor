@@ -15,6 +15,7 @@ import {
 import { createBenchmarkResult, getModel, type Model, touchModelLastUsed } from "../db/models.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import { CancelledError, getAdapter, randomSeed } from "./adapters.ts";
+import { hfTokenForUrl } from "./huggingface.ts";
 
 /** Scratch dir for real backends to write temp output (guaranteed to exist). */
 async function getBenchmarkWorkDir(): Promise<string> {
@@ -150,6 +151,7 @@ export async function executeBenchmarkJob(job: GenerationJob): Promise<void> {
         inputs: [],
         promptText: BENCHMARK_PROMPTS[task],
         workDir: benchmarkWorkDir,
+        hfToken: hfTokenForUrl(model.repository_url),
       },
       {
         onProgress(progress: number, _message: string | null): void {

@@ -113,6 +113,31 @@ export function hfEffectiveToken(): string {
 }
 
 /**
+ * The effective token for a model whose weights came from HuggingFace: spawned
+ * runners (local_cli) that finish a job by downloading components from the hub
+ * (VAE / text encoder / tokenizer) hit the same gate as the weight download, so
+ * jobs for HF-origin models get the token in their env. Returns "" when there
+ * is no token, the URL is empty/malformed, or its origin is not the HF public
+ * base — the token is never handed to non-HF hosts (same gate as the install
+ * Authorization forwarding).
+ */
+export function hfTokenForUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "";
+  }
+  try {
+    if (parsed.origin !== new URL(hfPublicBase()).origin) return "";
+  } catch {
+    return "";
+  }
+  return hfEffectiveToken();
+}
+
+/**
  * Optional auth for HuggingFace. Public repos need no token, but HF has been
  * tightening anonymous access on per-repo endpoints — when a token is configured
  * (settings or env) it is forwarded as a Bearer token.

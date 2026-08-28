@@ -33,6 +33,13 @@ export interface GenerationAdapterInput {
   promptText: string | null;
   /** Scratch directory the runner guarantees exists; adapters may create temp files here. */
   workDir: string;
+  /**
+   * Effective HuggingFace token for HF-origin models (resolved by the runner
+   * via hfTokenForUrl, "" or undefined otherwise). local_cli exposes it to the
+   * spawned process as HF_TOKEN / HUGGING_FACE_HUB_TOKEN so runners can
+   * download gated-repo components (VAE / text encoder) at job time.
+   */
+  hfToken?: string;
 }
 
 export interface GenerationAdapterResult {
@@ -385,13 +392,25 @@ export class LocalCliAdapter implements ModelAdapter {
     }
     const timeoutSeconds = settingNumber(settings, "timeout_seconds", 600, 1, 6 * 3600);
     const rawEnv = settings.env;
-    const extraEnv = rawEnv && typeof rawEnv === "object" && !Array.isArray(rawEnv)
+    const settingsEnv = rawEnv && typeof rawEnv === "object" && !Array.isArray(rawEnv)
       ? Object.fromEntries(
         Object.entries(rawEnv as Record<string, unknown>)
           .filter(([, v]) => typeof v === "string")
           .map(([k, v]) => [k, v as string]),
       )
       : undefined;
+    // HF token for gated-repo hub access at job time: an explicit
+    // settings.env entry (user's choice) wins over the injected one.
+    const hfToken = typeof input.hfToken === "string" ? input.hfToken.trim() : "";
+    let extraEnv = settingsEnv;
+    if (hfToken) {
+      const env: Record<string, string> = { ...(settingsEnv ?? {}) };
+      if (env.HF_TOKEN === undefined) env.HF_TOKEN = hfToken;
+      if (env.HUGGING_FACE_HUB_TOKEN === undefined) {
+        env.HUGGING_FACE_HUB_TOKEN = hfToken;
+      }
+      extraEnv = env;
+    }
     const seedUsed = input.seed && input.seed !== "random" ? input.seed : randomSeed();
     const count = candidateCount(settings);
     const def = outputForTask(input.jobType);

@@ -9,6 +9,7 @@ import {
   capHfFiles,
   HF_MAX_FILES,
   HF_README_MAX_CHARS,
+  hfTokenForUrl,
   pickWeightFile,
   resolveFileUrl,
   slugifyModelId,
@@ -281,6 +282,39 @@ describe("huggingface service (pure)", () => {
       resolveFileUrl("owner/repo", "weights.bin"),
       "https://huggingface.co/owner/repo/resolve/main/weights.bin",
     );
+  });
+
+  it("hfTokenForUrl hands out the effective token only for HF-origin URLs", () => {
+    const oldToken = Deno.env.get("HF_TOKEN");
+    freshMemoryDb();
+    try {
+      if (oldToken === undefined) Deno.env.delete("HF_TOKEN");
+      const hfUrl = "https://huggingface.co/owner/repo/resolve/main/model.bin";
+      // No token configured at all.
+      assertEquals(hfTokenForUrl(hfUrl), "");
+      Deno.env.set("HF_TOKEN", "hf_test_token_123");
+      // HF origin gets the effective token (env, then stored wins).
+      assertEquals(hfTokenForUrl(hfUrl), "hf_test_token_123");
+      updateHfToken("hf_stored_token");
+      assertEquals(hfTokenForUrl(hfUrl), "hf_stored_token");
+      // Non-HF origins, lookalike hosts, and bad URLs never get the token.
+      assertEquals(
+        hfTokenForUrl("https://example.com/owner/repo/resolve/main/model.bin"),
+        "",
+      );
+      assertEquals(
+        hfTokenForUrl("https://huggingface.co.evil.example/owner/repo/resolve/main/model.bin"),
+        "",
+      );
+      assertEquals(hfTokenForUrl(""), "");
+      assertEquals(hfTokenForUrl(null), "");
+      assertEquals(hfTokenForUrl(undefined), "");
+      assertEquals(hfTokenForUrl("not a url"), "");
+    } finally {
+      if (oldToken === undefined) Deno.env.delete("HF_TOKEN");
+      else Deno.env.set("HF_TOKEN", oldToken);
+      closeDb();
+    }
   });
 });
 

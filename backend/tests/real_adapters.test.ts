@@ -49,7 +49,7 @@ if [ "$prompt" = "FAIL" ]; then
   echo "boom: $prompt" >&2
   exit 3
 fi
-echo "PROMPT=$prompt SEED=$seed CAND=$cand FROM=$from" > "$out"
+echo "PROMPT=$prompt SEED=$seed CAND=$cand FROM=$from HFTOKEN=\${HF_TOKEN:-}" > "$out"
 `;
 
 const fakeSleepScript = `#!/bin/sh
@@ -247,6 +247,68 @@ describe("LocalCliAdapter", () => {
     const c1 = new TextDecoder().decode(result.candidates[1].content);
     assertStringIncludes(c0, "PROMPT=a lighthouse SEED=42 CAND=0");
     assertStringIncludes(c1, "PROMPT=a lighthouse SEED=42 CAND=1");
+  });
+
+  it("injects the HF token into the CLI env for gated-repo hub access", async () => {
+    const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+    const adapter = new LocalCliAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "42",
+        settings: cliSettings(script),
+        inputs: [],
+        promptText: "a lighthouse",
+        workDir: dir,
+        hfToken: "hf_fake_token_123",
+      },
+      noopHooks,
+    );
+    const out = new TextDecoder().decode(result.candidates[0].content);
+    assertStringIncludes(out, "HFTOKEN=hf_fake_token_123");
+  });
+
+  it("sets no HF token env when the model is not HF-origin", async () => {
+    const prevToken = Deno.env.get("HF_TOKEN");
+    Deno.env.delete("HF_TOKEN");
+    try {
+      const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+      const adapter = new LocalCliAdapter();
+      const result = await adapter.generate(
+        {
+          jobType: "text_to_image",
+          seed: "42",
+          settings: cliSettings(script),
+          inputs: [],
+          promptText: "a lighthouse",
+          workDir: dir,
+        },
+        noopHooks,
+      );
+      const out = new TextDecoder().decode(result.candidates[0].content).trimEnd();
+      assertEquals(out.slice(-8), "HFTOKEN=");
+    } finally {
+      if (prevToken !== undefined) Deno.env.set("HF_TOKEN", prevToken);
+    }
+  });
+
+  it("lets an explicit settings.env HF_TOKEN override the injected one", async () => {
+    const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+    const adapter = new LocalCliAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "42",
+        settings: cliSettings(script, { env: { HF_TOKEN: "user_token" } }),
+        inputs: [],
+        promptText: "a lighthouse",
+        workDir: dir,
+        hfToken: "hf_fake_token_123",
+      },
+      noopHooks,
+    );
+    const out = new TextDecoder().decode(result.candidates[0].content);
+    assertStringIncludes(out, "HFTOKEN=user_token");
   });
 
   it("uses a random numeric seed when none is given", async () => {
