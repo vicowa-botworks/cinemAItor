@@ -27,7 +27,7 @@ Stored in `app_settings` (same mechanism as the SMTP settings, see `docs/email.m
 | `llm_model`           | Model name to send in the request body (`qwen2.5:14b`, `local-model`, …)                                                                       |
 | `llm_temperature`     | Sampling temperature string (`"0.7"`), sent when set                                                                                           |
 | `llm_max_tokens`      | Default max completion tokens (`"1024"`), sent when set                                                                                        |
-| `llm_timeout_seconds` | Request timeout (`"300"` default; 1–600)                                                                                                       |
+| `llm_timeout_seconds` | Request timeout (`"300"` default; 1–3600)                                                                                                      |
 
 The key is never returned by any endpoint — settings GET exposes `api_key_set: boolean`. PUT accepts
 a partial update; `llm_api_key` accepts a string (set/replace) or `null` (clear). Mutating settings

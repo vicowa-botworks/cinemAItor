@@ -9,6 +9,9 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const UPLOAD_TIMEOUT_MS = 30 * 60_000;
 const MEDIA_TIMEOUT_MS = 5 * 60_000;
 const LONG_TASK_TIMEOUT_MS = 15 * 60_000;
+// LLM calls may wait on a busy local model; matches the 3600 s
+// llm_timeout_seconds server-side cap.
+const LLM_TIMEOUT_MS = 60 * 60_000;
 
 class ApiError extends Error {
   constructor(message, status, code) {
@@ -698,7 +701,7 @@ class ApiClient {
     return this.request("/llm/test", {
       method: "POST",
       body: JSON.stringify({}),
-      timeoutMs: LONG_TASK_TIMEOUT_MS,
+      timeoutMs: LLM_TIMEOUT_MS,
     });
   }
 
@@ -706,7 +709,7 @@ class ApiClient {
     return this.request("/llm/chat", {
       method: "POST",
       body: JSON.stringify({ messages, ...extra }),
-      timeoutMs: LONG_TASK_TIMEOUT_MS,
+      timeoutMs: LLM_TIMEOUT_MS,
     });
   }
 
@@ -718,7 +721,7 @@ class ApiClient {
     return this.request("/llm/assist", {
       method: "POST",
       body: JSON.stringify(body),
-      timeoutMs: LONG_TASK_TIMEOUT_MS,
+      timeoutMs: LLM_TIMEOUT_MS,
     });
   }
 
@@ -728,7 +731,7 @@ class ApiClient {
     return this.request("/llm/agent", {
       method: "POST",
       body: JSON.stringify(body),
-      timeoutMs: LONG_TASK_TIMEOUT_MS,
+      timeoutMs: LLM_TIMEOUT_MS,
     });
   }
 

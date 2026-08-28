@@ -1176,7 +1176,7 @@ export class ModelManager extends LitElement {
                       id="llm-timeout"
                       type="number"
                       min="1"
-                      max="600"
+                      max="3600"
                       .value=${this.llmDraft.timeout_seconds}
                       @input=${(e) => this._llmSetField("timeout_seconds", e.target.value)} />
                   </div>

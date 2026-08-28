@@ -144,9 +144,9 @@ function handleUpdateSettings(ctx: Context, body: Record<string, unknown>): void
       case "timeout_seconds": {
         if (
           typeof value !== "number" || !Number.isInteger(value) ||
-          value < 1 || value > 600
+          value < 1 || value > 3600
         ) {
-          throw badRequest("timeout_seconds must be an integer between 1 and 600");
+          throw badRequest("timeout_seconds must be an integer between 1 and 3600");
         }
         update.timeoutSeconds = value;
         touched = true;
