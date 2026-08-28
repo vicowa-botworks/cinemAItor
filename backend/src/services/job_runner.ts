@@ -11,6 +11,7 @@ import {
   listJobs,
   PROXY_JOB_TYPE,
   recoverStaleJobs,
+  updateJobLease,
   updateJobProgress,
 } from "../db/jobs.ts";
 import { isAudioAssetType } from "../db/audio.ts";
@@ -342,6 +343,17 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
   async function executeJob(job: GenerationJob): Promise<void> {
     const jobId = job.id;
     const userId = job.created_by_user_id ?? 0;
+    // Executions longer than one lease must renew it, or recovery re-queues
+    // the live job and a second execution of the same job starts. Renew at
+    // half-lease intervals; stop when the lease no longer belongs to us
+    // (job re-claimed or finished).
+    const leaseRenewalMs = Math.max(1000, Math.floor(leaseSeconds / 2) * 1000);
+    const leaseRenewal = setInterval(() => {
+      if (!updateJobLease(owner, jobId, leaseSeconds)) {
+        clearInterval(leaseRenewal);
+      }
+    }, leaseRenewalMs);
+    Deno.unrefTimer(leaseRenewal);
     try {
       if (job.job_type === PROXY_JOB_TYPE) {
         await executeProxyJob(job);
@@ -474,6 +486,8 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
       }
       const message = err instanceof Error ? err.message : String(err);
       finishJob(jobId, "failed", { errorText: message });
+    } finally {
+      clearInterval(leaseRenewal);
     }
   }
 
