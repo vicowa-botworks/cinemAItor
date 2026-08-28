@@ -13,6 +13,7 @@ import {
   listJobs,
   recoverStaleJobs,
   retryJob,
+  updateJobLease,
 } from "../src/db/jobs.ts";
 import { type JobRunner, startJobRunner } from "../src/services/job_runner.ts";
 import { resetContentStore } from "../src/storage/content_store.ts";
@@ -366,6 +367,76 @@ describe("job runner", () => {
     const runner = startJobRunner({ pollMs: 5 });
     runners.push(runner);
     await waitFor(() => getJob(job.id)?.status === "succeeded");
+  });
+
+  it("renews the lease of a running job so recovery leaves it alone", async () => {
+    // Regression: an execution longer than one lease used to look "stale" to
+    // recovery, which re-queued the live job and started a second execution
+    // of the same job every lease period. The runner must renew its lease.
+    const model = registerModel(ownerId, {
+      name: "slow-cli",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+      enabled: true,
+      default_settings: {
+        command: "sh",
+        args: ["-c", "sleep 3; : > {output}"],
+        timeout_seconds: 30,
+      },
+    });
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "slow job",
+    });
+
+    const runner = startJobRunner({ pollMs: 10, leaseSeconds: 2 });
+    runners.push(runner);
+    await waitFor(() => getJob(job.id)?.status === "running");
+
+    // Let more than one lease period pass, then run an aggressive recovery
+    // pass (zero grace) like the runner's tick does on every poll.
+    await new Promise((r) => setTimeout(r, 2500));
+    assertEquals(recoverStaleJobs(0), []);
+    const midTypes = eventTypes(job.id);
+    assertEquals(midTypes.filter((t) => t === "recovered").length, 0);
+    assertEquals(midTypes.filter((t) => t === "started").length, 1);
+
+    await waitFor(() => getJob(job.id)?.status === "succeeded", 15000);
+    const types = eventTypes(job.id);
+    assertEquals(types.filter((t) => t === "started").length, 1);
+    assertEquals(types.filter((t) => t === "recovered").length, 0);
+  });
+
+  it("updateJobLease only extends leases owned by the caller", async () => {
+    const model = mockT2IModel();
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "lease",
+    });
+    const claimed = claimJob("owner-a", 60);
+    assertEquals(claimed?.id, job.id);
+    const before = getJob(job.id)?.lease_expires_at;
+    assert(before);
+
+    // A different owner (e.g. a superseded execution) cannot extend it.
+    assertEquals(updateJobLease("owner-b", job.id, 60), false);
+    // The owner can.
+    await new Promise((r) => setTimeout(r, 1100));
+    assertEquals(updateJobLease("owner-a", job.id, 60), true);
+    const after = getJob(job.id)?.lease_expires_at;
+    assert(after);
+    assert(after > before);
+
+    // Terminal jobs keep no lease.
+    finishJob(job.id, "succeeded", { progress: 100 });
+    assertEquals(updateJobLease("owner-a", job.id, 60), false);
   });
 
   it("respects concurrency limits for mock (cpu) jobs", async () => {

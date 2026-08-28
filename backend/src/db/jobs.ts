@@ -328,6 +328,30 @@ export function updateJobProgress(id: string, progress: number): void {
   emitJobProgress(id, clamped);
 }
 
+/**
+ * Renew the lease of a running job. Long executions must keep their lease
+ * alive, or recovery will re-queue a live job and a second execution of the
+ * same job will start. Guarded by owner + status so a superseded execution
+ * cannot extend a re-claimed job's lease. Returns false when the lease no
+ * longer belongs to this owner.
+ */
+export function updateJobLease(
+  owner: string,
+  id: string,
+  leaseSeconds: number,
+): boolean {
+  const db = getDb();
+  const expires = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+  const changed = db
+    .prepare(
+      `UPDATE generation_jobs
+       SET lease_expires_at = ?
+       WHERE id = ? AND status = 'running' AND lease_owner = ?`,
+    )
+    .run(expires, id, owner);
+  return changed > 0;
+}
+
 export function finishJob(
   id: string,
   status: "succeeded" | "failed" | "cancelled" | "cancelling",
