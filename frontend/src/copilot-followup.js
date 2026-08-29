@@ -30,29 +30,39 @@ export function collectPendingTools(turns) {
  * copilot can continue (or close out) the plan.
  *
  * @param {string} tool Tool name of the proposal that just resolved.
- * @param {"approved"|"rejected"} verb How the user resolved it.
- * @param {string} [summary] Short human-readable result summary (approved only).
+ * @param {"approved"|"rejected"|"failed"} verb How the user resolved it ("failed" =
+ *   approved, but the tool execution errored and the proposal is still pending).
+ * @param {string} [summary] Short human-readable result summary (approved) or the
+ *   error message (failed).
  * @param {string[]} [pendingTools] Tools still pending from earlier turns.
  * @returns {string}
  */
 export function followUpMessage(tool, verb, summary = "", pendingTools = []) {
-  if (typeof tool !== "string" || !tool) throw new Error("tool must be a non-empty string");
-  if (verb !== "approved" && verb !== "rejected") {
-    throw new Error("verb must be 'approved' or 'rejected'");
+  if (typeof tool !== "string" || !tool) {
+    throw new Error("tool must be a non-empty string");
+  }
+  if (verb !== "approved" && verb !== "rejected" && verb !== "failed") {
+    throw new Error("verb must be 'approved', 'rejected', or 'failed'");
   }
   const pending = Array.isArray(pendingTools)
     ? [...new Set(pendingTools.filter((t) => typeof t === "string" && t))]
     : [];
   const outcome = verb === "approved"
     ? `approved your \`${tool}\` proposal and it completed${summary ? ` (${summary})` : ""}`
-    : `rejected your \`${tool}\` proposal`;
+    : verb === "rejected"
+    ? `rejected your \`${tool}\` proposal`
+    : `approved your \`${tool}\` proposal, but execution failed: ${
+      summary || "unknown error"
+    } — the proposal is still pending on the server`;
   const pendingNote = pending.length
     ? ` Still pending from earlier: ${
       pending.map((t) => `\`${t}\``).join(", ")
-    } — do not re-propose those steps.`
+    } — do not re-propose them with the same arguments; propose a corrected replacement if one of them is wrong or failed.`
     : " No other proposals are pending.";
   const next = verb === "approved"
     ? " Continue with the remaining steps of the plan if there are any — propose the next mutating action(s) for approval. If the plan is complete, briefly confirm the final state."
-    : " Adjust the plan accordingly: propose a replacement if the goal still makes sense, or confirm the final state if the plan is complete.";
+    : verb === "rejected"
+    ? " Adjust the plan accordingly: propose a replacement if the goal still makes sense, or confirm the final state if the plan is complete."
+    : " Diagnose the failure: if the step's arguments are wrong, propose the CORRECTED version as a new proposal (and tell the user the old pending one can be rejected), or explain the fix if no new proposal is needed.";
   return `The user just ${outcome}.${pendingNote}${next}`;
 }

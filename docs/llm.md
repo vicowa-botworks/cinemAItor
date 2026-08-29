@@ -215,10 +215,20 @@ re-clickable buttons.
 executes the tool, it does not resume the conversation. So after each approval/rejection resolves,
 the UI automatically sends one follow-up turn (rendered as a dashed `auto-continue` bubble) whose
 synthetic message reports the outcome, a short result summary, and which steps are still pending
-("do not re-propose those steps"). The copilot then proposes the next planned action for approval
-(or confirms the plan is complete), which is what lets multi-step setups — runner script → venv →
-adapter `update_model` — run to completion without the user typing "continue". Each follow-up is
-still gated on explicit human approval, so the loop can never run unattended.
+("do not re-propose them with the same arguments; propose a corrected replacement if one of them is
+wrong or failed"). The copilot then proposes the next planned action for approval (or confirms the
+plan is complete), which is what lets multi-step setups — runner script → venv → adapter
+`update_model` — run to completion without the user typing "continue". Each follow-up is still gated
+on explicit human approval, so the loop can never run unattended.
+
+**Failure follow-ups.** When an approved proposal's tool execution fails, the UI sends a `failed`
+follow-up turn carrying the error message: the copilot learns its step failed (the proposal stays
+pending server-side) and is expected to propose a corrected replacement as a NEW proposal. The
+copilot's system prompt carries the live list of pending proposals (tool + argument summary, marked
+when one is executing), and its approval-flow rule distinguishes the two cases: identical
+re-proposals of a still-pending step are forbidden, but a corrected replacement for a
+wrong/failed/rejected step is expected. This closes the loop where the copilot could fix an error in
+text yet never produce a new approval request.
 
 **Local-cli model setup.** The copilot's system prompt carries a setup playbook: a `local_cli` model
 only works when its `default_settings.command` is an existing executable and every file its `args`

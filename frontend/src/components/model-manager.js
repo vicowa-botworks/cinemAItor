@@ -1799,7 +1799,13 @@ export class ModelManager extends LitElement {
         this._copilotResultSummary(proposal.tool, result ?? updated.result),
       );
     } catch (err) {
-      this.copilotError = await this._syncProposalError(id, err, "Approval failed.");
+      const message = await this._syncProposalError(id, err, "Approval failed.");
+      this.copilotError = message;
+      // Report the failure to the copilot so it can propose a corrected
+      // replacement. _syncProposalError returns "" only when the server
+      // state already settled the proposal (approved / still executing),
+      // in which case there is no failure to report.
+      if (message) void this._copilotFollowUp(proposal.tool, "failed", message);
     } finally {
       this._clearProposalBusy(id);
     }

@@ -6,7 +6,7 @@ import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
 import { modelDir } from "../src/services/model_files.ts";
-import { copilotSystemPrompt } from "../src/services/llm_agent.ts";
+import { copilotSystemPrompt, createProposal, resetProposals } from "../src/services/llm_agent.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
 // Scripted fake LLM: each call pops the next response (tool call or final
@@ -977,6 +977,7 @@ describe("copilot system prompt", () => {
   beforeEach(() => {
     Deno.env.set("APP_DATA_DIR", Deno.makeTempDirSync({ prefix: "cinemaitor_copilot_prompt_" }));
     freshMemoryDb();
+    resetProposals();
   });
 
   afterEach(() => {
@@ -984,14 +985,40 @@ describe("copilot system prompt", () => {
   });
 
   it("calibrates the model on the approval flow", async () => {
-    const prompt = await copilotSystemPrompt();
+    const prompt = await copilotSystemPrompt(1, true);
     assertMatch(prompt, /approves each proposal AFTER your turn ends/);
     assertMatch(prompt, /continue the plan and propose the next steps/);
-    assertMatch(prompt, /never re-propose a step that is still pending/);
+    assertMatch(prompt, /Do not re-propose a pending step with identical arguments/);
+    assertMatch(prompt, /propose the CORRECTED version as a new proposal/);
+  });
+
+  it("lists the caller's pending proposals live", async () => {
+    // No pending proposals: the section says so.
+    const empty = await copilotSystemPrompt(1, true);
+    assertMatch(empty, /No proposals are currently pending/);
+
+    // A pending proposal for the same user is listed with its tool + args.
+    createProposal(
+      "write_model_file",
+      { model_id: "m1", filename: "runner.py", content: "print('hi')\n" },
+      1,
+    );
+    const prompt = await copilotSystemPrompt(1, true);
+    assertMatch(prompt, /Pending proposals awaiting the user's decision/);
+    assertMatch(prompt, /write_model_file/);
+    assertMatch(prompt, /runner\.py/);
+
+    // Other users do not see proposals that are not theirs.
+    const other = await copilotSystemPrompt(2, false);
+    assertMatch(other, /No proposals are currently pending/);
+
+    // Admins see everyone's pending proposals.
+    const admin = await copilotSystemPrompt(2, true);
+    assertMatch(admin, /write_model_file/);
   });
 
   it("keeps the local_cli setup playbook", async () => {
-    const prompt = await copilotSystemPrompt();
+    const prompt = await copilotSystemPrompt(1, true);
     assertMatch(prompt, /write_model_file/);
     assertMatch(prompt, /install_model_deps/);
     assertMatch(prompt, /venv python path/);
