@@ -12,6 +12,7 @@ import {
 } from "@std/assert";
 import {
   type AdapterHooks,
+  candidateSeed,
   ComfyUIAdapter,
   LocalCliAdapter,
   renderCliArgs,
@@ -55,6 +56,35 @@ echo "PROMPT=$prompt SEED=$seed CAND=$cand FROM=$from HFTOKEN=\${HF_TOKEN:-}" > 
 const fakeSleepScript = `#!/bin/sh
 sleep 30
 `;
+
+// ---------------------------------------------------------------------------
+// candidateSeed
+// ---------------------------------------------------------------------------
+
+describe("candidateSeed", () => {
+  it("keeps candidate 0 on the exact job seed", () => {
+    assertEquals(candidateSeed("42", 0), "42");
+    assertEquals(candidateSeed("abc", 0), "abc");
+  });
+
+  it("offsets numeric seeds numerically per candidate", () => {
+    assertEquals(candidateSeed("42", 1), "43");
+    assertEquals(candidateSeed("42", 7), "49");
+    assertEquals(candidateSeed("0", 1), "1");
+  });
+
+  it("suffixes the index for non-numeric seeds", () => {
+    assertEquals(candidateSeed("abc", 1), "abc:1");
+    assertEquals(candidateSeed("bench-flux_2_dev", 2), "bench-flux_2_dev:2");
+  });
+
+  it("derives 8 distinct seeds for the max candidate count", () => {
+    for (const seed of ["1", "42", "0", "abc", "bench-flux_2_dev", "0x10"]) {
+      const derivedAll = Array.from({ length: 8 }, (_, i) => candidateSeed(seed, i));
+      assertEquals(new Set(derivedAll).size, 8);
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // renderCliArgs
@@ -245,8 +275,56 @@ describe("LocalCliAdapter", () => {
     assertEquals(result.candidates[0].mime_type, "image/png");
     const c0 = new TextDecoder().decode(result.candidates[0].content);
     const c1 = new TextDecoder().decode(result.candidates[1].content);
+    // Per-candidate seed: candidate 0 gets the job seed, candidate 1 derives.
     assertStringIncludes(c0, "PROMPT=a lighthouse SEED=42 CAND=0");
-    assertStringIncludes(c1, "PROMPT=a lighthouse SEED=42 CAND=1");
+    assertStringIncludes(c1, "PROMPT=a lighthouse SEED=43 CAND=1");
+    assertEquals(result.candidates[0].seed, "42");
+    assertEquals(result.candidates[1].seed, "43");
+  });
+
+  it("derives distinct per-candidate seeds so deterministic CLIs differ", async () => {
+    const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+    const adapter = new LocalCliAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "1",
+        settings: cliSettings(script, { candidates: 3 }),
+        inputs: [],
+        promptText: "a lighthouse",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assertEquals(result.candidates.length, 3);
+    const outputs = result.candidates.map(
+      (c) => new TextDecoder().decode(c.content),
+    );
+    assertEquals(outputs[0], outputs[1].replace("SEED=2", "SEED=1").replace("CAND=1", "CAND=0"));
+    assertStringIncludes(outputs[1], "SEED=2 CAND=1");
+    assertStringIncludes(outputs[2], "SEED=3 CAND=2");
+    assertEquals(new Set(outputs).size, 3);
+    assertEquals(result.candidates.map((c) => c.seed), ["1", "2", "3"]);
+  });
+
+  it("suffixes the candidate index for non-numeric seeds", async () => {
+    const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+    const adapter = new LocalCliAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "abc",
+        settings: cliSettings(script, { candidates: 2 }),
+        inputs: [],
+        promptText: "a lighthouse",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    const c0 = new TextDecoder().decode(result.candidates[0].content);
+    const c1 = new TextDecoder().decode(result.candidates[1].content);
+    assertStringIncludes(c0, "SEED=abc CAND=0");
+    assertStringIncludes(c1, "SEED=abc:1 CAND=1");
   });
 
   it("injects the HF token into the CLI env for gated-repo hub access", async () => {

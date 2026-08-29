@@ -78,7 +78,12 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
     job: GenerationJob,
     targetAssetId: string,
     userId: number,
-    candidate: { content: Uint8Array; extension: string; mime_type: string },
+    candidate: {
+      content: Uint8Array;
+      extension: string;
+      mime_type: string;
+      seed?: string;
+    },
     index: number,
     count: number,
     seedUsed: string,
@@ -111,7 +116,7 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
           backend: model?.backend,
           prompt_text: job.prompt_text,
           negative_prompt: job.negative_prompt,
-          seed_used: seedUsed,
+          seed_used: candidate.seed ?? seedUsed,
           settings: job.settings,
           input_asset_versions: job.input_asset_versions,
           request: {
