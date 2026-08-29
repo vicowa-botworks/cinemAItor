@@ -1529,11 +1529,11 @@ export class ModelManager extends LitElement {
             this._sendCopilot();
           }}>
           <textarea
-            placeholder="e.g. Which video models are installed and healthy?"
+            placeholder="e.g. Which video models are installed and healthy? (Ctrl+Enter to send)"
             .value=${this.copilotInput}
             @input=${(e) => (this.copilotInput = e.target.value)}
             @keydown=${(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 this._sendCopilot();
               }
