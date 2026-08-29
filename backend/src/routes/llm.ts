@@ -17,6 +17,8 @@ import {
 } from "@cinemaItor/errors.ts";
 import { chatLlm, type LlmMessage, testLlmConnection } from "@cinemaItor/services/llm_client.ts";
 import {
+  type AgentProposal,
+  type AgentStep,
   approveProposal,
   listProposals,
   rejectProposal,
@@ -30,6 +32,13 @@ import {
 } from "@cinemaItor/services/llm_assist.ts";
 import { getModel } from "@cinemaItor/db/models.ts";
 import { getSkill } from "@cinemaItor/db/skills.ts";
+import {
+  deleteConversation,
+  getConversation,
+  listConversations,
+  logAgentTurn,
+  logProposalEvent,
+} from "@cinemaItor/db/llm_conversations.ts";
 import { logAudit } from "@cinemaItor/services/audit.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
 import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
@@ -374,6 +383,79 @@ function proposalParam(ctx: Context): string {
   return id;
 }
 
+function optionalConversationId(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw badRequest("conversation_id must be a string");
+  const id = value.trim();
+  if (id.length === 0 || id.length > 128) {
+    throw badRequest("conversation_id must be 1-128 characters");
+  }
+  return id;
+}
+
+/** The last user message of the raw history (the turn just answered), with
+ *  the client's synthetic flag (auto-continue follow-ups) when present. */
+function lastUserTurn(
+  body: Record<string, unknown>,
+): { content: string; synthetic: boolean } | null {
+  const raw = Array.isArray(body.history) ? body.history : null;
+  if (!raw) return null;
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const m = raw[i] as Record<string, unknown> | null;
+    if (m && m.role === "user" && typeof m.content === "string") {
+      return { content: m.content, synthetic: m.synthetic === true };
+    }
+  }
+  return null;
+}
+
+/** First user message of the conversation, trimmed to a title. */
+function conversationTitle(body: Record<string, unknown>): string {
+  const raw = Array.isArray(body.history) ? body.history : [];
+  for (const entry of raw) {
+    const m = entry as Record<string, unknown> | null;
+    if (m && m.role === "user" && typeof m.content === "string") {
+      return m.content.replace(/\s+/g, " ").trim().slice(0, 80);
+    }
+  }
+  return "";
+}
+
+function logTurnSafe(
+  userId: number,
+  isAdmin: boolean,
+  body: Record<string, unknown>,
+  conversationId: string | undefined,
+  model: string,
+  reply: string,
+  steps: AgentStep[],
+  proposals: AgentProposal[],
+): void {
+  if (!conversationId) return;
+  const userTurn = lastUserTurn(body);
+  try {
+    logAgentTurn({
+      conversationId,
+      userId,
+      isAdmin,
+      title: conversationTitle(body),
+      model: model || null,
+      userMessage: {
+        content: (userTurn?.content ?? "").slice(0, 20000),
+        synthetic: userTurn?.synthetic ?? false,
+      },
+      assistantMessage: {
+        content: reply.slice(0, 20000),
+        steps,
+        proposals,
+      },
+    });
+  } catch (err) {
+    // Conversation logging is best-effort: a storage failure must not fail the turn.
+    console.warn("[llm] failed to log copilot conversation turn:", err);
+  }
+}
+
 async function handleAgent(ctx: Context): Promise<void> {
   const userId = requireUserId(ctx);
   const body = await readJsonBody(ctx);
@@ -384,11 +466,13 @@ async function handleAgent(ctx: Context): Promise<void> {
     }
     model = body.model.trim();
   }
+  const conversationId = optionalConversationId(body.conversation_id);
   const result = await runAgent({
     history: body.history,
     userId,
     isAdmin: isAdminUser(userId),
     model,
+    conversationId,
   });
   logAudit(
     userId,
@@ -401,6 +485,16 @@ async function handleAgent(ctx: Context): Promise<void> {
       tools: result.steps.map((s) => s.tool),
     },
   );
+  logTurnSafe(
+    userId,
+    isAdminUser(userId),
+    body,
+    conversationId,
+    result.model,
+    result.reply,
+    result.steps,
+    result.proposals,
+  );
   ctx.response.body = {
     reply: result.reply,
     model: result.model,
@@ -411,11 +505,28 @@ async function handleAgent(ctx: Context): Promise<void> {
   };
 }
 
+function logProposalOutcomeSafe(
+  proposal: { id: string; conversation_id?: string },
+  userId: number,
+  isAdmin: boolean,
+  outcome: "approved" | "rejected",
+): void {
+  const conversationId = proposal.conversation_id;
+  if (!conversationId) return;
+  try {
+    logProposalEvent(conversationId, userId, isAdmin, proposal.id, outcome);
+  } catch (err) {
+    // Best-effort: the outcome still applies, only the log row is lost.
+    console.warn("[llm] failed to log proposal outcome:", err);
+  }
+}
+
 async function handleApproveProposal(ctx: Context): Promise<void> {
   const userId = requireUserId(ctx);
   const id = proposalParam(ctx);
   const { proposal, result } = await approveProposal(id, userId, isAdminUser(userId));
   logAudit(userId, "llm.proposal_approve", proposal.tool, proposal.id);
+  logProposalOutcomeSafe(proposal, userId, isAdminUser(userId), "approved");
   ctx.response.body = { proposal, result };
 }
 
@@ -424,12 +535,47 @@ function handleRejectProposal(ctx: Context): void {
   const id = proposalParam(ctx);
   const proposal = rejectProposal(id, isAdminUser(userId));
   logAudit(userId, "llm.proposal_reject", proposal.tool, proposal.id);
+  logProposalOutcomeSafe(proposal, userId, isAdminUser(userId), "rejected");
   ctx.response.body = { proposal };
 }
 
 function handleListProposals(ctx: Context): void {
   const userId = requireUserId(ctx);
   ctx.response.body = { proposals: listProposals(userId, isAdminUser(userId)) };
+}
+
+// ---------------------------------------------------------------------------
+// Conversation log
+// ---------------------------------------------------------------------------
+
+interface ConversationParamContext extends AuthedContext {
+  params: { id?: string };
+}
+
+function conversationParam(ctx: Context): string {
+  const id = (ctx as ConversationParamContext).params?.id ?? "";
+  if (!id) throw notFound("Conversation not found");
+  return id;
+}
+
+function handleListConversations(ctx: Context): void {
+  const userId = requireUserId(ctx);
+  ctx.response.body = { conversations: listConversations(userId, isAdminUser(userId)) };
+}
+
+function handleGetConversation(ctx: Context): void {
+  const userId = requireUserId(ctx);
+  ctx.response.body = {
+    conversation: getConversation(conversationParam(ctx), userId, isAdminUser(userId)),
+  };
+}
+
+function handleDeleteConversation(ctx: Context): void {
+  const userId = requireUserId(ctx);
+  const id = conversationParam(ctx);
+  deleteConversation(id, userId, isAdminUser(userId));
+  logAudit(userId, "llm.conversation_delete", "conversation", id);
+  ctx.response.status = 204;
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +594,10 @@ export const router = new Router()
   .post("/api/v1/llm/agent", authMiddleware, handleAgent)
   .get("/api/v1/llm/proposals", authMiddleware, handleListProposals)
   .post("/api/v1/llm/proposals/:id/approve", authMiddleware, handleApproveProposal)
-  .post("/api/v1/llm/proposals/:id/reject", authMiddleware, handleRejectProposal);
+  .post("/api/v1/llm/proposals/:id/reject", authMiddleware, handleRejectProposal)
+  .get("/api/v1/llm/conversations", authMiddleware, handleListConversations)
+  .get("/api/v1/llm/conversations/:id", authMiddleware, handleGetConversation)
+  .delete("/api/v1/llm/conversations/:id", authMiddleware, handleDeleteConversation);
 
 const LlmSettingsViewSchema = {
   type: "object",
@@ -670,10 +819,20 @@ export const openApiOps: Record<string, OperationMeta> = {
               properties: {
                 role: { type: "string", enum: ["user", "assistant"] },
                 content: { type: "string" },
+                synthetic: {
+                  type: "boolean",
+                  description: "True for auto-generated follow-up turns (outcome reports)",
+                },
               },
             },
           },
           model: { type: "string" },
+          conversation_id: {
+            type: "string",
+            maxLength: 128,
+            description: "Client-chosen conversation id. When present, the turn (and later " +
+              "proposal outcomes) are persisted under /api/v1/llm/conversations.",
+          },
         },
       },
     },
@@ -740,6 +899,45 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(401, 403, 404, 409),
+    },
+  },
+  "GET /api/v1/llm/conversations": {
+    summary: "List logged copilot conversations (the caller's own; admins see all)",
+    responses: {
+      200: {
+        description: "Conversations, most recently updated first",
+        schema: {
+          type: "object",
+          required: ["conversations"],
+          properties: {
+            conversations: { type: "array", items: ref("LlmConversation") },
+          },
+        },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "GET /api/v1/llm/conversations/{id}": {
+    summary: "Fetch one logged copilot conversation with its full message log",
+    description: "Includes user and assistant rows (with tool steps + proposals) and " +
+      "event rows recording each proposal's approval/rejection.",
+    responses: {
+      200: {
+        description: "Conversation metadata + every logged message in order",
+        schema: {
+          type: "object",
+          required: ["conversation"],
+          properties: { conversation: ref("LlmConversationDetail") },
+        },
+      },
+      ...errorResponses(401, 404),
+    },
+  },
+  "DELETE /api/v1/llm/conversations/{id}": {
+    summary: "Delete a logged copilot conversation and its messages (owner or admin)",
+    responses: {
+      204: { description: "Conversation and its messages deleted" },
+      ...errorResponses(401, 404),
     },
   },
   "GET /api/v1/llm/proposals": {

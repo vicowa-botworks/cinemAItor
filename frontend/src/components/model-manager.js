@@ -609,6 +609,120 @@ export class ModelManager extends LitElement {
       font-family: inherit;
     }
 
+    .copilot-history-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+
+    .copilot-history-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 6px 10px;
+    }
+
+    .copilot-history-open {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      background: none;
+      border: none;
+      color: var(--color-text);
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+      padding: 2px 0;
+    }
+
+    .copilot-history-open:hover .copilot-history-title {
+      text-decoration: underline;
+    }
+
+    .copilot-history-title {
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .copilot-history-sub {
+      font-size: 11px;
+      color: var(--color-text-muted);
+    }
+
+    .copilot-history-detail {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 480px;
+      overflow-y: auto;
+      padding: 4px 2px;
+    }
+
+    .copilot-history-detail-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .copilot-history-msg {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+    }
+
+    .copilot-history-msg.user {
+      background: var(--color-surface);
+    }
+
+    .copilot-history-msg.assistant {
+      background: transparent;
+    }
+
+    .copilot-history-msg.event {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+    }
+
+    .copilot-history-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .copilot-history-time {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--color-text-muted);
+    }
+
+    .copilot-history-body {
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .copilot-history-steps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
     .reg-field label {
       font-size: 12px;
       color: var(--color-text-muted);
@@ -921,6 +1035,10 @@ export class ModelManager extends LitElement {
     }
   `;
 
+  // Live copilot conversation id (server-logged). A private field so the
+  // _copilotConversationId() getter never resolves the method itself.
+  #copilotConversationId = null;
+
   static properties = {
     models: { state: true },
     hardware: { state: true },
@@ -951,6 +1069,11 @@ export class ModelManager extends LitElement {
     copilotError: { state: true },
     copilotBusyProposals: { state: true },
     copilotBusySince: { state: true },
+    copilotHistoryOpen: { state: true },
+    copilotHistory: { state: true },
+    copilotHistoryDetail: { state: true },
+    copilotHistoryBusy: { state: true },
+    copilotHistoryError: { state: true },
     showRegister: { state: true },
     regBusy: { state: true },
     regForm: { state: true },
@@ -1005,6 +1128,11 @@ export class ModelManager extends LitElement {
     this.copilotError = "";
     this.copilotBusyProposals = [];
     this.copilotBusySince = {};
+    this.copilotHistoryOpen = false;
+    this.copilotHistory = [];
+    this.copilotHistoryDetail = null;
+    this.copilotHistoryBusy = false;
+    this.copilotHistoryError = "";
     this.showRegister = false;
     this.regBusy = false;
     this.regForm = { ...EMPTY_REG_FORM };
@@ -1518,8 +1646,12 @@ export class ModelManager extends LitElement {
     return html`
       <div class="panel">
         <div class="llm-head">
-          <h3>Model Copilot</h3>
+          <h3>${this.copilotHistoryOpen ? "Copilot history" : "Model Copilot"}</h3>
           <span class="chip enabled">tool harness</span>
+          <button class="btn btn-secondary btn-small" @click=${() =>
+            this.copilotHistoryOpen ? this._closeCopilotHistory() : this._openCopilotHistory()}>
+            ${this.copilotHistoryOpen ? "Back to chat" : "History"}
+          </button>
         </div>
         <p class="admin-note">
           Ask about models, registry state, or HuggingFace repos. Read-only tools
@@ -1527,52 +1659,54 @@ export class ModelManager extends LitElement {
           proposal that you must approve explicitly.
           ${!this.isAdmin ? "You are not an admin, so mutating tools are not available." : ""}
         </p>
-        ${this.copilot.length > 0
-          ? html`
-            <button class="btn btn-secondary btn-small" @click=${() => this._copilotClear()}>
-              Clear conversation
+        ${this.copilotHistoryOpen ? this._renderCopilotHistory() : html`
+          ${this.copilot.length > 0
+            ? html`
+              <button class="btn btn-secondary btn-small" @click=${() => this._copilotClear()}>
+                Clear conversation
+              </button>
+            `
+            : null}
+          ${this.copilot.length > 0
+            ? html`
+              <div class="copilot-chat" ref=${(el) => (this._copilotChatEl = el)}>
+                ${this.copilot.map((turn) => this._renderCopilotTurn(turn))}
+                ${this.copilotBusy
+                  ? html`
+                    <div class="copilot-msg assistant">
+                      <div class="copilot-bubble">
+                          Thinking...</div>
+                    </div>
+                  `
+                  : null}
+              </div>
+            `
+            : null}
+          ${this.copilotError ? html`<div class="error">${this.copilotError}</div>` : null}
+          <form
+            class="copilot-input"
+            @submit=${(e) => {
+              e.preventDefault();
+              this._sendCopilot();
+            }}>
+            <textarea
+              placeholder="e.g. Which video models are installed and healthy? (Ctrl+Enter to send)"
+              .value=${this.copilotInput}
+              @input=${(e) => (this.copilotInput = e.target.value)}
+              @keydown=${(e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  this._sendCopilot();
+                }
+              }}></textarea>
+            <button
+              class="btn"
+              type="submit"
+              ?disabled=${this.copilotBusy || this.copilotInput.trim() === ""}>
+              ${this.copilotBusy ? "Working..." : "Ask"}
             </button>
-          `
-          : null}
-        ${this.copilot.length > 0
-          ? html`
-            <div class="copilot-chat" ref=${(el) => (this._copilotChatEl = el)}>
-              ${this.copilot.map((turn) => this._renderCopilotTurn(turn))}
-              ${this.copilotBusy
-                ? html`
-                  <div class="copilot-msg assistant">
-                    <div class="copilot-bubble">
-                                    Thinking...</div>
-                  </div>
-                `
-                : null}
-            </div>
-          `
-          : null}
-        ${this.copilotError ? html`<div class="error">${this.copilotError}</div>` : null}
-        <form
-          class="copilot-input"
-          @submit=${(e) => {
-            e.preventDefault();
-            this._sendCopilot();
-          }}>
-          <textarea
-            placeholder="e.g. Which video models are installed and healthy? (Ctrl+Enter to send)"
-            .value=${this.copilotInput}
-            @input=${(e) => (this.copilotInput = e.target.value)}
-            @keydown=${(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                this._sendCopilot();
-              }
-            }}></textarea>
-          <button
-            class="btn"
-            type="submit"
-            ?disabled=${this.copilotBusy || this.copilotInput.trim() === ""}>
-            ${this.copilotBusy ? "Working..." : "Ask"}
-          </button>
-        </form>
+          </form>
+        `}
       </div>
     `;
   }
@@ -1675,6 +1809,21 @@ export class ModelManager extends LitElement {
       .map((t) => ({ role: t.role, content: t.content }));
   }
 
+  /**
+   * Stable id for the live copilot conversation, created on the first turn.
+   * A new id means "start a new conversation" server-side; a known id appends
+   * to it. Reset by _copilotClear so "Clear conversation" starts fresh.
+   */
+  _copilotConversationId() {
+    if (!this.#copilotConversationId) {
+      this.#copilotConversationId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `conv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+    return this.#copilotConversationId;
+  }
+
   async _sendCopilot() {
     const text = this.copilotInput.trim();
     if (!text || this.copilotBusy) return;
@@ -1695,7 +1844,11 @@ export class ModelManager extends LitElement {
     ];
     this.copilotBusy = true;
     try {
-      const result = await api.llmAgent(this._copilotHistory());
+      const result = await api.llmAgent(
+        this._copilotHistory(),
+        undefined,
+        this._copilotConversationId(),
+      );
       this.copilot = [
         ...this.copilot.slice(0, -1),
         {
@@ -1833,6 +1986,145 @@ export class ModelManager extends LitElement {
     this.copilotError = "";
     this.copilotBusyProposals = [];
     this.copilotBusySince = {};
+    // A cleared conversation is a new one: the next turn mints a fresh id.
+    this.#copilotConversationId = null;
+  }
+
+  // --- Copilot conversation history (server-logged) ---
+
+  async _openCopilotHistory() {
+    this.copilotHistoryOpen = true;
+    this.copilotHistoryError = "";
+    this.copilotHistoryDetail = null;
+    await this._loadCopilotHistory();
+  }
+
+  _closeCopilotHistory() {
+    this.copilotHistoryOpen = false;
+    this.copilotHistoryDetail = null;
+    this.copilotHistoryError = "";
+  }
+
+  async _loadCopilotHistory() {
+    this.copilotHistoryBusy = true;
+    try {
+      const res = await api.listLlmConversations();
+      this.copilotHistory = res.conversations ?? [];
+    } catch (err) {
+      this.copilotHistoryError = err.message || "Failed to load copilot history.";
+    } finally {
+      this.copilotHistoryBusy = false;
+    }
+  }
+
+  async _openCopilotConversation(id) {
+    this.copilotHistoryError = "";
+    this.copilotHistoryBusy = true;
+    try {
+      const res = await api.getLlmConversation(id);
+      this.copilotHistoryDetail = res.conversation ?? null;
+    } catch (err) {
+      this.copilotHistoryError = err.message || "Failed to open this conversation.";
+    } finally {
+      this.copilotHistoryBusy = false;
+    }
+  }
+
+  async _deleteCopilotConversation(id) {
+    if (!window.confirm("Delete this conversation log? This cannot be undone.")) return;
+    try {
+      await api.deleteLlmConversation(id);
+      if (this.copilotHistoryDetail?.id === id) this.copilotHistoryDetail = null;
+      await this._loadCopilotHistory();
+    } catch (err) {
+      this.copilotHistoryError = err.message || "Failed to delete the conversation.";
+    }
+  }
+
+  _renderCopilotHistoryMessage(msg) {
+    const time = msg.created_at ? new Date(msg.created_at).toLocaleString() : "";
+    if (msg.role === "event") {
+      const label = msg.content === "approved" ? "Proposal approved" : "Proposal rejected";
+      return html`
+        <div class="copilot-history-msg event">
+          <span class="chip">${label}</span>
+          <span class="copilot-history-time">${time}</span>
+        </div>
+      `;
+    }
+    const isUser = msg.role === "user";
+    return html`
+      <div class="copilot-history-msg ${isUser ? "user" : "assistant"}">
+        <div class="copilot-history-meta">
+          <strong>${isUser ? (msg.synthetic ? "You (auto-continue)" : "You") : "Copilot"}</strong>
+          <span class="copilot-history-time">${time}</span>
+        </div>
+        <div class="copilot-history-body">${msg.content}</div>
+        ${!isUser && msg.steps?.length
+          ? html`
+            <div class="copilot-history-steps">
+              ${msg.steps.map(
+                (s) =>
+                  html`<span class="chip">${s.tool ?? "?"}${
+                    s.summary ? ` — ${s.summary}` : ""
+                  }</span>`,
+              )}
+            </div>
+          `
+          : null}
+      </div>
+    `;
+  }
+
+  _renderCopilotHistory() {
+    const detail = this.copilotHistoryDetail;
+    return html`
+      ${this.copilotHistoryError
+        ? html`<div class="error">${this.copilotHistoryError}</div>`
+        : null}
+      ${detail
+        ? html`
+          <div class="copilot-history-detail">
+            <div class="copilot-history-detail-head">
+              <strong>${detail.title || "Untitled conversation"}</strong>
+              <span class="chip">${detail.model ?? "unknown model"}</span>
+              <span class="chip">${detail.messages.length} messages</span>
+            </div>
+            ${detail.messages.map((m) => this._renderCopilotHistoryMessage(m))}
+          </div>
+        `
+        : html`
+          ${this.copilotHistoryBusy && this.copilotHistory.length === 0
+            ? html`<p class="admin-note">Loading…</p>`
+            : null}
+          ${this.copilotHistory.length === 0
+            ? html`<p class="admin-note">No logged conversations yet.</p>`
+            : html`
+              <ul class="copilot-history-list">
+                ${this.copilotHistory.map((c) => {
+                  const updated = c.updated_at ? new Date(c.updated_at).toLocaleString() : "";
+                  return html`
+                    <li class="copilot-history-item">
+                      <button
+                        class="copilot-history-open"
+                        @click=${() => this._openCopilotConversation(c.id)}>
+                        <span class="copilot-history-title">${c.title || "Untitled"}</span>
+                        <span class="copilot-history-sub">
+                          ${c.message_count} messages · ${c.model ?? "?"} · ${updated}
+                        </span>
+                      </button>
+                      <button
+                        class="btn btn-danger btn-small"
+                        @click=${() => this._deleteCopilotConversation(c.id)}>
+                        Delete
+                      </button>
+                    </li>
+                  `;
+                })}
+              </ul>
+            `}
+        `}
+    `;
   }
 
   _renderHfPanel() {

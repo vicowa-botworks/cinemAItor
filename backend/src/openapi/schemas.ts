@@ -2707,7 +2707,65 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         type: "string",
         description: "Set when the approved tool call started executing",
       },
+      conversation_id: {
+        type: "string",
+        description: "Conversation that created the proposal (client conversation id)",
+      },
       result: { type: ["object", "null"], nullable: true },
+    },
+  },
+  LlmConversation: {
+    type: "object",
+    required: ["id", "user_id", "title", "message_count", "created_at", "updated_at"],
+    properties: {
+      id: { type: "string", description: "Client-chosen conversation id" },
+      user_id: { type: "integer", description: "User who ran the conversation" },
+      title: { type: "string", description: "First user message, trimmed" },
+      model: { type: ["string", "null"] },
+      message_count: { type: "integer" },
+      created_at: { type: "string" },
+      updated_at: { type: "string" },
+    },
+  },
+  LlmConversationMessage: {
+    type: "object",
+    required: ["id", "role", "content", "created_at"],
+    properties: {
+      id: { type: "integer" },
+      role: { type: "string", enum: ["user", "assistant", "event"] },
+      content: {
+        type: "string",
+        description: "Message text; for event rows the outcome ('approved' | 'rejected')",
+      },
+      synthetic: {
+        type: "boolean",
+        description: "True for auto-generated follow-up turns (outcome reports)",
+      },
+      steps: {
+        type: ["array", "null"],
+        description: "Assistant tool steps (tool/status/summary/proposal_id)",
+        items: { type: "object" },
+      },
+      proposals: {
+        type: ["array", "null"],
+        description: "Proposals created by this turn (id/tool/args)",
+        items: { type: "object" },
+      },
+      proposal_id: { type: ["string", "null"] },
+      created_at: { type: "string" },
+    },
+  },
+  LlmConversationDetail: {
+    type: "object",
+    required: ["id", "user_id", "title", "created_at", "updated_at", "messages"],
+    properties: {
+      id: { type: "string" },
+      user_id: { type: "integer" },
+      title: { type: "string" },
+      model: { type: ["string", "null"] },
+      created_at: { type: "string" },
+      updated_at: { type: "string" },
+      messages: { type: "array", items: ref("LlmConversationMessage") },
     },
   },
   HuggingFaceRepoSummary: {
