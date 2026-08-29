@@ -1000,6 +1000,8 @@ export class ModelManager extends LitElement {
     this.copilot = [];
     this.copilotInput = "";
     this.copilotBusy = false;
+    this._copilotChatEl = null;
+    this._copilotForceScroll = false;
     this.copilotError = "";
     this.copilotBusyProposals = [];
     this.copilotBusySince = {};
@@ -1028,6 +1030,32 @@ export class ModelManager extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback?.();
     if (this._queryTimer) clearTimeout(this._queryTimer);
+  }
+
+  updated(changed) {
+    if (
+      changed.has("copilot") ||
+      changed.has("copilotBusy") ||
+      changed.has("copilotBusyProposals")
+    ) {
+      this._copilotAutoScroll();
+    }
+  }
+
+  /**
+   * Keep the copilot chat on the latest output: after any copilot update,
+   * pin the scroll to the bottom if the user is already near it (or if a
+   * new user turn was just sent); never yank a user back down while they
+   * are scrolled up reading older turns.
+   */
+  _copilotAutoScroll() {
+    const el = this._copilotChatEl;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (this._copilotForceScroll || nearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+    this._copilotForceScroll = false;
   }
 
   async connectedCallback() {
@@ -1508,7 +1536,7 @@ export class ModelManager extends LitElement {
           : null}
         ${this.copilot.length > 0
           ? html`
-            <div class="copilot-chat">
+            <div class="copilot-chat" ref=${(el) => (this._copilotChatEl = el)}>
               ${this.copilot.map((turn) => this._renderCopilotTurn(turn))}
               ${this.copilotBusy
                 ? html`
@@ -1656,6 +1684,9 @@ export class ModelManager extends LitElement {
 
   async _runCopilotTurn(text, { synthetic = false } = {}) {
     if (!text || this.copilotBusy) return;
+    // A new turn is always user-triggered (send, or an approve/reject click
+    // on a proposal) — jump to it even if the user was scrolled up.
+    this._copilotForceScroll = true;
     this.copilotError = "";
     this.copilot = [
       ...this.copilot,
