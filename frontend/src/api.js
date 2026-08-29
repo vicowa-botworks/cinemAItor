@@ -725,9 +725,10 @@ class ApiClient {
     });
   }
 
-  llmAgent(history, model) {
+  llmAgent(history, model, conversationId) {
     const body = { history };
     if (model) body.model = model;
+    if (conversationId) body.conversation_id = conversationId;
     return this.request("/llm/agent", {
       method: "POST",
       body: JSON.stringify(body),
@@ -756,6 +757,20 @@ class ApiClient {
     // Fast read; used to re-sync proposal cards after an approve/reject error
     // so a dropped long-running approval converges on server-side state.
     return this.request("/llm/proposals");
+  }
+
+  listLlmConversations() {
+    return this.request("/llm/conversations");
+  }
+
+  getLlmConversation(id) {
+    return this.request(`/llm/conversations/${encodeURIComponent(id)}`);
+  }
+
+  deleteLlmConversation(id) {
+    return this.request(`/llm/conversations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   }
 
   searchHuggingFace({ q = "", filter = "", limit = 12 } = {}) {

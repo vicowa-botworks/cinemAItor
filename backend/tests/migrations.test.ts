@@ -89,6 +89,7 @@ describe("migrations", () => {
         "0022_advanced_presets.sql",
         "0023_sessions_jti.sql",
         "0024_email_system.sql",
+        "0025_llm_conversations.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -118,12 +119,13 @@ describe("migrations", () => {
         "0022_advanced_presets.sql",
         "0023_sessions_jti.sql",
         "0024_email_system.sql",
+        "0025_llm_conversations.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        24,
+        25,
       );
     } finally {
       db.close();
@@ -159,6 +161,7 @@ describe("migrations", () => {
       "0022_advanced_presets.sql",
       "0023_sessions_jti.sql",
       "0024_email_system.sql",
+      "0025_llm_conversations.sql",
     ]);
   });
 

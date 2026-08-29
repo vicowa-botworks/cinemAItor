@@ -409,10 +409,17 @@ server.ts (entry point)
    │   │   409s), and GET /api/v1/llm/proposals lists live status (in_flight +
    │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.
    │   │   A turn ends when it creates its proposals, so the UI auto-continues: after each
-   │   │   approval/rejection it sends a follow-up turn (synthetic `auto-continue` message
-   │   │   with outcome + still-pending steps) so multi-step setups chain to completion —
-   │   │   each next action still requires explicit approval (see docs/llm.md).
-  │   │   Local-cli runtime setup tools:
+    │   │   approval/rejection it sends a follow-up turn (synthetic `auto-continue` message
+    │   │   with outcome + still-pending steps) so multi-step setups chain to completion —
+    │   │   each next action still requires explicit approval (see docs/llm.md).
+   │   │   Conversation logging: `conversation_id` on the agent request (or on a proposal
+   │   │   via its origin turn) persists the exchange to the llm_conversations/llm_messages
+   │   │   tables (db/llm_conversations.ts, migration 0025) — user/assistant rows with
+   │   │   tool-step + proposal JSON, plus an event row per approve/reject; GET/DELETE
+   │   │   /api/v1/llm/conversations[/:id] are ownership-gated (admins see all); the UI's
+   │   │   History view in the copilot panel browses + deletes logs (improvement record,
+   │   │   never fed back to the LLM).
+   │   │   Local-cli runtime setup tools:
   │   │   model_files (read-only listing), write_model_file (runner scripts into the
   │   │   model dir), install_model_deps (.venv + pip install, returns the venv
   │   │   python path), update_model (fix settings/task types on an existing row) —

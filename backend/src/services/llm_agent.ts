@@ -256,6 +256,8 @@ export interface AgentProposal {
   in_flight?: boolean;
   /** Set when the approved tool call started executing. */
   started_at?: string;
+  /** Conversation that created the proposal (client conversation id). */
+  conversation_id?: string;
   result?: Record<string, unknown> | null;
 }
 
@@ -280,6 +282,7 @@ export function createProposal(
   tool: AgentToolName,
   args: Record<string, unknown>,
   userId: number,
+  conversationId?: string,
 ): AgentProposal {
   pruneProposals();
   const proposal: AgentProposal = {
@@ -291,6 +294,7 @@ export function createProposal(
     expires_at: new Date(Date.now() + PROPOSAL_TTL_MS).toISOString(),
     user_id: userId,
   };
+  if (conversationId) proposal.conversation_id = conversationId;
   proposals.set(proposal.id, proposal);
   return proposal;
 }
@@ -753,6 +757,9 @@ export interface AgentRunOptions {
   userId: number;
   isAdmin: boolean;
   model?: string;
+  /** Client conversation id — stamped on created proposals so the
+   *  conversation log can record approval/rejection outcomes. */
+  conversationId?: string;
 }
 
 /**
@@ -808,7 +815,12 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         step.summary = "Mutating tools require the admin role";
         messages.push(toolMessage(call, JSON.stringify({ error: step.summary })));
       } else if (isMutatingAgentTool(name)) {
-        const proposal = createProposal(name as AgentToolName, args, opts.userId);
+        const proposal = createProposal(
+          name as AgentToolName,
+          args,
+          opts.userId,
+          opts.conversationId,
+        );
         created.push(proposal);
         step.status = "proposal";
         step.proposal_id = proposal.id;

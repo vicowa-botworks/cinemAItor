@@ -35,18 +35,21 @@ require admin; reading settings requires admin; every authenticated user can rea
 
 ## Endpoints
 
-| Method | Endpoint                            | Access        | Description                                                                                        |
-| ------ | ----------------------------------- | ------------- | -------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/llm/settings`              | admin         | Current settings (key masked) + `enabled` + `configured`                                           |
-| PUT    | `/api/v1/llm/settings`              | admin         | Partial update (see table above)                                                                   |
-| GET    | `/api/v1/llm/status`                | authenticated | `{configured: boolean}` — enabled + has base URL + has model name                                  |
-| POST   | `/api/v1/llm/test`                  | admin         | Minimal completion; `200 {ok: true, latency_ms, model}` or a mapped error                          |
-| POST   | `/api/v1/llm/chat`                  | authenticated | One-shot chat `{messages, model?, temperature?, max_tokens?}`                                      |
-| POST   | `/api/v1/llm/assist`                | authenticated | `{purpose, context, model_id?, skill_id?, max_tokens?}` → `{purpose, content}`                     |
-| POST   | `/api/v1/llm/agent`                 | authenticated | Model Copilot: `{history, model?}` → `{reply, model, iterations, truncated, steps[], proposals[]}` |
-| POST   | `/api/v1/llm/proposals/:id/approve` | admin         | Execute a pending mutating-tool proposal → `{proposal, result}`                                    |
-| POST   | `/api/v1/llm/proposals/:id/reject`  | admin         | Reject a pending proposal → `{proposal}`                                                           |
-| GET    | `/api/v1/llm/proposals`             | authenticated | The caller's proposals with live status (`in_flight`, `started_at`); admins see all                |
+| Method | Endpoint                            | Access        | Description                                                                                                          |
+| ------ | ----------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/llm/settings`              | admin         | Current settings (key masked) + `enabled` + `configured`                                                             |
+| PUT    | `/api/v1/llm/settings`              | admin         | Partial update (see table above)                                                                                     |
+| GET    | `/api/v1/llm/status`                | authenticated | `{configured: boolean}` — enabled + has base URL + has model name                                                    |
+| POST   | `/api/v1/llm/test`                  | admin         | Minimal completion; `200 {ok: true, latency_ms, model}` or a mapped error                                            |
+| POST   | `/api/v1/llm/chat`                  | authenticated | One-shot chat `{messages, model?, temperature?, max_tokens?}`                                                        |
+| POST   | `/api/v1/llm/assist`                | authenticated | `{purpose, context, model_id?, skill_id?, max_tokens?}` → `{purpose, content}`                                       |
+| POST   | `/api/v1/llm/agent`                 | authenticated | Model Copilot: `{history, model?, conversation_id?}` → `{reply, model, iterations, truncated, steps[], proposals[]}` |
+| POST   | `/api/v1/llm/proposals/:id/approve` | admin         | Execute a pending mutating-tool proposal → `{proposal, result}`                                                      |
+| POST   | `/api/v1/llm/proposals/:id/reject`  | admin         | Reject a pending proposal → `{proposal}`                                                                             |
+| GET    | `/api/v1/llm/proposals`             | authenticated | The caller's proposals with live status (`in_flight`, `started_at`, `conversation_id`); admins see all               |
+| GET    | `/api/v1/llm/conversations`         | authenticated | The caller's logged copilot conversations (newest first, ≤50); admins see all                                        |
+| GET    | `/api/v1/llm/conversations/:id`     | owner/admin   | One conversation with its full message log                                                                           |
+| DELETE | `/api/v1/llm/conversations/:id`     | owner/admin   | Delete a conversation log → `204`                                                                                    |
 
 ### Error mapping (chat / test / assist / agent)
 
@@ -150,8 +153,13 @@ judging whether a model fits, and to only warn about it not fitting when the num
 so. Hardware detection spawns `nvidia-smi`, so results are cached for 60 s (`detectHardware()` in
 `services/hardware.ts`).
 
-**Request:** `{history: [{role: "user" | "assistant", content: string}...], model?}` — at least one
-message, each content trimmed to 20 000 chars; `model` overrides the configured model name.
+**Request:**
+`{history: [{role: "user" | "assistant", content: string, synthetic?}...], model?,
+conversation_id?}`
+— at least one message, each content trimmed to 20 000 chars; `model` overrides the configured model
+name. `conversation_id` (string, ≤128 chars) is optional: when present, the turn is persisted to the
+caller's copilot conversation log (see [Conversation logging](#conversation-logging)); when absent,
+the turn is stateless as before.
 
 **Response:** `{reply, model, iterations, truncated, steps, proposals}` where `steps` is one entry
 per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, proposal_id?}` — and
@@ -241,3 +249,38 @@ referencing the runner script by absolute path with the `{prompt}/{seed}/{output
 reference images) placeholders, and a device flag matching the detected hardware (`cuda` when the
 GPU has sufficient free VRAM, `cpu` otherwise). Every file the copilot writes (scripts, `.venv`)
 lives inside the model's own storage directory, so removing the model removes its runtime too.
+
+## Conversation logging
+
+The Model Copilot's conversations are logged server-side so they can be mined later to improve the
+agent (which tools it picks, where plans go off the rails, which setups need better guidance). The
+UI sends a stable `conversation_id` for the live chat (created on the first turn, reset by "Clear
+conversation"); every agent turn that carries one is persisted.
+
+**Storage** (migration `0025_llm_conversations.sql`, repository `db/llm_conversations.ts`):
+
+- `llm_conversations` — one row per conversation: `id` (client-chosen, ≤128 chars), `user_id`,
+  `title` (set from the first user message), `model`, timestamps.
+- `llm_messages` — append-only, one row per logged message: `role` `user` | `assistant` | `event`,
+  `content`, `synthetic` (auto-continue / failure follow-ups), `steps_json` (the assistant turn's
+  per-step `tool`/`status`/`summary`), `proposals_json`, `proposal_id` (event rows), `created_at`.
+  The list endpoint computes `message_count` per conversation.
+
+**What gets logged:**
+
+- `POST /api/v1/llm/agent` with a `conversation_id` logs the turn's last user message plus the
+  assistant reply (content, per-step `tool`/`status`/`summary`, proposal ids). The conversation row
+  is upserted; `title` is set only once (first turn).
+- Approving or rejecting a proposal logs an `event` row (`approved` / `rejected`) on the
+  conversation the proposal belongs to, so the plan's approval trail is part of the log.
+- Turns without a `conversation_id` are not logged (stateless behavior is preserved).
+
+**Access** is ownership-gated: a user sees and can delete their own conversations; admins see and
+can delete all. Deleting removes the conversation and its messages. The Model Manager UI's "History"
+button (Model Copilot panel) lists the caller's conversations, opens any one as a read-only
+transcript (user / assistant / event rows with timestamps), and offers per-conversation delete.
+`GET /api/v1/llm/proposals` includes `conversation_id` on each proposal so the UI can correlate
+cards with the log.
+
+Logs are never sent back to the LLM — the agent's `history` is still whatever the client sends, so
+the log is a pure audit/improvement record, not a memory the model reads.
