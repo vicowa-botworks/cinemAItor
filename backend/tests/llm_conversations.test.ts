@@ -357,6 +357,18 @@ describe("llm conversations (routes)", () => {
     });
   });
 
+  it("rejects a conversation_id longer than 128 chars", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint();
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "hello" }],
+        conversation_id: "x".repeat(129),
+      }, adminToken);
+      assertEquals(res.status, 400);
+    });
+  });
+
   it("logs proposal approve and reject outcomes as events", async () => {
     await withServer(async (base) => {
       baseUrl = base;

@@ -1035,6 +1035,10 @@ export class ModelManager extends LitElement {
     }
   `;
 
+  // Live copilot conversation id (server-logged). A private field so the
+  // _copilotConversationId() getter never resolves the method itself.
+  #copilotConversationId = null;
+
   static properties = {
     models: { state: true },
     hardware: { state: true },
@@ -1121,7 +1125,6 @@ export class ModelManager extends LitElement {
     this.copilotBusy = false;
     this._copilotChatEl = null;
     this._copilotForceScroll = false;
-    this._copilotConversationId = null;
     this.copilotError = "";
     this.copilotBusyProposals = [];
     this.copilotBusySince = {};
@@ -1812,13 +1815,13 @@ export class ModelManager extends LitElement {
    * to it. Reset by _copilotClear so "Clear conversation" starts fresh.
    */
   _copilotConversationId() {
-    if (!this._copilotConversationId) {
-      this._copilotConversationId =
+    if (!this.#copilotConversationId) {
+      this.#copilotConversationId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `conv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     }
-    return this._copilotConversationId;
+    return this.#copilotConversationId;
   }
 
   async _sendCopilot() {
@@ -1984,7 +1987,7 @@ export class ModelManager extends LitElement {
     this.copilotBusyProposals = [];
     this.copilotBusySince = {};
     // A cleared conversation is a new one: the next turn mints a fresh id.
-    this._copilotConversationId = null;
+    this.#copilotConversationId = null;
   }
 
   // --- Copilot conversation history (server-logged) ---
