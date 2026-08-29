@@ -271,6 +271,11 @@ function pruneProposals(now = Date.now()): void {
   }
 }
 
+/** Test-only: drop all in-memory proposals (the map outlives individual tests). */
+export function resetProposals(): void {
+  proposals.clear();
+}
+
 export function createProposal(
   tool: AgentToolName,
   args: Record<string, unknown>,
@@ -671,12 +676,29 @@ export function validateAgentHistory(raw: unknown): LlmMessage[] {
   });
 }
 
-/** Live context so the copilot knows what is already registered. */
-export async function copilotSystemPrompt(): Promise<string> {
+/**
+ * Live context so the copilot knows what is already registered and which
+ * proposals are still awaiting approval (live from the proposal store), so
+ * it can propose corrected replacements for broken pending steps instead of
+ * re-proposing them or staying silent.
+ */
+export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Promise<string> {
   const models = listModels();
   const taskTypes = [...new Set(models.flatMap((m) => m.task_types))].sort();
   const assistantSkills = listSkills(true);
   const hardware = await detectHardware();
+  const pending = listProposals(userId, isAdmin).filter((p) => p.status === "pending");
+  const pendingSection = pending.length === 0
+    ? "No proposals are currently pending."
+    : "Pending proposals awaiting the user's decision (created earlier, not yet executed):\n" +
+      pending
+        .map((p, i) => {
+          const args = JSON.stringify(p.args);
+          const summary = args.length > 200 ? `${args.slice(0, 200)}…` : args;
+          const flight = p.in_flight ? " (currently executing)" : "";
+          return `${i + 1}. ${p.tool} — ${summary}${flight}`;
+        })
+        .join("\n");
   return [
     "You are the model copilot of cinemaItor, a local-first AI movie studio.",
     "You help the user choose, register, and install local generation models, and connect runtimes such as ComfyUI.",
@@ -693,7 +715,8 @@ export async function copilotSystemPrompt(): Promise<string> {
     "(3) install_model_deps to build a .venv with the packages the script needs — its result carries the venv python path; " +
     "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders and a BARE '{input:0}' token (as its own args entry, after its flag) for the reference image — the app drops it when a job has no references, so dual t2i/i2i models work from one settings row — plus a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
     "Never leave a local_cli model whose command or referenced script is missing — if you are unsure what the runtime needs, propose the setup steps instead of guessing.",
-    "The user approves each proposal AFTER your turn ends — the outcome reaches you as a new message. When it does, continue the plan and propose the next steps; never assume an approval already happened within the current turn, and never re-propose a step that is still pending.",
+    "The user approves each proposal AFTER your turn ends — the outcome reaches you as a new message. When it does, continue the plan and propose the next steps; never assume an approval already happened within the current turn. Do not re-propose a pending step with identical arguments — it already awaits the user's decision. But if a pending step is wrong (the user reports an error, or it failed or was rejected), propose the CORRECTED version as a new proposal: a replacement for a broken pending step is expected, not a duplicate. When the user explicitly asks you to create an approval request, call the mutating tool — the pending list below tells you what is already open.",
+    pendingSection,
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
   ].join("\n");
 }
@@ -740,7 +763,7 @@ export interface AgentRunOptions {
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   const history = validateAgentHistory(opts.history);
   const messages: LlmMessage[] = [
-    { role: "system", content: await copilotSystemPrompt() },
+    { role: "system", content: await copilotSystemPrompt(opts.userId, opts.isAdmin) },
     ...history,
   ];
   const tools = agentToolDefs(opts.isAdmin);

@@ -52,7 +52,7 @@ describe("followUpMessage", () => {
     );
   });
 
-  it("lists still-pending steps and forbids re-proposing them", () => {
+  it("lists still-pending steps and forbids identical re-proposals", () => {
     const msg = followUpMessage(
       "write_model_file",
       "approved",
@@ -62,7 +62,7 @@ describe("followUpMessage", () => {
     assertEquals(
       msg,
       "The user just approved your `write_model_file` proposal and it completed (wrote runner.py)." +
-        " Still pending from earlier: `install_model_deps` — do not re-propose those steps." +
+        " Still pending from earlier: `install_model_deps` — do not re-propose them with the same arguments; propose a corrected replacement if one of them is wrong or failed." +
         " Continue with the remaining steps of the plan if there are any — propose the next mutating action(s) for approval. If the plan is complete, briefly confirm the final state.",
     );
   });
@@ -72,8 +72,23 @@ describe("followUpMessage", () => {
     assertEquals(
       msg,
       "The user just rejected your `install_model_deps` proposal." +
-        " Still pending from earlier: `update_model` — do not re-propose those steps." +
+        " Still pending from earlier: `update_model` — do not re-propose them with the same arguments; propose a corrected replacement if one of them is wrong or failed." +
         " Adjust the plan accordingly: propose a replacement if the goal still makes sense, or confirm the final state if the plan is complete.",
+    );
+  });
+
+  it("describes a failed approval with diagnose-and-replace guidance", () => {
+    const msg = followUpMessage(
+      "install_model_deps",
+      "failed",
+      "pip install timed out",
+      ["write_model_file", "install_model_deps"],
+    );
+    assertEquals(
+      msg,
+      "The user just approved your `install_model_deps` proposal, but execution failed: pip install timed out — the proposal is still pending on the server." +
+        " Still pending from earlier: `write_model_file`, `install_model_deps` — do not re-propose them with the same arguments; propose a corrected replacement if one of them is wrong or failed." +
+        " Diagnose the failure: if the step's arguments are wrong, propose the CORRECTED version as a new proposal (and tell the user the old pending one can be rejected), or explain the fix if no new proposal is needed.",
     );
   });
 
