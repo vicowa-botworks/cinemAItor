@@ -9,6 +9,12 @@ export interface CandidateFile {
   content: Uint8Array;
   extension: string;
   mime_type: string;
+  /**
+   * The seed actually used for this candidate (per-candidate derivation,
+   * see candidateSeed). Omitted when the runtime used the base seed for
+   * every candidate (e.g. a single ComfyUI run).
+   */
+  seed?: string;
 }
 
 export interface AdapterHooks {
@@ -65,6 +71,22 @@ export class CancelledError extends Error {
 export function randomSeed(): string {
   const bytes = crypto.getRandomValues(new Uint32Array(1));
   return String(bytes[0]);
+}
+
+/**
+ * Per-candidate seed for multi-candidate runs. Candidate 0 keeps the job's
+ * exact seed (a requested seed stays reproducible); later candidates derive
+ * from it so deterministic runtimes (e.g. a CPU diffusers runner) produce
+ * distinct candidates instead of byte-identical copies. Numeric seeds
+ * offset numerically; non-numeric seeds suffix the index.
+ */
+export function candidateSeed(seedUsed: string, index: number): string {
+  if (index <= 0) return seedUsed;
+  const asNumber = Number(seedUsed);
+  if (seedUsed.trim() !== "" && Number.isFinite(asNumber)) {
+    return String(asNumber + index);
+  }
+  return `${seedUsed}:${index}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +260,9 @@ export class MockAdapter implements ModelAdapter {
 //   env (string map, optional)   extra env vars (inherited from the server)
 //   output_extension (string)    default derived from the job type
 // Placeholders: {prompt} {seed} {candidate} {count} {output} {input:<i>}
+// {seed} is the PER-CANDIDATE derived seed (candidateSeed: candidate 0 gets
+// the job's exact seed, candidate i gets the derived one) so deterministic
+// runtimes produce distinct candidates.
 // A bare {input:<i>} token is an OPTIONAL reference: when the job carries
 // no such input the token — and a lone flag token directly before it — is
 // dropped, so dual t2i/i2i models work from a single settings row.
@@ -422,11 +447,12 @@ export class LocalCliAdapter implements ModelAdapter {
     const candidates: CandidateFile[] = [];
     for (let i = 0; i < count; i++) {
       if (hooks.isCancelled()) throw new CancelledError();
+      const seedForCandidate = candidateSeed(seedUsed, i);
       const outPath = `${input.workDir}/.localcli-${crypto.randomUUID()}.${ext}`;
       try {
         const args = renderCliArgs(rawArgs, {
           prompt: input.promptText ?? "",
-          seed: seedUsed,
+          seed: seedForCandidate,
           candidate: i,
           count,
           inputPaths: input.inputs.map((ref) => ref.file_path),
@@ -446,6 +472,7 @@ export class LocalCliAdapter implements ModelAdapter {
           content,
           extension: ext,
           mime_type: mediaTypeFor(outPath).mime ?? "application/octet-stream",
+          seed: seedForCandidate,
         });
         hooks.onProgress(5 + ((i + 1) / count) * 90, `Candidate ${i + 1}/${count} done`);
       } finally {
