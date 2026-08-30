@@ -1,7 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { api } from "../api.js";
-import { collectPendingTools, followUpMessage } from "../copilot-followup.js";
+import { agentHistory, collectPendingTools, followUpMessage } from "../copilot-followup.js";
 import "./confirm-dialog.js";
 
 const TASK_TYPES = [
@@ -1826,9 +1826,7 @@ export class ModelManager extends LitElement {
   }
 
   _copilotHistory() {
-    return this.copilot
-      .filter((t) => t.content)
-      .map((t) => ({ role: t.role, content: t.content }));
+    return agentHistory(this.copilot);
   }
 
   /**
