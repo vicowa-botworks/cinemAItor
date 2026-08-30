@@ -26,6 +26,28 @@ export function collectPendingTools(turns) {
 }
 
 /**
+ * Map in-memory chat turns to the agent request's `history` array.
+ *
+ * Empty turns (the in-flight assistant placeholder) are dropped. The
+ * `synthetic` flag survives the mapping: the backend logs it on the stored
+ * conversation row so auto-continue follow-ups stay distinguishable from
+ * real user input in the conversation log (the LLM itself never sees the
+ * flag — `validateAgentHistory` reads only role/content).
+ *
+ * @param {Array<{role: string, content: string, synthetic?: boolean}>} turns
+ * @returns {Array<{role: string, content: string, synthetic?: boolean}>}
+ */
+export function agentHistory(turns) {
+  return (turns ?? [])
+    .filter((t) => t && t.content)
+    .map((t) =>
+      t.synthetic
+        ? { role: t.role, content: t.content, synthetic: true }
+        : { role: t.role, content: t.content }
+    );
+}
+
+/**
  * Build the synthetic user message that follows a resolved proposal so the
  * copilot can continue (or close out) the plan.
  *

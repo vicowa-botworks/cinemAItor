@@ -1,6 +1,6 @@
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assertEquals, assertThrows } from "jsr:@std/assert";
-import { collectPendingTools, followUpMessage } from "../src/copilot-followup.js";
+import { agentHistory, collectPendingTools, followUpMessage } from "../src/copilot-followup.js";
 
 describe("collectPendingTools", () => {
   it("collects pending tools in first-appearance order", () => {
@@ -38,6 +38,47 @@ describe("collectPendingTools", () => {
     assertEquals(collectPendingTools([]), []);
     assertEquals(collectPendingTools(undefined), []);
     assertEquals(collectPendingTools([{ role: "user", content: "hi" }, null, {}]), []);
+  });
+});
+
+describe("agentHistory", () => {
+  it("carries the synthetic flag for auto-continue turns", () => {
+    const turns = [
+      { role: "user", content: "first question" },
+      { role: "assistant", content: "a reply" },
+      { role: "user", content: "The user just approved your `x` proposal...", synthetic: true },
+    ];
+    assertEquals(agentHistory(turns), [
+      { role: "user", content: "first question" },
+      { role: "assistant", content: "a reply" },
+      { role: "user", content: "The user just approved your `x` proposal...", synthetic: true },
+    ]);
+  });
+
+  it("omits the flag on non-synthetic turns", () => {
+    assertEquals(
+      agentHistory([{ role: "user", content: "hi" }, { role: "assistant", content: "there" }]),
+      [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "there" },
+      ],
+    );
+  });
+
+  it("drops empty turns (the in-flight assistant placeholder)", () => {
+    assertEquals(
+      agentHistory([
+        { role: "assistant", content: "", steps: [], proposals: [] },
+        { role: "user", content: "hi" },
+      ]),
+      [{ role: "user", content: "hi" }],
+    );
+  });
+
+  it("handles malformed and empty input", () => {
+    assertEquals(agentHistory([]), []);
+    assertEquals(agentHistory(undefined), []);
+    assertEquals(agentHistory([null, {}, { role: "user" }]), []);
   });
 });
 
