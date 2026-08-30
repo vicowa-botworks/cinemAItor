@@ -1,4 +1,5 @@
 import { css, html, LitElement } from "lit";
+import { ref } from "lit/directives/ref.js";
 import { api } from "../api.js";
 import { collectPendingTools, followUpMessage } from "../copilot-followup.js";
 import "./confirm-dialog.js";
@@ -1124,7 +1125,7 @@ export class ModelManager extends LitElement {
     this.copilotInput = "";
     this.copilotBusy = false;
     this._copilotChatEl = null;
-    this._copilotForceScroll = false;
+    this._copilotFollow = false;
     this.copilotError = "";
     this.copilotBusyProposals = [];
     this.copilotBusySince = {};
@@ -1155,6 +1156,14 @@ export class ModelManager extends LitElement {
     this._queryTimer = null;
   }
 
+  _setCopilotChatRef = (el) => {
+    this._copilotChatEl = el;
+    if (el && !el._copilotScrollWired) {
+      el._copilotScrollWired = true;
+      el.addEventListener("scroll", this._onCopilotChatScroll);
+    }
+  };
+
   disconnectedCallback() {
     super.disconnectedCallback?.();
     if (this._queryTimer) clearTimeout(this._queryTimer);
@@ -1172,19 +1181,30 @@ export class ModelManager extends LitElement {
 
   /**
    * Keep the copilot chat on the latest output: after any copilot update,
-   * pin the scroll to the bottom if the user is already near it (or if a
-   * new user turn was just sent); never yank a user back down while they
-   * are scrolled up reading older turns.
+   * pin the scroll to the bottom if the user is following the current turn
+   * (armed in _runCopilotTurn and sticky until they scroll up) or is
+   * already near the bottom.
    */
   _copilotAutoScroll() {
     const el = this._copilotChatEl;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (this._copilotForceScroll || nearBottom) {
+    if (this._copilotFollow || nearBottom) {
       el.scrollTop = el.scrollHeight;
     }
-    this._copilotForceScroll = false;
   }
+
+  /**
+   * The user scrolled the chat up away from the bottom on their own — stop
+   * following so new output doesn't yank them back down.
+   */
+  _onCopilotChatScroll = () => {
+    const el = this._copilotChatEl;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight > 60) {
+      this._copilotFollow = false;
+    }
+  };
 
   async connectedCallback() {
     super.connectedCallback?.();
@@ -1669,7 +1689,9 @@ export class ModelManager extends LitElement {
             : null}
           ${this.copilot.length > 0
             ? html`
-              <div class="copilot-chat" ref=${(el) => (this._copilotChatEl = el)}>
+              <div
+                class="copilot-chat"
+                ref=${ref(this._setCopilotChatRef)}>
                 ${this.copilot.map((turn) => this._renderCopilotTurn(turn))}
                 ${this.copilotBusy
                   ? html`
@@ -1834,8 +1856,10 @@ export class ModelManager extends LitElement {
   async _runCopilotTurn(text, { synthetic = false } = {}) {
     if (!text || this.copilotBusy) return;
     // A new turn is always user-triggered (send, or an approve/reject click
-    // on a proposal) — jump to it even if the user was scrolled up.
-    this._copilotForceScroll = true;
+    // on a proposal) — follow its output to the bottom even if the user was
+    // scrolled up. Follow is sticky: it must survive every render of the
+    // in-flight reply, not just the first one.
+    this._copilotFollow = true;
     this.copilotError = "";
     this.copilot = [
       ...this.copilot,
@@ -1988,6 +2012,7 @@ export class ModelManager extends LitElement {
     this.copilotBusySince = {};
     // A cleared conversation is a new one: the next turn mints a fresh id.
     this.#copilotConversationId = null;
+    this._copilotFollow = false;
   }
 
   // --- Copilot conversation history (server-logged) ---
