@@ -1,4 +1,5 @@
 import { css, html, LitElement } from "lit";
+import { ref } from "lit/directives/ref.js";
 import { api } from "../api.js";
 import { collectPendingTools, followUpMessage } from "../copilot-followup.js";
 import "./confirm-dialog.js";
@@ -1155,6 +1156,14 @@ export class ModelManager extends LitElement {
     this._queryTimer = null;
   }
 
+  _setCopilotChatRef = (el) => {
+    this._copilotChatEl = el;
+    if (el && !el._copilotScrollWired) {
+      el._copilotScrollWired = true;
+      el.addEventListener("scroll", this._onCopilotChatScroll);
+    }
+  };
+
   disconnectedCallback() {
     super.disconnectedCallback?.();
     if (this._queryTimer) clearTimeout(this._queryTimer);
@@ -1682,10 +1691,7 @@ export class ModelManager extends LitElement {
             ? html`
               <div
                 class="copilot-chat"
-                ref=${(el) => {
-                  this._copilotChatEl = el;
-                  if (el) el.addEventListener("scroll", this._onCopilotChatScroll);
-                }}>
+                ref=${ref(this._setCopilotChatRef)}>
                 ${this.copilot.map((turn) => this._renderCopilotTurn(turn))}
                 ${this.copilotBusy
                   ? html`
