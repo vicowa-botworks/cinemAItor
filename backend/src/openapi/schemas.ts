@@ -1939,6 +1939,11 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
       known_limitations: { type: ["array", "null"], items: { type: "string" } },
       enabled: { type: "boolean" },
+      agent_auto_approve: {
+        type: "boolean",
+        description:
+          "When true, the Model Copilot's model-scoped mutating tools for this model are auto-approved and executed in the same agent turn (see docs/llm.md).",
+      },
       installed_at: { type: ["string", "null"] },
       last_used_at: { type: ["string", "null"] },
       health_status: { type: ["string", "null"] },
@@ -1997,6 +2002,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       dependencies: { type: "array", items: { type: "string" } },
       default_settings: { type: "object", additionalProperties: true },
       enabled: { type: "boolean" },
+      agent_auto_approve: { type: "boolean" },
     },
   },
 

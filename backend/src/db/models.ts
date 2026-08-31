@@ -57,6 +57,13 @@ export interface Model {
   default_settings: Record<string, unknown>;
   known_limitations: string[] | null;
   enabled: boolean;
+  /**
+   * When true, the Model Copilot's model-scoped mutating tools
+   * (update_model, write_model_file, install_model_deps, run_smoke_test,
+   * run_benchmark) are auto-approved and executed in the same agent turn
+   * for this model. Admin-set; non-scoped tools are never auto-approved.
+   */
+  agent_auto_approve: boolean;
   installed_at: string | null;
   last_used_at: string | null;
   health_status: string | null;
@@ -109,6 +116,7 @@ export interface UpdateModelInput {
   default_settings?: Record<string, unknown>;
   known_limitations?: string[];
   enabled?: boolean;
+  agent_auto_approve?: boolean;
 }
 
 function nowIso(): string {
@@ -178,6 +186,7 @@ export function rowToModel(row: Record<string, unknown>): Model {
       [],
     ),
     enabled: row.enabled === 1,
+    agent_auto_approve: row.agent_auto_approve === 1,
     installed_at: asNullableString(row.installed_at),
     last_used_at: asNullableString(row.last_used_at),
     health_status: asNullableString(row.health_status),
@@ -448,6 +457,9 @@ export function updateModel(
       patch.known_limitations !== undefined ? patch.known_limitations : existing.known_limitations,
     ),
     enabled: patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : (existing.enabled ? 1 : 0),
+    agent_auto_approve: patch.agent_auto_approve !== undefined
+      ? (patch.agent_auto_approve ? 1 : 0)
+      : (existing.agent_auto_approve ? 1 : 0),
     updated_at: nowIso(),
   };
 
@@ -464,8 +476,14 @@ export function updateModel(
     id,
     task_types: patch.task_types,
     enabled: patch.enabled,
+    agent_auto_approve: patch.agent_auto_approve,
   };
-  logAudit(userId, patch.enabled === false ? "model.disable" : "model.update", id, set);
+  const action = patch.agent_auto_approve !== undefined
+    ? "model.agent_auto_approve"
+    : patch.enabled === false
+    ? "model.disable"
+    : "model.update";
+  logAudit(userId, action, id, set);
   return getModel(id);
 }
 

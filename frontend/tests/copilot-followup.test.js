@@ -1,6 +1,11 @@
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assertEquals, assertThrows } from "jsr:@std/assert";
-import { agentHistory, collectPendingTools, followUpMessage } from "../src/copilot-followup.js";
+import {
+  agentHistory,
+  collectPendingTools,
+  followUpMessage,
+  needsProposalNudge,
+} from "../src/copilot-followup.js";
 
 describe("collectPendingTools", () => {
   it("collects pending tools in first-appearance order", () => {
@@ -136,5 +141,27 @@ describe("followUpMessage", () => {
   it("validates its arguments", () => {
     assertThrows(() => followUpMessage("", "approved"));
     assertThrows(() => followUpMessage("x", "maybe"));
+  });
+});
+
+describe("needsProposalNudge", () => {
+  it("detects approval asks in the reply text", () => {
+    assertEquals(needsProposalNudge("Please approve this runner.py update."), true);
+    assertEquals(needsProposalNudge("Awaiting your approval for the venv install."), true);
+    assertEquals(needsProposalNudge("The fix is ready \u2014 waiting for approval."), true);
+    assertEquals(needsProposalNudge("PLEASE APPROVE THIS"), true);
+  });
+
+  it("does not nudge ordinary replies", () => {
+    assertEquals(needsProposalNudge("The model is registered and installed."), false);
+    assertEquals(needsProposalNudge("I ran the smoke test; it passed."), false);
+  });
+
+  it("ignores empty and non-string content", () => {
+    assertEquals(needsProposalNudge(""), false);
+    assertEquals(needsProposalNudge("   "), false);
+    assertEquals(needsProposalNudge(null), false);
+    assertEquals(needsProposalNudge(undefined), false);
+    assertEquals(needsProposalNudge(42), false);
   });
 });

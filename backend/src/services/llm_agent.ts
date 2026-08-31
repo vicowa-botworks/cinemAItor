@@ -1,8 +1,12 @@
 import { loadConfig } from "../config.ts";
+import { BENCHMARK_JOB_TYPE, listJobs } from "../db/jobs.ts";
+import { logProposalEvent, touchConversation } from "../db/llm_conversations.ts";
 import {
   deleteModel,
   getModel,
+  listBenchmarkResults,
   listModels,
+  type Model,
   MODEL_TASK_TYPES,
   registerModel,
   type RegisterModelInput,
@@ -18,11 +22,21 @@ import {
   searchHuggingFaceModels,
 } from "./huggingface.ts";
 import { describeHardware, detectHardware } from "./hardware.ts";
+import { requestBenchmark } from "./model_benchmark.ts";
 import { installModelById, removeModelFiles } from "./model_files.ts";
+import {
+  runSmokeTest,
+  SMOKE_TEST_DEFAULT_TIMEOUT_SECONDS,
+  SMOKE_TEST_MAX_TIMEOUT_SECONDS,
+} from "./model_smoke.ts";
 import { listModelFiles, setupModelVenv, writeModelFile } from "./model_runtime.ts";
 import { chatLlm, type LlmMessage, type LlmToolCall, type LlmToolDef } from "./llm_client.ts";
 
-export const AGENT_MAX_TOOL_ITERATIONS = 8;
+/** Max mutating/read tool round-trips per agent turn. Each iteration is one
+ * LLM call, so this bounds both the cost and the wall time of a turn. The
+ * budget is generous enough for an auto-approved fix loop
+ * (change -> smoke test -> fix -> smoke test -> benchmark). */
+export const AGENT_MAX_TOOL_ITERATIONS = 16;
 export const AGENT_MAX_HISTORY = 32;
 const PROPOSAL_TTL_MS = 60 * 60 * 1000;
 const TOOL_RESULT_MAX_CHARS = 8000;
@@ -42,7 +56,10 @@ export type AgentToolName =
   | "write_model_file"
   | "install_model_deps"
   | "install_model"
-  | "remove_model";
+  | "remove_model"
+  | "run_smoke_test"
+  | "run_benchmark"
+  | "benchmark_results";
 
 const TASK_TYPES_HELP = `Task types the model covers. Allowed: ${MODEL_TASK_TYPES.join(", ")}`;
 
@@ -66,6 +83,7 @@ export const READ_ONLY_AGENT_TOOLS: readonly AgentToolName[] = [
   "huggingface_search",
   "huggingface_model_info",
   "comfyui_status",
+  "benchmark_results",
 ] as const;
 
 const MUTATING_AGENT_TOOLS: readonly AgentToolName[] = [
@@ -76,6 +94,8 @@ const MUTATING_AGENT_TOOLS: readonly AgentToolName[] = [
   "install_model_deps",
   "install_model",
   "remove_model",
+  "run_smoke_test",
+  "run_benchmark",
 ] as const;
 
 function toolDef(
@@ -226,6 +246,48 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
     required: ["model_id"],
     properties: { model_id: stringProperty("Registered model id") },
   }),
+  toolDef(
+    "run_smoke_test",
+    "Run the model's local_cli command ONCE with a minimal prompt and a short timeout (default 60s, max 180s). " +
+      "Returns the exit code and the exact stderr tail on failure — the error to fix. Use it to validate every " +
+      "change in a fix loop instead of asking the user to run the model and paste the error back. A 'started_ok' " +
+      "status means the process ran the full timeout without failing (startup healthy — not a quality or speed " +
+      "measurement; use run_benchmark for that).",
+    {
+      type: "object",
+      required: ["model_id"],
+      properties: {
+        model_id: stringProperty("Registered model id"),
+        timeout_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: SMOKE_TEST_MAX_TIMEOUT_SECONDS,
+          description: `Bounded run in seconds (default ${SMOKE_TEST_DEFAULT_TIMEOUT_SECONDS})`,
+        },
+      },
+    },
+  ),
+  toolDef(
+    "run_benchmark",
+    "Enqueue a deterministic benchmark job (fixed prompts, 2 candidates per benchmarkable task type). Runs " +
+      "asynchronously in the job queue — a full run can take hours on CPU. Returns the job id immediately; check " +
+      "status and measurement rows with benchmark_results. Only benchmark once run_smoke_test passes.",
+    {
+      type: "object",
+      required: ["model_id"],
+      properties: { model_id: stringProperty("Registered model id") },
+    },
+  ),
+  toolDef(
+    "benchmark_results",
+    "Read a model's benchmark measurement rows (duration_ms, candidate_count, output_bytes per task) and the " +
+      "status of its most recent benchmark jobs. Read-only.",
+    {
+      type: "object",
+      required: ["model_id"],
+      properties: { model_id: stringProperty("Registered model id") },
+    },
+  ),
 ];
 
 /** Tools a caller may use: mutating tools are admin-only (schema level). */
@@ -363,6 +425,30 @@ export function listPendingProposals(): AgentProposal[] {
 export function listProposals(userId: number, isAdmin: boolean): AgentProposal[] {
   pruneProposals();
   return [...proposals.values()].filter((p) => isAdmin || p.user_id === userId);
+}
+
+/** Model-scoped mutating tools that may auto-approve under a model's
+ * agent_auto_approve flag. Non-scoped tools (register, install, remove,
+ * settings) always need a human approval. */
+const AUTO_APPROVABLE_TOOLS: ReadonlySet<string> = new Set([
+  "update_model",
+  "write_model_file",
+  "install_model_deps",
+  "run_smoke_test",
+  "run_benchmark",
+]);
+
+/** The target model when the call is model-scoped, that model has
+ * agent_auto_approve, and the tool is auto-approvable — else undefined. */
+function autoApproveModelFor(
+  tool: string,
+  args: Record<string, unknown>,
+): Model | undefined {
+  if (!AUTO_APPROVABLE_TOOLS.has(tool)) return undefined;
+  const modelId = args.model_id;
+  if (typeof modelId !== "string" || modelId === "") return undefined;
+  const model = getModel(modelId);
+  return model && model.agent_auto_approve ? model : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +714,46 @@ export async function runTool(
       await removeModelFiles(storageLayout(loadConfig().appDataDir), id);
       return { deleted: true, id };
     }
+    case "run_smoke_test": {
+      const id = argStringRequired(args, "model_id");
+      const timeout = argInt(args, "timeout_seconds");
+      return await runSmokeTest(id, timeout);
+    }
+    case "run_benchmark": {
+      const id = argStringRequired(args, "model_id");
+      const open = listJobs({ model_id: id, job_type: BENCHMARK_JOB_TYPE }).filter(
+        (j) => j.status === "queued" || j.status === "running",
+      );
+      if (open.length > 0) {
+        throw badRequest(
+          `A benchmark for this model is already ${open[0].status} (job ${open[0].id}) — ` +
+            "check benchmark_results instead of enqueueing another",
+          "model_id",
+        );
+      }
+      const job = requestBenchmark(id, ctx.userId);
+      return {
+        job_id: job.job_id,
+        tasks: job.tasks,
+        note: "Benchmark enqueued — it runs asynchronously in the job queue and can take hours " +
+          "on CPU. Check status and measurement rows with benchmark_results.",
+      };
+    }
+    case "benchmark_results": {
+      const id = argStringRequired(args, "model_id");
+      if (!getModel(id)) throw notFound(`Unknown model id '${id}'`);
+      const recent = listJobs({ model_id: id, job_type: BENCHMARK_JOB_TYPE, limit: 3 }).map(
+        (j) => ({
+          job_id: j.id,
+          status: j.status,
+          progress: j.progress,
+          created_at: j.created_at,
+          finished_at: j.finished_at,
+          error: j.error_text,
+        }),
+      );
+      return { results: listBenchmarkResults(id), recent_jobs: recent };
+    }
     default:
       throw badRequest(`Unknown tool '${name}'`, "tool");
   }
@@ -703,6 +829,15 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
           return `${i + 1}. ${p.tool} — ${summary}${flight}`;
         })
         .join("\n");
+  const autoModels = isAdmin ? models.filter((m) => m.agent_auto_approve) : [];
+  const autoApproveSection = autoModels.length === 0 ? "" : "Agent auto-approval is ON for: " +
+    autoModels.map((m) => `${m.id} (${m.name})`).join("; ") +
+    ". Mutating tools scoped to one of these models (update_model, write_model_file, " +
+    "install_model_deps, run_smoke_test, run_benchmark) auto-execute the moment you call " +
+    "them — the result comes back in the SAME turn, so drive a broken or freshly-set-up " +
+    "model to a working state end-to-end: make the change, run_smoke_test it, read the " +
+    "error, fix the ROOT CAUSE, and repeat. Non-scoped tools (register_model, install_model, " +
+    "remove_model) still need manual approval.";
   return [
     "You are the model copilot of cinemaItor, a local-first AI movie studio.",
     "You help the user choose, register, and install local generation models, and connect runtimes such as ComfyUI.",
@@ -712,17 +847,20 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
     `; ${assistantSkills.length} skill(s) carry prompt-creation guidance.`,
     `This server runs on: ${describeHardware(hardware)}.`,
     "Use that hardware as the ground truth when judging whether a model fits: compare the model's weight/VRAM needs against the free VRAM (or RAM for CPU-only), and only warn about it not fitting when the numbers actually say so — prefer quantized or smaller variants when it genuinely would not fit.",
-    "Use the tools to look things up before answering. When the user asks you to register or install a model, call the matching tool — the action is only executed after the user explicitly approves your proposal.",
+    "Use the tools to look things up before answering. When the user asks you to register or install a model, call the matching tool — the action is only executed after the user explicitly approves your proposal (or automatically, when the model's auto-approval is on — see below).",
     "Setting up a local_cli model: it only works when its default_settings 'command' is an existing executable and every file its 'args' reference exists. When the user wants to set up (or repair) a local_cli model, propose these steps in order: " +
     "(1) huggingface_model_info and/or model_files to see what the repo/weights actually are; " +
     "(2) write_model_file a small runner script (e.g. 'runner.py') that loads the weights, takes --prompt/--seed and an OPTIONAL --image (absent = text-to-image, present = image-to-image) and writes the result to the --output path — keep it minimal and standard (a diffusers pipeline script for diffusers-format repos). If the model is HuggingFace-origin, any hub downloads the script needs at run time (VAE / text encoder / tokenizer) are authenticated for you: the app injects the configured HF token into the runner environment as HF_TOKEN, so rely on that (huggingface_hub picks it up automatically) and NEVER hardcode a token into the script; " +
     "(3) install_model_deps to build a .venv with the packages the script needs — its result carries the venv python path; " +
     "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders and a BARE '{input:0}' token (as its own args entry, after its flag) for the reference image — the app drops it when a job has no references, so dual t2i/i2i models work from one settings row — plus a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
     "Never leave a local_cli model whose command or referenced script is missing — if you are unsure what the runtime needs, propose the setup steps instead of guessing.",
+    "Fixing a model: validate EVERY change (settings, runner script, venv) with run_smoke_test instead of asking the user to run the model and paste the error back — when auto-approval is on the test runs in the same turn, so chain change -> smoke test -> fix -> smoke test; otherwise propose the smoke test and continue once it is approved. On a smoke-test failure, read its error_tail, fix the ROOT CAUSE (wrong path, missing module, bad flag — never a workaround), and smoke-test again. Run a full run_benchmark only once the smoke test passes — benchmarks are slow (hours on CPU) and async: report the job id and check benchmark_results when asked.",
+    "If you ask the user to approve something, you must have called the matching mutating tool in this same turn. Never end a turn asking for approval of a proposal you did not create; if you cannot create the proposal because information is missing, say exactly what is missing instead of asking for approval.",
     "The user approves each proposal AFTER your turn ends — the outcome reaches you as a new message. When it does, continue the plan and propose the next steps; never assume an approval already happened within the current turn. Do not re-propose a pending step with identical arguments — it already awaits the user's decision. But if a pending step is wrong (the user reports an error, or it failed or was rejected), propose the CORRECTED version as a new proposal: a replacement for a broken pending step is expected, not a duplicate. When the user explicitly asks you to create an approval request, call the mutating tool — the pending list below tells you what is already open.",
     pendingSection,
+    autoApproveSection,
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
-  ].join("\n");
+  ].filter((part) => part !== "").join("\n");
 }
 
 function toolMessage(call: LlmToolCall, content: string): LlmMessage {
@@ -739,6 +877,24 @@ function summarizeStep(name: string, result: unknown): string {
   if (typeof result === "object" && result !== null) {
     const r = result as Record<string, unknown>;
     if (r.deleted) return "model removed";
+    if (
+      typeof r.status === "string" &&
+      (r.status === "ok" || r.status === "failed" || r.status === "started_ok") &&
+      typeof r.duration_ms === "number"
+    ) {
+      const secs = (r.duration_ms / 1000).toFixed(1);
+      if (r.status === "failed") {
+        const tail = String(r.error_tail ?? "").slice(0, 200);
+        return `smoke test failed (exit ${String(r.exit_code)} in ${secs}s) — ${tail}`;
+      }
+      if (r.status === "started_ok") {
+        return `smoke test: process ran the full ${secs}s timeout without failing (startup healthy)`;
+      }
+      return `smoke test passed in ${secs}s`;
+    }
+    if (r.job_id && Array.isArray(r.tasks)) {
+      return `benchmark enqueued (job ${String(r.job_id)}, tasks: ${r.tasks.join(", ")})`;
+    }
     if (r.reachable) {
       const q = r.queue as { running: number; pending: number } | undefined;
       return q
@@ -763,12 +919,31 @@ export interface AgentRunOptions {
 }
 
 /**
- * Run one copilot turn: a bounded tool-calling loop (max 8 tool iterations).
- * Read-only tools auto-execute; mutating tools create proposals that await
- * explicit user approval (approveProposal/rejectProposal).
+ * Run one copilot turn: a bounded tool-calling loop
+ * (max AGENT_MAX_TOOL_ITERATIONS tool round-trips). Read-only tools
+ * auto-execute; mutating tools create proposals that await explicit user
+ * approval (approveProposal/rejectProposal) — except model-scoped calls under
+ * a model's agent_auto_approve flag, which execute in-loop and log an
+ * "auto_approved" outcome.
  */
+/** First user message, whitespace-normalized, 80 chars — the conversation
+ * title convention (mirrors the route's conversationTitle). */
+function historyTitle(history: LlmMessage[]): string {
+  for (const m of history) {
+    if (m.role === "user" && m.content) {
+      return m.content.replace(/\s+/g, " ").trim().slice(0, 80);
+    }
+  }
+  return "";
+}
+
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   const history = validateAgentHistory(opts.history);
+  if (opts.conversationId) {
+    // Proposal events log mid-loop; the row must exist before the first write
+    // (logAgentTurn only creates it after the turn completes).
+    touchConversation(opts.conversationId, opts.userId, opts.isAdmin, historyTitle(history));
+  }
   const messages: LlmMessage[] = [
     { role: "system", content: await copilotSystemPrompt(opts.userId, opts.isAdmin) },
     ...history,
@@ -822,19 +997,69 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
           opts.conversationId,
         );
         created.push(proposal);
-        step.status = "proposal";
         step.proposal_id = proposal.id;
-        step.summary = "Proposal created — awaiting user approval";
-        messages.push(
-          toolMessage(
-            call,
-            JSON.stringify({
-              status: "pending_approval",
-              proposal_id: proposal.id,
-              tool: proposal.tool,
-            }),
-          ),
-        );
+        // Model-scoped proposals under a model's agent_auto_approve flag
+        // execute immediately through the same single-flight path as a manual
+        // approval, so the fix loop (change -> smoke test -> fix -> ...) runs
+        // inside this turn. On failure the proposal stays pending for a
+        // manual retry.
+        const autoModel = autoApproveModelFor(name, args);
+        if (autoModel) {
+          try {
+            const { result } = await approveProposal(
+              proposal.id,
+              opts.userId,
+              opts.isAdmin,
+            );
+            step.status = "ok";
+            step.summary = `auto-approved (${autoModel.id}) — ${summarizeStep(name, result)}`;
+            if (opts.conversationId) {
+              // Best-effort: a storage failure must not fail the turn.
+              try {
+                logProposalEvent(
+                  opts.conversationId,
+                  opts.userId,
+                  opts.isAdmin,
+                  proposal.id,
+                  "auto_approved",
+                );
+              } catch (err) {
+                console.warn("[llm_agent] failed to log auto-approval event:", err);
+              }
+            }
+            messages.push(
+              toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)),
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            step.status = "error";
+            step.summary = `auto-approval failed: ${message}`;
+            messages.push(
+              toolMessage(
+                call,
+                JSON.stringify({
+                  error: message,
+                  proposal_id: proposal.id,
+                  status: "auto_approval_failed",
+                  note: "The proposal is still pending; the user can approve it manually.",
+                }),
+              ),
+            );
+          }
+        } else {
+          step.status = "proposal";
+          step.summary = "Proposal created — awaiting user approval";
+          messages.push(
+            toolMessage(
+              call,
+              JSON.stringify({
+                status: "pending_approval",
+                proposal_id: proposal.id,
+                tool: proposal.tool,
+              }),
+            ),
+          );
+        }
       } else {
         try {
           const result = await runTool(name, args, { userId: opts.userId, isAdmin: opts.isAdmin });

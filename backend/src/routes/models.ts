@@ -301,6 +301,7 @@ export const modelRouter = new Router()
       default_settings: jsonObject(body, "default_settings"),
       known_limitations: stringArray(body, "known_limitations"),
       enabled: optionalBool(body, "enabled"),
+      agent_auto_approve: optionalBool(body, "agent_auto_approve"),
     };
     const updated = updateModel(userId, id, patch);
     if (!updated) throw notFound("Model not found");

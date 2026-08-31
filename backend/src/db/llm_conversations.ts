@@ -69,6 +69,34 @@ function requireConversation(
   return row;
 }
 
+/**
+ * Ensure the conversation row exists before the agent loop runs. The row is
+ * normally created by logAgentTurn AFTER the turn completes, but auto-approved
+ * proposals log their outcome mid-loop — without this the first turn's event
+ * rows would hit requireConversation's 404. An existing row is only access-
+ * checked; the title is filled from the first user message and kept by
+ * logAgentTurn (its empty-title CASE handles the pre-created row).
+ */
+export function touchConversation(
+  conversationId: string,
+  userId: number,
+  isAdmin: boolean,
+  title: string,
+): void {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM llm_conversations WHERE id = ?")
+    .get(conversationId) as ConversationRow | undefined;
+  if (row) {
+    if (!canAccess(row, userId, isAdmin)) throw notFound("Conversation not found");
+    return;
+  }
+  db.prepare(
+    `INSERT INTO llm_conversations (id, user_id, title, model, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, ?, ?)`,
+  ).run(conversationId, userId, title, nowIso(), nowIso());
+}
+
 function parseJsonList(raw: string | null): Array<Record<string, unknown>> | null {
   if (!raw) return null;
   try {
@@ -160,13 +188,15 @@ export function logAgentTurn(turn: AgentTurnLog): void {
   }
 }
 
-/** Append a proposal outcome (approved | rejected) as an event row. */
+/** Append a proposal outcome (approved | rejected | auto_approved) as an
+ * event row. "auto_approved" marks proposals executed immediately by the
+ * agent loop under a model's agent_auto_approve flag (see docs/llm.md). */
 export function logProposalEvent(
   conversationId: string,
   userId: number,
   isAdmin: boolean,
   proposalId: string,
-  outcome: "approved" | "rejected",
+  outcome: "approved" | "rejected" | "auto_approved",
 ): void {
   requireConversation(conversationId, userId, isAdmin);
   getDb()

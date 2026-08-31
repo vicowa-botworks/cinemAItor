@@ -1,7 +1,13 @@
 import { dirname, join } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
-import { closeDb } from "../src/db/database.ts";
+import { closeDb, getDb } from "../src/db/database.ts";
+import { BENCHMARK_JOB_TYPE, createJob } from "../src/db/jobs.ts";
+import {
+  registerModel as dbRegisterModel,
+  setModelInstalled,
+  updateModel as dbUpdateModel,
+} from "../src/db/models.ts";
 import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
@@ -482,11 +488,11 @@ describe("llm agent", () => {
     });
   });
 
-  it("truncates after 8 tool iterations", async () => {
+  it("truncates after 16 tool iterations", async () => {
     await withServer(async (base) => {
       baseUrl = base;
       await setLlmEndpoint(llm.url);
-      script = Array.from({ length: 9 }, (_, i) => ({
+      script = Array.from({ length: 17 }, (_, i) => ({
         toolCalls: [{ id: `call_${i}`, name: "list_models", args: {} }],
       }));
       const res = await post("/api/v1/llm/agent", {
@@ -499,11 +505,11 @@ describe("llm agent", () => {
         reply: string;
         steps: unknown[];
       };
-      assertEquals(body.iterations, 8);
+      assertEquals(body.iterations, 16);
       assertEquals(body.truncated, true);
-      assertMatch(body.reply, /stopped after 8 tool iterations/);
-      assertEquals(body.steps.length, 8);
-      assertEquals(llm.requests.length, 8);
+      assertMatch(body.reply, /stopped after 16 tool iterations/);
+      assertEquals(body.steps.length, 16);
+      assertEquals(llm.requests.length, 16);
     });
   });
 
@@ -655,6 +661,7 @@ describe("llm agent runtime tools", () => {
     script = [];
     llm = startScriptedLlm();
     freshMemoryDb();
+    resetProposals();
     await withServer(async (base) => {
       baseUrl = base;
       const health = await fetchWithRetry(`${baseUrl}/api/v1/health`);
@@ -943,6 +950,284 @@ describe("llm agent runtime tools", () => {
     });
   });
 
+  async function setAutoApprove(id: string, on: boolean): Promise<void> {
+    const res = await fetch(`${baseUrl}/api/v1/models/${id}`, {
+      method: "PATCH",
+      headers: headers(adminToken),
+      body: JSON.stringify({ agent_auto_approve: on }),
+    });
+    assertEquals(res.status, 200);
+  }
+
+  /** One agent turn with the given tool calls; returns the parsed response. */
+  async function agentTurn(
+    calls: Array<{ id: string; name: string; args: unknown }>,
+    content: string,
+  ): Promise<Record<string, unknown>> {
+    script = [
+      { toolCalls: calls },
+      { content: "done" },
+    ];
+    const res = await post("/api/v1/llm/agent", {
+      history: [{ role: "user", content }],
+    }, adminToken);
+    assertEquals(res.status, 200);
+    return (await res.json()) as Record<string, unknown>;
+  }
+
+  function stepsOf(body: Record<string, unknown>): Array<Record<string, unknown>> {
+    return body.steps as Array<Record<string, unknown>>;
+  }
+
+  it("auto-approval executes model-scoped tools in-loop", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Auto Model");
+      await setAutoApprove(id, true);
+      const body = await agentTurn(
+        [{
+          id: "call_upd",
+          name: "update_model",
+          args: { model_id: id, task_types: ["text_to_image", "text_to_video"] },
+        }],
+        "add a video task type",
+      );
+      const steps = stepsOf(body);
+      assertEquals(steps.length, 1);
+      assertEquals(steps[0].status, "ok");
+      assertMatch(String(steps[0].summary), /^auto-approved \(/);
+      const proposals = body.proposals as Array<Record<string, unknown>>;
+      assertEquals(proposals.length, 1);
+      assertEquals(proposals[0].status, "approved");
+      const fetched = await get(`/api/v1/models/${id}`, adminToken);
+      const model = (await fetched.json()) as { task_types: string[] };
+      assertEquals(model.task_types, ["text_to_image", "text_to_video"]);
+    });
+  });
+
+  it("never auto-approves non-scoped tools even with the flag on", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Guard Model");
+      await setAutoApprove(id, true);
+      const body = await agentTurn(
+        [{ id: "call_inst", name: "install_model", args: { model_id: id } }],
+        "install it",
+      );
+      const steps = stepsOf(body);
+      assertEquals(steps[0].status, "proposal");
+      assertMatch(String(steps[0].summary), /awaiting user approval/);
+      const proposals = body.proposals as Array<Record<string, unknown>>;
+      assertEquals(proposals[0].status, "pending");
+    });
+  });
+
+  it("run_smoke_test auto-runs the CLI and reports the failure tail", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const binDir = Deno.makeTempDirSync({ prefix: "smoke_fail_" });
+      const failSh = join(binDir, "fail.sh");
+      await Deno.writeTextFile(
+        failSh,
+        "#!/usr/bin/env bash\necho \"ModuleNotFoundError: No module named 'torch'\" >&2\nexit 3\n",
+      );
+      await Deno.chmod(failSh, 0o755);
+      const id = await registerModel("Smoke Model", {
+        backend: "local_cli",
+        default_settings: {
+          command: failSh,
+          args: ["--prompt", "{prompt}", "--output", "{output}"],
+        },
+      });
+      assertExists(setModelInstalled(id, "a".repeat(64)));
+      await setAutoApprove(id, true);
+      const body = await agentTurn(
+        [{ id: "call_smoke", name: "run_smoke_test", args: { model_id: id, timeout_seconds: 10 } }],
+        "smoke test it",
+      );
+      const steps = stepsOf(body);
+      assertEquals(steps[0].status, "ok");
+      assertMatch(String(steps[0].summary), /smoke test failed \(exit 3/);
+      assertMatch(String(steps[0].summary), /torch/);
+      // The failure tail is also what the LLM reads in the tool result.
+      const toolMsg = (llm.requests[1].messages as Array<Record<string, unknown>>)
+        .find((m) => m.role === "tool");
+      assertMatch(String(toolMsg?.content), /ModuleNotFoundError/);
+      await Deno.remove(binDir, { recursive: true });
+    });
+  });
+
+  it("run_smoke_test success and started_ok semantics", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const binDir = Deno.makeTempDirSync({ prefix: "smoke_ok_" });
+      const okSh = join(binDir, "ok.sh");
+      await Deno.writeTextFile(
+        okSh,
+        "#!/usr/bin/env bash\nout=''\nwhile [ $# -gt 0 ]; do\n" +
+          '  case "$1" in\n    --output) out="$2"; shift 2 ;;\n    *) shift ;;\n  esac\ndone\n' +
+          "printf 'fake' > \"$out\"\nexit 0\n",
+      );
+      await Deno.chmod(okSh, 0o755);
+      const hangSh = join(binDir, "hang.sh");
+      await Deno.writeTextFile(hangSh, "#!/usr/bin/env bash\nsleep 30\n");
+      await Deno.chmod(hangSh, 0o755);
+
+      const okId = await registerModel("Smoke OK", {
+        backend: "local_cli",
+        default_settings: {
+          command: okSh,
+          args: ["--prompt", "{prompt}", "--output", "{output}"],
+        },
+      });
+      assertExists(setModelInstalled(okId, "b".repeat(64)));
+      await setAutoApprove(okId, true);
+      const okBody = await agentTurn(
+        [{
+          id: "call_smoke_ok",
+          name: "run_smoke_test",
+          args: { model_id: okId, timeout_seconds: 10 },
+        }],
+        "smoke test it",
+      );
+      assertEquals(stepsOf(okBody)[0].status, "ok");
+      assertMatch(String(stepsOf(okBody)[0].summary), /smoke test passed in/);
+
+      const hangId = await registerModel("Smoke Hang", {
+        backend: "local_cli",
+        default_settings: {
+          command: hangSh,
+          args: ["--prompt", "{prompt}", "--output", "{output}"],
+        },
+      });
+      assertExists(setModelInstalled(hangId, "c".repeat(64)));
+      await setAutoApprove(hangId, true);
+      const hangBody = await agentTurn(
+        [{
+          id: "call_smoke_hang",
+          name: "run_smoke_test",
+          args: { model_id: hangId, timeout_seconds: 1 },
+        }],
+        "smoke test it",
+      );
+      assertEquals(stepsOf(hangBody)[0].status, "ok");
+      assertMatch(String(stepsOf(hangBody)[0].summary), /startup healthy/);
+      await Deno.remove(binDir, { recursive: true });
+    });
+  });
+
+  it("a failed auto-approval leaves the proposal pending for manual retry", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Broken Model", {
+        backend: "local_cli",
+        default_settings: { command: "/nonexistent/smoke-python", args: ["--output", "{output}"] },
+      });
+      assertExists(setModelInstalled(id, "d".repeat(64)));
+      await setAutoApprove(id, true);
+      const body = await agentTurn(
+        [{ id: "call_smoke_bad", name: "run_smoke_test", args: { model_id: id } }],
+        "test it",
+      );
+      const steps = stepsOf(body);
+      assertEquals(steps[0].status, "error");
+      assertMatch(String(steps[0].summary), /auto-approval failed/);
+      const list = await get("/api/v1/llm/proposals", adminToken);
+      const proposals = ((await list.json()) as { proposals: Array<Record<string, unknown>> })
+        .proposals.filter((p) => p.tool === "run_smoke_test");
+      assertEquals(proposals.length, 1);
+      assertEquals(proposals[0].status, "pending");
+    });
+  });
+
+  it("run_benchmark enqueues once and refuses a second run while one is open", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Bench Model");
+      assertExists(setModelInstalled(id, "e".repeat(64)));
+      await setAutoApprove(id, true);
+      const body = await agentTurn(
+        [{ id: "call_bench", name: "run_benchmark", args: { model_id: id } }],
+        "benchmark it",
+      );
+      const steps = stepsOf(body);
+      assertEquals(steps[0].status, "ok");
+      assertMatch(String(steps[0].summary), /benchmark enqueued \(job /);
+      // Pin the benchmark job in a live running state (valid lease) so the
+      // duplicate guard is deterministic — the runner leaves it alone.
+      createJob(1, { job_type: BENCHMARK_JOB_TYPE, model_id: id });
+      getDb()
+        .prepare(
+          `UPDATE generation_jobs SET status = 'running', lease_owner = 'test',
+             lease_expires_at = ? WHERE model_id = ? AND job_type = ?`,
+        )
+        .run(new Date(Date.now() + 60_000).toISOString(), id, BENCHMARK_JOB_TYPE);
+      const body2 = await agentTurn(
+        [{ id: "call_bench2", name: "run_benchmark", args: { model_id: id } }],
+        "benchmark it again",
+      );
+      const steps2 = stepsOf(body2);
+      assertEquals(steps2[0].status, "error");
+      assertMatch(String(steps2[0].summary), /already running \(job /);
+    });
+  });
+
+  it("run_benchmark refuses uninstalled and non-benchmarkable models", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const uninstalled = await registerModel("Uninstalled Model");
+      await setAutoApprove(uninstalled, true);
+      const body = await agentTurn(
+        [{ id: "call_bench3", name: "run_benchmark", args: { model_id: uninstalled } }],
+        "benchmark it",
+      );
+      assertEquals(stepsOf(body)[0].status, "error");
+      assertMatch(String(stepsOf(body)[0].summary), /not installed/);
+
+      const noTasks = await registerModel("NoBench Model", {
+        task_types: ["image_to_image"],
+      });
+      assertExists(setModelInstalled(noTasks, "f".repeat(64)));
+      await setAutoApprove(noTasks, true);
+      const body2 = await agentTurn(
+        [{ id: "call_bench4", name: "run_benchmark", args: { model_id: noTasks } }],
+        "benchmark it",
+      );
+      assertEquals(stepsOf(body2)[0].status, "error");
+      assertMatch(String(stepsOf(body2)[0].summary), /no benchmarkable task types/);
+    });
+  });
+
+  it("logs an auto_approved event on the conversation", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerModel("Log Model");
+      await setAutoApprove(id, true);
+      const conversationId = `auto-approve-${Date.now()}`;
+      script = [
+        {
+          toolCalls: [
+            { id: "call_upd2", name: "update_model", args: { model_id: id, enabled: false } },
+          ],
+        },
+        { content: "done" },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "disable the model" }],
+        conversation_id: conversationId,
+      }, adminToken);
+      assertEquals(res.status, 200);
+      const convRes = await get(`/api/v1/llm/conversations/${conversationId}`, adminToken);
+      assertEquals(convRes.status, 200);
+      const conv = (await convRes.json()) as {
+        conversation: { messages: Array<{ role: string; content: string }> };
+      };
+      const events = conv.conversation.messages.filter((m) => m.role === "event");
+      assertEquals(events.length, 1);
+      assertEquals(events[0].content, "auto_approved");
+    });
+  });
+
   it("non-admins never see the runtime mutating tools", async () => {
     const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
     createUser(email, await hashPassword("password123"), "Regular User");
@@ -964,6 +1249,8 @@ describe("llm agent runtime tools", () => {
           "update_model",
           "write_model_file",
           "install_model_deps",
+          "run_smoke_test",
+          "run_benchmark",
         ]
       ) {
         assertEquals(names.includes(mutating), false, mutating);
@@ -1022,5 +1309,28 @@ describe("copilot system prompt", () => {
     assertMatch(prompt, /write_model_file/);
     assertMatch(prompt, /install_model_deps/);
     assertMatch(prompt, /venv python path/);
+  });
+
+  it("lists flagged models in the auto-approval section (admins only)", async () => {
+    const plain = await copilotSystemPrompt(1, true);
+    assert(!plain.includes("Agent auto-approval is ON"));
+
+    const m = dbRegisterModel(1, {
+      name: "Auto Model",
+      version: "1.0",
+      backend: "mock",
+      task_types: ["text_to_image"],
+    });
+    assertExists(dbUpdateModel(1, m.id, { agent_auto_approve: true }));
+    const admin = await copilotSystemPrompt(1, true);
+    assertMatch(admin, /Agent auto-approval is ON for/);
+    assertMatch(admin, new RegExp(m.id));
+    assertMatch(admin, /run_smoke_test it, read the/);
+    assertMatch(admin, /must have called the matching mutating tool in this same turn/);
+
+    // Non-admins never see the section: their tools always go through a
+    // pending proposal, so auto-approval cannot apply to them.
+    const user = await copilotSystemPrompt(1, false);
+    assert(!user.includes("Agent auto-approval is ON"));
   });
 });
