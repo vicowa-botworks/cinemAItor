@@ -3323,9 +3323,11 @@ export class ModelManager extends LitElement {
     const st = this.confirmState;
     if (!st) return;
     if (st.reattach) {
-      // Watching only — the install runs in another tab (or an earlier
-      // visit). Closing just stops the progress poll.
+      // Watching only — the install runs on the server (another tab or an
+      // earlier visit). Closing stops the progress poll and dismisses the
+      // dialog; the install itself keeps running.
       this._closeInstallWatch();
+      this.confirmState = null;
       return;
     }
     this.confirmBusy = true;
