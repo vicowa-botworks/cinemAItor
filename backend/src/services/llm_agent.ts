@@ -37,6 +37,10 @@ import { chatLlm, type LlmMessage, type LlmToolCall, type LlmToolDef } from "./l
  * budget is generous enough for an auto-approved fix loop
  * (change -> smoke test -> fix -> smoke test -> benchmark). */
 export const AGENT_MAX_TOOL_ITERATIONS = 16;
+/** Extra LLM iterations granted for the one-shot claim-verification nudge
+ * (see claimsProposalReply) when a reply promises a proposal that was never
+ * created. */
+export const AGENT_CLAIM_NUDGE_ITERATIONS = 3;
 export const AGENT_MAX_HISTORY = 32;
 const PROPOSAL_TTL_MS = 60 * 60 * 1000;
 const TOOL_RESULT_MAX_CHARS = 8000;
@@ -340,13 +344,51 @@ export function resetProposals(): void {
   proposals.clear();
 }
 
+export interface CreateProposalResult {
+  proposal: AgentProposal;
+  /**
+   * True when a pending proposal with the same tool and identical
+   * (canonicalized) arguments already exists in this conversation — the
+   * existing proposal is returned and no new one is created, so a looping
+   * model cannot stack duplicate approval cards for the same step.
+   */
+  duplicate: boolean;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonicalize((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function proposalArgsKey(tool: AgentToolName, args: Record<string, unknown>): string {
+  return `${tool}\u0000${JSON.stringify(canonicalize(args))}`;
+}
+
 export function createProposal(
   tool: AgentToolName,
   args: Record<string, unknown>,
   userId: number,
   conversationId?: string,
-): AgentProposal {
+): CreateProposalResult {
   pruneProposals();
+  const scope = conversationId ?? `user:${userId}`;
+  const key = proposalArgsKey(tool, args);
+  for (const existing of proposals.values()) {
+    if (
+      existing.status === "pending" &&
+      (existing.conversation_id ?? `user:${existing.user_id}`) === scope &&
+      proposalArgsKey(existing.tool, existing.args) === key
+    ) {
+      return { proposal: existing, duplicate: true };
+    }
+  }
   const proposal: AgentProposal = {
     id: crypto.randomUUID(),
     tool,
@@ -358,7 +400,7 @@ export function createProposal(
   };
   if (conversationId) proposal.conversation_id = conversationId;
   proposals.set(proposal.id, proposal);
-  return proposal;
+  return { proposal, duplicate: false };
 }
 
 function findPendingProposal(id: string): AgentProposal {
@@ -855,7 +897,7 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
     "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders and a BARE '{input:0}' token (as its own args entry, after its flag) for the reference image — the app drops it when a job has no references, so dual t2i/i2i models work from one settings row — plus a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
     "Never leave a local_cli model whose command or referenced script is missing — if you are unsure what the runtime needs, propose the setup steps instead of guessing.",
     "Fixing a model: validate EVERY change (settings, runner script, venv) with run_smoke_test instead of asking the user to run the model and paste the error back — when auto-approval is on the test runs in the same turn, so chain change -> smoke test -> fix -> smoke test; otherwise propose the smoke test and continue once it is approved. On a smoke-test failure, read its error_tail, fix the ROOT CAUSE (wrong path, missing module, bad flag — never a workaround), and smoke-test again. Run a full run_benchmark only once the smoke test passes — benchmarks are slow (hours on CPU) and async: report the job id and check benchmark_results when asked.",
-    "If you ask the user to approve something, you must have called the matching mutating tool in this same turn. Never end a turn asking for approval of a proposal you did not create; if you cannot create the proposal because information is missing, say exactly what is missing instead of asking for approval.",
+    "If you ask the user to approve something, you must have called the matching mutating tool in this same turn. Never end a turn asking for approval of a proposal you did not create; if you cannot create the proposal because information is missing, say exactly what is missing instead of asking for approval. Never write 'I've proposed ...' / 'I've created a proposal ...' unless the mutating tool call has actually been made in this turn and returned — describe what you intend to do instead.",
     "The user approves each proposal AFTER your turn ends — the outcome reaches you as a new message. When it does, continue the plan and propose the next steps; never assume an approval already happened within the current turn. Do not re-propose a pending step with identical arguments — it already awaits the user's decision. But if a pending step is wrong (the user reports an error, or it failed or was rejected), propose the CORRECTED version as a new proposal: a replacement for a broken pending step is expected, not a duplicate. When the user explicitly asks you to create an approval request, call the mutating tool — the pending list below tells you what is already open.",
     pendingSection,
     autoApproveSection,
@@ -937,6 +979,25 @@ function historyTitle(history: LlmMessage[]): string {
   return "";
 }
 
+const CLAIM_PROPOSAL_PATTERNS: RegExp[] = [
+  /i'?ve (?:proposed|created)/i,
+  /\bi (?:have |just )?proposed\b/i,
+  /\bproposed (?:running|installing|writing|updating|adding|removing|creating|registering|that|a |an |the)\b/i,
+  /\bproposals? (?:is|are) (?:\w+ )?(?:ready|pending|awaiting|submitted)\b/i,
+  /approval request (?:is|was)/i,
+];
+
+/**
+ * True when an assistant reply claims a proposal was made ("I've proposed
+ * running a smoke test") — the claim that must be backed by an actual tool
+ * call. Used by runAgent's one-shot verification nudge when the turn
+ * created zero proposals, and by tests.
+ */
+export function claimsProposalReply(content: string): boolean {
+  if (typeof content !== "string" || content.trim() === "") return false;
+  return CLAIM_PROPOSAL_PATTERNS.some((re) => re.test(content));
+}
+
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   const history = validateAgentHistory(opts.history);
   if (opts.conversationId) {
@@ -955,8 +1016,10 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   let model = "";
   let iterations = 0;
   let lastHadToolCalls = false;
+  let budget = AGENT_MAX_TOOL_ITERATIONS;
+  let claimNudged = false;
 
-  for (let i = 0; i < AGENT_MAX_TOOL_ITERATIONS; i++) {
+  for (let i = 0; i < budget; i++) {
     iterations++;
     const result = await chatLlm({ messages, model: opts.model, tools });
     model = result.model;
@@ -970,7 +1033,26 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
     messages.push(assistantMessage);
 
     lastHadToolCalls = result.toolCalls.length > 0;
-    if (!lastHadToolCalls) break;
+    if (!lastHadToolCalls) {
+      // Claim-verification guard: the reply asserts that a proposal was
+      // created, but the turn produced none — the "I've proposed running a
+      // smoke test" dead end where the user has nothing to approve. Send the
+      // copilot back ONCE with an explicit instruction to make the tool call
+      // for real (the frontend nudge button remains as the fallback).
+      if (!claimNudged && created.length === 0 && claimsProposalReply(result.content ?? "")) {
+        claimNudged = true;
+        budget += AGENT_CLAIM_NUDGE_ITERATIONS;
+        messages.push({
+          role: "user",
+          content:
+            "You said you proposed something, but no proposal was created this turn — there is nothing for me to approve. " +
+            "Call the matching mutating tool now so the approval request actually exists. " +
+            "If you cannot create it, say exactly what is missing.",
+        });
+        continue;
+      }
+      break;
+    }
 
     for (const call of result.toolCalls) {
       const name = call.function.name;
@@ -990,75 +1072,95 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         step.summary = "Mutating tools require the admin role";
         messages.push(toolMessage(call, JSON.stringify({ error: step.summary })));
       } else if (isMutatingAgentTool(name)) {
-        const proposal = createProposal(
+        const { proposal, duplicate } = createProposal(
           name as AgentToolName,
           args,
           opts.userId,
           opts.conversationId,
         );
-        created.push(proposal);
-        step.proposal_id = proposal.id;
-        // Model-scoped proposals under a model's agent_auto_approve flag
-        // execute immediately through the same single-flight path as a manual
-        // approval, so the fix loop (change -> smoke test -> fix -> ...) runs
-        // inside this turn. On failure the proposal stays pending for a
-        // manual retry.
-        const autoModel = autoApproveModelFor(name, args);
-        if (autoModel) {
-          try {
-            const { result } = await approveProposal(
-              proposal.id,
-              opts.userId,
-              opts.isAdmin,
-            );
-            step.status = "ok";
-            step.summary = `auto-approved (${autoModel.id}) — ${summarizeStep(name, result)}`;
-            if (opts.conversationId) {
-              // Best-effort: a storage failure must not fail the turn.
-              try {
-                logProposalEvent(
-                  opts.conversationId,
-                  opts.userId,
-                  opts.isAdmin,
-                  proposal.id,
-                  "auto_approved",
-                );
-              } catch (err) {
-                console.warn("[llm_agent] failed to log auto-approval event:", err);
-              }
-            }
-            messages.push(
-              toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)),
-            );
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            step.status = "error";
-            step.summary = `auto-approval failed: ${message}`;
-            messages.push(
-              toolMessage(
-                call,
-                JSON.stringify({
-                  error: message,
-                  proposal_id: proposal.id,
-                  status: "auto_approval_failed",
-                  note: "The proposal is still pending; the user can approve it manually.",
-                }),
-              ),
-            );
-          }
-        } else {
+        if (duplicate) {
+          // The identical step already awaits the user's decision — do not
+          // stack duplicate cards, and tell the model to stop re-proposing.
           step.status = "proposal";
-          step.summary = "Proposal created — awaiting user approval";
+          step.proposal_id = proposal.id;
+          step.summary = `Duplicate — an identical ${name} proposal is already pending`;
           messages.push(
             toolMessage(
               call,
               JSON.stringify({
-                status: "pending_approval",
+                status: "already_pending",
                 proposal_id: proposal.id,
                 tool: proposal.tool,
+                note:
+                  "An identical proposal is already awaiting approval. Do not re-propose it — the user will approve or reject the existing one.",
               }),
             ),
           );
+        } else {
+          created.push(proposal);
+          step.proposal_id = proposal.id;
+          // Model-scoped proposals under a model's agent_auto_approve flag
+          // execute immediately through the same single-flight path as a
+          // manual approval, so the fix loop (change -> smoke test -> fix ->
+          // ...) runs inside this turn. On failure the proposal stays pending
+          // for a manual retry.
+          const autoModel = autoApproveModelFor(name, args);
+          if (autoModel) {
+            try {
+              const { result } = await approveProposal(
+                proposal.id,
+                opts.userId,
+                opts.isAdmin,
+              );
+              step.status = "ok";
+              step.summary = `auto-approved (${autoModel.id}) — ${summarizeStep(name, result)}`;
+              if (opts.conversationId) {
+                // Best-effort: a storage failure must not fail the turn.
+                try {
+                  logProposalEvent(
+                    opts.conversationId,
+                    opts.userId,
+                    opts.isAdmin,
+                    proposal.id,
+                    "auto_approved",
+                  );
+                } catch (err) {
+                  console.warn("[llm_agent] failed to log auto-approval event:", err);
+                }
+              }
+              messages.push(
+                toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)),
+              );
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              step.status = "error";
+              step.summary = `auto-approval failed: ${message}`;
+              messages.push(
+                toolMessage(
+                  call,
+                  JSON.stringify({
+                    error: message,
+                    proposal_id: proposal.id,
+                    status: "auto_approval_failed",
+                    note: "The proposal is still pending; the user can approve it manually.",
+                  }),
+                ),
+              );
+            }
+          } else {
+            step.status = "proposal";
+            step.summary = "Proposal created — awaiting user approval";
+            messages.push(
+              toolMessage(
+                call,
+                JSON.stringify({
+                  status: "pending_approval",
+                  proposal_id: proposal.id,
+                  tool: proposal.tool,
+                }),
+              ),
+            );
+          }
         }
       } else {
         try {
@@ -1081,7 +1183,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   let truncated = false;
   if (lastHadToolCalls) {
     truncated = true;
-    const note = `(stopped after ${AGENT_MAX_TOOL_ITERATIONS} tool iterations)`;
+    const note = `(stopped after ${iterations} tool iterations)`;
     reply = reply ? `${reply}\n\n${note}` : note;
   }
 
