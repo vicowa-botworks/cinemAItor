@@ -12,6 +12,9 @@ e2e/playwright-report/
 backend/.env
 frontend/.env
 
+# Test weights (multi-GB, downloaded on demand — see backend/tests/gguf_smoke)
+backend/tests/gguf_smoke/weights/
+
 # Database
 *.db
 *.sqlite

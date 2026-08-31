@@ -1355,6 +1355,17 @@ describe("copilot system prompt", () => {
     assertMatch(prompt, /venv python path/);
   });
 
+  it("teaches the GGUF loading recipe (backbone-only from_single_file)", async () => {
+    const prompt = await copilotSystemPrompt(1, true);
+    assertMatch(prompt, /GGUF weights/);
+    assertMatch(prompt, /BACKBONE-ONLY/);
+    assertMatch(prompt, /from_single_file/);
+    assertMatch(prompt, /GGUFQuantizationConfig/);
+    assertMatch(prompt, /does NOT mean the GGUF is unsupported/);
+    assertMatch(prompt, /UNet models \(SD 1\.5\/SDXL\) CANNOT be loaded from GGUF/);
+    assertMatch(prompt, /dequantize per forward pass/);
+  });
+
   it("lists flagged models in the auto-approval section (admins only)", async () => {
     const plain = await copilotSystemPrompt(1, true);
     assert(!plain.includes("Agent auto-approval is ON"));

@@ -286,6 +286,25 @@ reference images) placeholders, and a device flag matching the detected hardware
 GPU has sufficient free VRAM, `cpu` otherwise). Every file the copilot writes (scripts, `.venv`)
 lives inside the model's own storage directory, so removing the model removes its runtime too.
 
+**GGUF weights.** The playbook also carries the GGUF loading recipe, because a single `.gguf` file
+(FLUX/SD3.5/Wan/LTX/HiDream/Qwen quants) is easy to misread as "unsupported by diffusers": diffusers
+has a native GGUF loader, but it is **backbone-only** and the backbone must be a **DiT/transformer**
+— `Pipeline.from_pretrained("....gguf")` is not supported, UNet models (SD 1.5/SDXL) cannot be
+loaded from GGUF at all (4-D conv weights are not representable in GGUF; third-party SDXL GGUFs
+store convs as flat 2-D matrices that the loader rejects — for those use the full-precision
+checkpoint or ComfyUI). The playbook tells the copilot that a `from_single_file` failure does NOT
+mean the GGUF is unsupported. The recipe: `gguf>=0.10`, `accelerate` and `transformers` in the venv;
+load the backbone with
+`<TransformerClass>.from_single_file(gguf_path, quantization_config=GGUFQuantizationConfig(...))`,
+passing `config=`/`subfolder="transformer"` explicitly for diffusers-format GGUFs (the shape
+heuristic misidentifies the base model otherwise); build the pipeline from the diffusers-format base
+repo, injecting the backbone, with text encoders/VAE/tokenizers loaded as usual. Weights stay uint8
+and dequantize per forward pass, so a quantized model needs far less RAM/VRAM than its
+full-precision size and runs on CPU. A reference runner exercising the recipe against the
+SD3.5-medium Q4_0 GGUF lives at `backend/tests/gguf_smoke/runner.py`, with an availability-gated
+smoke test in `backend/tests/gguf_smoke.test.ts` (skips when the Python env or the multi-GB weights
+are absent).
+
 **Agent auto-approval (per model).** Every model has an admin-set `agent_auto_approve` flag (model
 card toggle, `PATCH /api/v1/models/:id {agent_auto_approve: true}`; migration 0026, default off).
 When it is on, the copilot's **model-scoped** mutating tools — `update_model`, `write_model_file`,
