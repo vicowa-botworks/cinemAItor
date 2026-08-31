@@ -872,7 +872,15 @@ describe("model manager", () => {
     assert(stale.message.includes("mismatch"));
 
     // Restoring the file triggers a full re-hash and refreshes the record.
+    // Set the mtime explicitly: the copy can land in the same granularity
+    // tick as the install (as in the step above), which would take the
+    // fast path instead of re-hashing.
     await Deno.copyFile(src, file);
+    await Deno.utime(
+      file,
+      before.atime ?? new Date(0),
+      new Date((before.mtime?.getTime() ?? 0) + 120_000),
+    );
     const restored = await checkModelHealth(layout, row);
     assertEquals(restored.status, "ok");
     assert(restored.message.includes("File verified"));
