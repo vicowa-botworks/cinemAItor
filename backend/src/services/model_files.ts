@@ -87,6 +87,14 @@ export interface InstallFromUrlOptions {
   retryBaseDelayMs?: number;
   /** Cap for the retry delay in ms (default 30000). */
   retryMaxDelayMs?: number;
+  /**
+   * Progress hook, called once with the pre-existing part-file offset before
+   * the first read and after every chunk written. `receivedBytes` is the
+   * cumulative size of the part file; `totalBytes` is the remote file size
+   * when the response advertises one (Content-Length / Content-Range),
+   * otherwise null (chunked transfer — indeterminate).
+   */
+  onProgress?: (receivedBytes: number, totalBytes: number | null) => void;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -253,6 +261,15 @@ export async function installFromUrl(
     let progress = 0;
     let capExceeded = false;
     let streamFailed = false;
+    // Remote size for progress reporting: Content-Range (206) or
+    // Content-Length (200) when advertised; null for chunked responses.
+    let remoteTotal: number | null = null;
+    if (res.status === 206 && range && range.total !== null) {
+      remoteTotal = range.total;
+    } else if (res.status === 200 && contentLength > 0) {
+      remoteTotal = offset + contentLength;
+    }
+    opts.onProgress?.(total, remoteTotal);
     try {
       const reader = res.body.getReader();
       for (;;) {
@@ -267,6 +284,7 @@ export async function installFromUrl(
           }
           progress += value.byteLength;
           await file.write(value);
+          opts.onProgress?.(total, remoteTotal);
         }
       }
     } catch {
@@ -311,6 +329,28 @@ export async function installFromUrl(
  */
 const installsInFlight = new Map<string, Promise<{ model: Model; install: InstallResult }>>();
 
+/** Live state of a running install, published for the UI's progress bar. */
+export interface InstallProgressState {
+  started_at: string;
+  source: "url" | "local" | "mock";
+  /** Bytes currently in the part file (cumulative, includes resumed bytes). */
+  received_bytes: number;
+  /** Remote file size when the server advertises one; null = indeterminate. */
+  total_bytes: number | null;
+  /** Rolling download speed over the last 10 s of progress samples. */
+  speed_bytes_per_sec: number;
+}
+
+const installProgress = new Map<string, InstallProgressState>();
+
+export function getInstallProgress(modelId: string): InstallProgressState | null {
+  return installProgress.get(modelId) ?? null;
+}
+
+export function listInstallProgress(): (InstallProgressState & { model_id: string })[] {
+  return [...installProgress.entries()].map(([model_id, state]) => ({ model_id, ...state }));
+}
+
 /**
  * Full install flow for a model row — the install route and the model-copilot
  * `install_model` tool share this. Network sources require explicit consent
@@ -339,30 +379,58 @@ async function runInstall(
   const sourcePath = opts.sourcePath ?? model.source_path ?? undefined;
   const repositoryUrl = opts.repositoryUrl ?? model.repository_url ?? undefined;
   const lay = storageLayout(loadConfig().appDataDir);
+  const progress: InstallProgressState = {
+    started_at: new Date().toISOString(),
+    source: sourcePath ? "local" : repositoryUrl ? "url" : "mock",
+    received_bytes: 0,
+    total_bytes: null,
+    speed_bytes_per_sec: 0,
+  };
+  installProgress.set(modelId, progress);
+  // Rolling-speed samples: (timestamp, cumulative bytes), pruned to 10 s.
+  const speedSamples: Array<{ t: number; bytes: number }> = [];
   let result: InstallResult;
-  if (sourcePath) {
-    result = await installFromLocal(lay, modelId, sourcePath);
-  } else if (repositoryUrl) {
-    if (opts.consent !== true) {
+  try {
+    if (sourcePath) {
+      result = await installFromLocal(lay, modelId, sourcePath);
+    } else if (repositoryUrl) {
+      if (opts.consent !== true) {
+        throw badRequest(
+          "Installing from a network source requires explicit consent (consent: true)",
+          "consent",
+        );
+      }
+      result = await installFromUrl(lay, modelId, repositoryUrl, {
+        maxBytes: loadConfig().modelDownloadMaxBytes,
+        onProgress: (receivedBytes, totalBytes) => {
+          progress.received_bytes = receivedBytes;
+          if (totalBytes !== null) progress.total_bytes = totalBytes;
+          const now = Date.now();
+          speedSamples.push({ t: now, bytes: receivedBytes });
+          while (speedSamples.length > 1 && now - speedSamples[0].t > 10_000) {
+            speedSamples.shift();
+          }
+          const oldest = speedSamples[0];
+          const dtSec = (now - oldest.t) / 1000;
+          progress.speed_bytes_per_sec = dtSec >= 0.5
+            ? Math.max(0, (receivedBytes - oldest.bytes) / dtSec)
+            : 0;
+        },
+      });
+    } else if (model.source === "mock" || model.backend === "mock") {
+      result = { fileHash: model.file_hash ?? "", fileBytes: 0 };
+    } else {
       throw badRequest(
-        "Installing from a network source requires explicit consent (consent: true)",
-        "consent",
+        "No installation source: provide source_path or repository_url on the model",
       );
     }
-    result = await installFromUrl(lay, modelId, repositoryUrl, {
-      maxBytes: loadConfig().modelDownloadMaxBytes,
-    });
-  } else if (model.source === "mock" || model.backend === "mock") {
-    result = { fileHash: model.file_hash ?? "", fileBytes: 0 };
-  } else {
-    throw badRequest(
-      "No installation source: provide source_path or repository_url on the model",
-    );
-  }
 
-  const installed = setModelInstalled(modelId, result.fileHash);
-  if (!installed) throw notFound("Model not found");
-  return { model: installed, install: result };
+    const installed = setModelInstalled(modelId, result.fileHash);
+    if (!installed) throw notFound("Model not found");
+    return { model: installed, install: result };
+  } finally {
+    installProgress.delete(modelId);
+  }
 }
 
 /** Remove installed files for a model (MOD-005). */

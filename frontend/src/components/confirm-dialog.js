@@ -11,6 +11,11 @@ import { css, html, LitElement, nothing } from "lit";
  * While `busy` is true (a long-running operation is in flight), dismissal is
  * suppressed (buttons, Escape, overlay) and the confirm button shows
  * `busyLabel` with a spinner, so the user always sees the operation running.
+ *
+ * Optional progress display: `progress` (0–100, or null for indeterminate)
+ * renders a bar under the message while `progressLabel` shows the caption
+ * (e.g. "1.4 GB of 18.2 GB (8%)"). The host sets them while `busy` and
+ * clears them when the operation settles.
  */
 export class ConfirmDialog extends LitElement {
   static properties = {
@@ -22,6 +27,10 @@ export class ConfirmDialog extends LitElement {
     tone: { type: String },
     busy: { type: Boolean, reflect: true },
     busyLabel: { type: String },
+    // Untyped on purpose: bound as a plain property (no attribute
+    // conversion), so `null` stays `null`. Shape:
+    // { percent: number 0–100 | null (indeterminate), label: string }
+    progress: {},
   };
 
   constructor() {
@@ -34,6 +43,7 @@ export class ConfirmDialog extends LitElement {
     this.tone = "default";
     this.busy = false;
     this.busyLabel = "Working…";
+    this.progress = null;
   }
 
   connectedCallback() {
@@ -91,6 +101,30 @@ export class ConfirmDialog extends LitElement {
             ${this.title}
           </div>
           <div class="message">${this.message}</div>
+          ${this.progress
+            ? html`
+              <div class="progress">
+                <div
+                  class="progress-track"
+                  role="progressbar"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow=${this.progress.percent === null ? nothing : this.progress.percent}
+                  aria-label=${this.progress.label || nothing}
+                >
+                  <div
+                    class="progress-fill ${this.progress.percent === null ? "indeterminate" : ""}"
+                    style=${this.progress.percent === null
+                      ? nothing
+                      : `width: ${this.progress.percent}%`}
+                  ></div>
+                </div>
+                ${this.progress.label
+                  ? html`<div class="progress-label">${this.progress.label}</div>`
+                  : null}
+              </div>
+            `
+            : null}
           <div class="actions">
             <button
               class="btn btn-cancel"
@@ -159,11 +193,51 @@ export class ConfirmDialog extends LitElement {
       word-break: break-word;
     }
 
+    .progress {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .progress-track {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--color-surface-hover);
+      border: 1px solid var(--color-border);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--color-primary);
+      transition: width 0.5s ease;
+    }
+
+    .progress-fill.indeterminate {
+      width: 40%;
+      animation: cd-slide 1.2s ease-in-out infinite;
+    }
+
+    .progress-label {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    @keyframes cd-slide {
+      from {
+        transform: translateX(-100%);
+      }
+      to {
+        transform: translateX(350%);
+      }
+    }
+
     .actions {
       display: flex;
       justify-content: flex-end;
       gap: 10px;
-      margin-top: 4px;
+      margin-top: 18px;
     }
 
     .btn {

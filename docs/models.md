@@ -30,6 +30,8 @@ task mapping, hardware detection, and requirement warnings.
 | PATCH  | `/api/v1/models/:id`                       | Update metadata / enable / disable (admin)                                   |
 | DELETE | `/api/v1/models/:id`                       | Remove model + installed files (admin)                                       |
 | POST   | `/api/v1/models/:id/install`               | Install artifact (admin); network sources need `consent: true`               |
+| GET    | `/api/v1/models/:id/install-progress`      | Live download progress for this model (`in_progress` + byte counts)          |
+| GET    | `/api/v1/models/install-progress`          | All in-progress installs (re-attach after a page reload)                     |
 | POST   | `/api/v1/models/:id/verify`                | SHA-256 checksum of installed file vs stored hash                            |
 | POST   | `/api/v1/models/:id/health-check`          | Install state, checksum, runtime availability                                |
 | POST   | `/api/v1/models/:id/benchmark`             | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)                    |
@@ -165,7 +167,15 @@ repo, `409` model id already registered, `502` HuggingFace unreachable, timed ou
   corrupt a download of another. Permanent failures (bad URL/protocol, HTTP `4xx`, size cap) clean
   up the part file, so nothing partial is left behind. The size is uncapped by default — set
   `MODEL_DOWNLOAD_MAX_SIZE` (bytes, 0 = unlimited) to enforce a limit (a part file already beyond
-  the cap is removed and the install fails).
+  the cap is removed and the install fails). **Install progress**: while a download runs, the
+  streaming loop reports received bytes, the total from `Content-Length`/`Content-Range` (null when
+  the server sends no length), the start time, and a 10-second rolling speed. Two read endpoints
+  expose the state (any authenticated user): `GET /api/v1/models/:id/install-progress` answers
+  `{in_progress: false}` when idle, and `GET /api/v1/models/install-progress` lists every
+  in-progress install. The model-manager polls the per-model endpoint while the install dialog is
+  open and renders a progress bar + "received of total (%) · speed" caption in it; the list endpoint
+  lets a reloaded page re-attach to an install started in another tab or visit (the download keeps
+  running server-side regardless of the browser).
 - **Verify**: always re-hashes the installed file (a full SHA-256 — minutes for multi-GB models) and
   compares to the stored hash; when no hash was stored yet, verify records the current hash. A
   successful full verification also refreshes the verification sidecar (below).

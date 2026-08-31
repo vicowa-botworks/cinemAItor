@@ -1,3 +1,4 @@
+import { Application } from "@oak/oak";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
@@ -353,6 +354,158 @@ describe("models api", () => {
       })();
     });
   });
+
+  it("reports install progress while a URL install streams", async () => {
+    const payload = new Uint8Array(8192).fill(7);
+    const app = new Application();
+    app.use((ctx) => {
+      ctx.response.status = 200;
+      ctx.response.headers.set("Content-Length", String(payload.byteLength));
+      ctx.response.body = new ReadableStream({
+        async start(c) {
+          for (let i = 0; i < payload.byteLength; i += 1024) {
+            await new Promise((r) => setTimeout(r, 40));
+            c.enqueue(payload.slice(i, i + 1024));
+          }
+          c.close();
+        },
+      });
+    });
+    const probe = await Deno.listen({ port: 0, hostname: "127.0.0.1" });
+    const port = (probe.addr as Deno.NetAddr).port;
+    await probe.close();
+    const downloadAbort = new AbortController();
+    const listenP = app.listen({
+      port,
+      hostname: "127.0.0.1",
+      signal: downloadAbort.signal,
+    });
+    listenP.catch(() => {});
+    const downloadBase = `http://127.0.0.1:${port}`;
+    for (let i = 0; i < 100; i++) {
+      try {
+        const probe = await fetch(`${downloadBase}/`);
+        await probe.body?.cancel().catch(() => {});
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+
+    try {
+      await withServer(async (base) => {
+        baseUrl = base;
+        const reg = await registerModel({
+          name: "progress-url-model",
+          version: "1.0",
+          backend: "mock",
+          source: "url",
+          repository_url: `${downloadBase}/model.bin`,
+          task_types: ["text_to_image"],
+        });
+        const model = (await reg.json()) as ModelBody;
+
+        const installP = post(`/api/v1/models/${model.id}/install`, {
+          consent: true,
+        }, adminToken);
+
+        // The list endpoint shows the in-flight install (poll until visible).
+        interface ProgressEntry {
+          model_id: string;
+          received_bytes: number;
+          total_bytes: number | null;
+          source: string;
+          speed_bytes_per_sec: number;
+        }
+        let seen: ProgressEntry | undefined;
+        const t0 = Date.now();
+        while (!seen && Date.now() - t0 < 5000) {
+          const listRes = await get("/api/v1/models/install-progress", adminToken);
+          assertEquals(listRes.status, 200);
+          const listBody = (await listRes.json()) as { installs: ProgressEntry[] };
+          seen = listBody.installs.find((x) => x.model_id === model.id);
+          if (!seen) await new Promise((r) => setTimeout(r, 25));
+        }
+        assert(seen, "expected the in-flight install to appear in the progress list");
+        // Poll until the entry carries the advertised total: the entry is
+        // registered before the first response headers arrive.
+        while (seen && seen.total_bytes === null && Date.now() - t0 < 5000) {
+          const listRes = await get("/api/v1/models/install-progress", adminToken);
+          seen = ((await listRes.json()) as { installs: ProgressEntry[] }).installs
+            .find((x) => x.model_id === model.id);
+          if (seen) await new Promise((r) => setTimeout(r, 25));
+        }
+        assert(seen, "expected the in-flight install to report a total");
+        assertEquals(seen.source, "url");
+        assertEquals(seen.total_bytes, payload.byteLength);
+        assert(
+          typeof seen.speed_bytes_per_sec === "number" && seen.speed_bytes_per_sec >= 0,
+          "speed_bytes_per_sec must be a non-negative number",
+        );
+
+        // The per-model endpoint agrees.
+        const perRes = await get(`/api/v1/models/${model.id}/install-progress`, adminToken);
+        assertEquals(perRes.status, 200);
+        const perBody = (await perRes.json()) as {
+          in_progress: boolean;
+          received_bytes: number;
+          total_bytes: number | null;
+          source: string;
+        };
+        assertEquals(perBody.in_progress, true);
+        assertEquals(perBody.total_bytes, payload.byteLength);
+
+        // Bytes grow while the stream is running.
+        let received = seen.received_bytes;
+        const t1 = Date.now();
+        while (received === 0 && Date.now() - t1 < 4000) {
+          await new Promise((r) => setTimeout(r, 25));
+          const b = (await (await get(
+            `/api/v1/models/${model.id}/install-progress`,
+            adminToken,
+          )).json()) as { in_progress: boolean; received_bytes: number };
+          if (!b.in_progress) break;
+          received = b.received_bytes;
+        }
+        assert(received > 0, "expected received_bytes to grow while the download streams");
+
+        const installRes = await installP;
+        assertEquals(installRes.status, 201);
+
+        // The entry clears once the install settles.
+        const after = (await (await get(
+          `/api/v1/models/${model.id}/install-progress`,
+          adminToken,
+        )).json()) as { in_progress: boolean };
+        assertEquals(after.in_progress, false);
+        const listAfter =
+          (await (await get("/api/v1/models/install-progress", adminToken)).json()) as {
+            installs: unknown[];
+          };
+        assertEquals(listAfter.installs.length, 0);
+      });
+    } finally {
+      downloadAbort.abort();
+    }
+  });
+
+  it("guards the install-progress endpoints", () =>
+    withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        assertEquals((await get("/api/v1/models/install-progress")).status, 401);
+        assertEquals(
+          (await get("/api/v1/models/unknown-model/install-progress")).status,
+          401,
+        );
+        assertEquals(
+          (
+            await get("/api/v1/models/unknown-model/install-progress", adminToken)
+          ).status,
+          404,
+        );
+      })();
+    }));
 
   it("enables and disables models via patch", async () => {
     await withServer((base) => {

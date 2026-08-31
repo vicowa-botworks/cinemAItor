@@ -649,6 +649,14 @@ class ApiClient {
     });
   }
 
+  getModelInstallProgress(id) {
+    return this.request(`/models/${encodeURIComponent(id)}/install-progress`);
+  }
+
+  listModelInstallProgress() {
+    return this.request("/models/install-progress");
+  }
+
   verifyModel(id) {
     // Full-file SHA-256 over multi-GB models can run for minutes.
     return this.request(`/models/${encodeURIComponent(id)}/verify`, {
