@@ -1954,6 +1954,29 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
     },
   },
 
+  /** Live state of a running model install (install-progress endpoints). */
+  InstallProgress: {
+    type: "object",
+    required: ["started_at", "source", "received_bytes", "total_bytes", "speed_bytes_per_sec"],
+    properties: {
+      started_at: isoDate,
+      source: { type: "string", enum: ["url", "local", "mock"] },
+      received_bytes: {
+        type: "integer",
+        description: "Bytes in the download part file (cumulative, includes resumed bytes)",
+      },
+      total_bytes: {
+        type: ["integer", "null"],
+        description:
+          "Remote file size when the server advertises one; null for indeterminate (chunked) transfers",
+      },
+      speed_bytes_per_sec: {
+        type: "integer",
+        description: "Rolling download speed over the last 10 s of progress samples",
+      },
+    },
+  },
+
   /** POST /api/v1/models body (admin). */
   ModelCreateRequest: {
     type: "object",

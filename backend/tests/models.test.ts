@@ -474,6 +474,86 @@ describe("model manager", () => {
     }
   });
 
+  it("reports download progress through onProgress with the remote total", async () => {
+    const m = registerModel(userId, {
+      name: "progress-model",
+      version: "1.0",
+      backend: "mock",
+      source: "url",
+      repository_url: "",
+    });
+    const payload = new Uint8Array(1000).fill(1);
+    const app = new Application();
+    app.use((ctx) => {
+      ctx.response.status = 200;
+      ctx.response.headers.set("Content-Length", String(payload.byteLength));
+      // Stream in two spaced chunks so the callback fires more than once.
+      ctx.response.body = new ReadableStream({
+        async start(c) {
+          c.enqueue(payload.slice(0, 600));
+          await new Promise((r) => setTimeout(r, 10));
+          c.enqueue(payload.slice(600));
+          c.close();
+        },
+      });
+    });
+    const mock = await mockDownloadServerApp(app);
+    try {
+      const samples: [number, number | null][] = [];
+      const result = await installFromUrl(layout, m.id, `${mock.url}/model.bin`, {
+        maxBytes: 1024 * 1024,
+        onProgress: (received, total) => samples.push([received, total]),
+      });
+      assertEquals(result.fileBytes, 1000);
+      assert(samples.length >= 2, `expected multiple samples, got ${samples.length}`);
+      assertEquals(samples[0][0], 0);
+      assertEquals(samples[0][1], 1000);
+      assertEquals(samples[samples.length - 1], [1000, 1000]);
+      for (const sample of samples) assertEquals(sample[1], 1000);
+      for (let i = 1; i < samples.length; i++) {
+        assert(samples[i][0] >= samples[i - 1][0], "received must be non-decreasing");
+      }
+    } finally {
+      mock.stop();
+    }
+  });
+
+  it("reports indeterminate progress when the response has no Content-Length", async () => {
+    const m = registerModel(userId, {
+      name: "progress-indeterminate",
+      version: "1.0",
+      backend: "mock",
+      source: "url",
+      repository_url: "",
+    });
+    const payload = new Uint8Array(512).fill(2);
+    const app = new Application();
+    app.use((ctx) => {
+      ctx.response.status = 200;
+      // No Content-Length: chunked transfer, total unknown.
+      ctx.response.body = new ReadableStream({
+        start(c) {
+          c.enqueue(payload);
+          c.close();
+        },
+      });
+    });
+    const mock = await mockDownloadServerApp(app);
+    try {
+      const samples: [number, number | null][] = [];
+      const result = await installFromUrl(layout, m.id, `${mock.url}/model.bin`, {
+        maxBytes: 1024 * 1024,
+        onProgress: (received, total) => samples.push([received, total]),
+      });
+      assertEquals(result.fileBytes, 512);
+      assert(samples.length >= 2);
+      for (const sample of samples) assertEquals(sample[1], null);
+      assertEquals(samples[samples.length - 1][0], 512);
+    } finally {
+      mock.stop();
+    }
+  });
+
   it("url install forwards the HF token only for the HF origin", async () => {
     const m = registerModel(userId, {
       name: "hf-gated-model",

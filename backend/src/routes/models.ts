@@ -18,7 +18,9 @@ import {
   type UpdateModelInput,
 } from "@cinemaItor/db/models.ts";
 import {
+  getInstallProgress,
   installModelById,
+  listInstallProgress,
   removeModelFiles,
   verifyModelFile,
 } from "@cinemaItor/services/model_files.ts";
@@ -271,6 +273,10 @@ export const modelRouter = new Router()
     ctx.response.status = 201;
     ctx.response.body = result;
   })
+  .get("/api/v1/models/install-progress", authMiddleware, (ctx, _next) => {
+    requireUserId(ctx);
+    ctx.response.body = { installs: listInstallProgress() };
+  })
   .get("/api/v1/models/:id", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
     const model = getModel(requireIdParam(ctx));
@@ -327,6 +333,13 @@ export const modelRouter = new Router()
     });
     ctx.response.status = 201;
     ctx.response.body = result;
+  })
+  .get("/api/v1/models/:id/install-progress", authMiddleware, (ctx, _next) => {
+    requireUserId(ctx);
+    const id = requireIdParam(ctx);
+    if (!getModel(id)) throw notFound("Model not found");
+    const progress = getInstallProgress(id);
+    ctx.response.body = progress ? { in_progress: true, ...progress } : { in_progress: false };
   })
   .post("/api/v1/models/:id/verify", authMiddleware, async (ctx, _next) => {
     requireUserId(ctx);
@@ -608,6 +621,66 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  "GET /api/v1/models/install-progress": {
+    summary: "List installs currently running (all authenticated users)",
+    description: "One entry per in-flight model install (route POST or copilot " +
+      "install_model), with live download progress. Lets a reloaded page " +
+      "re-attach to an install whose POST request is no longer pending.",
+    responses: {
+      200: {
+        description: "The in-flight installs (empty when idle)",
+        schema: {
+          type: "object",
+          required: ["installs"],
+          properties: {
+            installs: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["model_id"],
+                allOf: [{ $ref: "#/components/schemas/InstallProgress" }],
+                properties: {
+                  model_id: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "GET /api/v1/models/{id}/install-progress": {
+    summary: "Live progress of a model install (all authenticated users)",
+    description: "`in_progress: false` when no install is running for the model. " +
+      "While running, carries the part-file byte count and the remote file " +
+      "size when the server advertises one (total_bytes null = indeterminate).",
+    responses: {
+      200: {
+        description: "Idle, or the install progress state",
+        schema: {
+          anyOf: [
+            {
+              type: "object",
+              required: ["in_progress"],
+              properties: {
+                in_progress: { type: "boolean", enum: [false] },
+              },
+            },
+            {
+              type: "object",
+              required: ["in_progress"],
+              allOf: [{ $ref: "#/components/schemas/InstallProgress" }],
+              properties: {
+                in_progress: { type: "boolean", enum: [true] },
+              },
+            },
+          ],
+        },
+      },
+      ...errorResponses(401, 404),
     },
   },
   "POST /api/v1/models/{id}/verify": {

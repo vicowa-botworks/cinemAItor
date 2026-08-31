@@ -7,6 +7,7 @@ import {
   followUpMessage,
   needsProposalNudge,
 } from "../copilot-followup.js";
+import { installProgressLabel, installProgressPercent } from "../install-progress.js";
 import "./confirm-dialog.js";
 
 const TASK_TYPES = [
@@ -1111,6 +1112,7 @@ export class ModelManager extends LitElement {
     hfTokenMsg: { state: true },
     confirmState: { state: true },
     confirmBusy: { state: true },
+    confirmProgress: { state: true },
   };
 
   constructor() {
@@ -1170,7 +1172,9 @@ export class ModelManager extends LitElement {
     this.hfTokenMsg = null;
     this.confirmState = null;
     this.confirmBusy = false;
+    this.confirmProgress = null;
     this._queryTimer = null;
+    this._installProgressTimer = null;
   }
 
   _setCopilotChatRef = (el) => {
@@ -1184,6 +1188,7 @@ export class ModelManager extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback?.();
     if (this._queryTimer) clearTimeout(this._queryTimer);
+    this._stopInstallProgressPoll();
   }
 
   updated(changed) {
@@ -1231,7 +1236,7 @@ export class ModelManager extends LitElement {
     } catch {
       this.isAdmin = false;
     }
-    this._loadAll();
+    this._loadAll().then(() => this._reattachInstallProgress());
   }
 
   render() {
@@ -1476,6 +1481,7 @@ export class ModelManager extends LitElement {
               tone=${this._confirmSpec().tone}
               ?busy=${this.confirmBusy}
               busyLabel=${this._confirmSpec().busyLabel}
+              progress=${this.confirmState?.kind === "install" ? this.confirmProgress : null}
               @confirm=${() => this._confirmAccept()}
               @cancel=${() => this._confirmDismiss()}
             ></confirm-dialog>
@@ -3284,6 +3290,16 @@ export class ModelManager extends LitElement {
     const st = this.confirmState;
     if (!st) return null;
     if (st.kind === "install") {
+      if (st.reattach) {
+        return {
+          title: "Model installing",
+          message:
+            `The download of "${st.model.name}" is running on the server. You can keep watching here, or close this tab — the install keeps running and you can pick the progress back up on the next visit.`,
+          confirmLabel: "Close",
+          tone: "default",
+          busyLabel: "Installing…",
+        };
+      }
       return {
         title: "Install model",
         message: st.needsConsent
@@ -3306,6 +3322,12 @@ export class ModelManager extends LitElement {
   async _confirmAccept() {
     const st = this.confirmState;
     if (!st) return;
+    if (st.reattach) {
+      // Watching only — the install runs in another tab (or an earlier
+      // visit). Closing just stops the progress poll.
+      this._closeInstallWatch();
+      return;
+    }
     this.confirmBusy = true;
     try {
       if (st.kind === "install") {
@@ -3321,13 +3343,21 @@ export class ModelManager extends LitElement {
 
   _confirmDismiss() {
     if (this.confirmBusy) return;
+    this._closeInstallWatch();
     this.confirmState = null;
+  }
+
+  _closeInstallWatch() {
+    this._stopInstallProgressPoll();
+    this.confirmProgress = null;
   }
 
   async _doInstall(m, needsConsent) {
     this.busyId = m.id;
     this.notice = null;
     this.error = "";
+    this.confirmProgress = { percent: null, label: "Starting…" };
+    this._startInstallProgressPoll(m.id);
     try {
       const result = await api.installModel(m.id, {
         consent: needsConsent ? true : undefined,
@@ -3340,8 +3370,74 @@ export class ModelManager extends LitElement {
     } catch (err) {
       this.error = err.message || "Failed to install model.";
     } finally {
+      this._stopInstallProgressPoll();
+      this.confirmProgress = null;
       this.busyId = null;
     }
+  }
+
+  _startInstallProgressPoll(modelId) {
+    this._stopInstallProgressPoll();
+    const tick = async () => {
+      const st = this.confirmState;
+      if (!st || st.kind !== "install" || st.model.id !== modelId) {
+        this._stopInstallProgressPoll();
+        return;
+      }
+      let data;
+      try {
+        data = await api.getModelInstallProgress(modelId);
+      } catch {
+        return; // transient failure — the next tick retries
+      }
+      if (!data?.in_progress) {
+        this._stopInstallProgressPoll();
+        this.confirmProgress = null;
+        if (st.reattach) {
+          this.confirmState = null;
+          this.confirmBusy = false;
+          this.notice = {
+            kind: "ok",
+            text: `"${st.model.name}" install finished.`,
+          };
+          this._loadModels();
+        }
+        return;
+      }
+      this.confirmProgress = {
+        percent: installProgressPercent(data),
+        label: installProgressLabel(data),
+      };
+    };
+    tick();
+    this._installProgressTimer = setInterval(tick, 1000);
+  }
+
+  _stopInstallProgressPoll() {
+    if (this._installProgressTimer) {
+      clearInterval(this._installProgressTimer);
+      this._installProgressTimer = null;
+    }
+  }
+
+  async _reattachInstallProgress() {
+    let entries;
+    try {
+      entries = (await api.listModelInstallProgress()).installs ?? [];
+    } catch {
+      return;
+    }
+    const entry = entries[0];
+    if (!entry) return;
+    const model = this.models.find((m) => m.id === entry.model_id);
+    if (!model) return;
+    this.confirmState = { kind: "install", model, needsConsent: false, reattach: true };
+    this.confirmBusy = false;
+    this.confirmProgress = {
+      percent: installProgressPercent(entry),
+      label: installProgressLabel(entry),
+    };
+    this._startInstallProgressPoll(model.id);
   }
 
   async _doRemove(m) {

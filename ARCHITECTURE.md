@@ -134,13 +134,16 @@ app-root (main router)
  │   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
   │   │              with approve/reject proposal cards; approving a mutating proposal refreshes
   │   │              the registered-model list so the change is visible without a page reload;
-  │   │              install/remove confirm through confirm-dialog — the modal stays open with a
-  │   │              spinner ("Installing…") while the multi-GB download runs)
+   │   │              install/remove confirm through confirm-dialog — the modal stays open with a
+   │   │              spinner ("Installing…") + live progress bar (bytes/total/%/speed polled from
+   │   │              install-progress) while the multi-GB download runs; a reloaded page
+   │   │              re-attaches to an in-progress install from another tab/visit)
 ├── confirm-dialog (reusable controlled confirmation modal: host-owned `open`,
 │   │              `confirm`/`cancel` events, `tone` default|danger, `busy` mode that
 │   │              suppresses dismissal (buttons/Escape/overlay) and shows a spinner +
-│   │              `busyLabel` on the confirm button; first consumer: model-manager
-│   │              install/remove)
+│   │              `busyLabel` on the confirm button; `progress` object ({percent, label})
+│   │              renders a progress bar (indeterminate while percent is null) + caption;
+│   │              first consumer: model-manager install/remove)
 ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
@@ -184,6 +187,8 @@ app-root (main router)
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
 ├── audio-adjustments (shared trim/gain parse/prefill/validation for the asset-detail
 │   │                  adjustments UI)
+├── install-progress (shared pure byte/percent/label formatting for the model install
+│   │                 progress bar — unit-tested)
 ├── compare (shared A/B pair selection, row differ, and synced-media transport (CompareSync)
 │   │        for review-board candidate compare and asset-detail version compare — unit-tested)
 ├── timeline-playback (shared pure playback math: active visual/audio/text at time, source time,
@@ -271,9 +276,11 @@ server.ts (entry point)
   │   ├── Registry (register/update validate per-backend default_settings — local_cli
   │   │   needs 'command', comfyui needs 'endpoint' + 'workflow' — so
   │   │   misconfigured models are
-  │   │   rejected at registration instead of failing at run time), install/verify
-  │   │   (SHA-256; URL installs stream to a temp file, resumable via HTTP Range with
-  │   │   backoff-retry), remove, enable/disable, /:id/health-check
+   │   │   rejected at registration instead of failing at run time), install/verify
+   │   │   (SHA-256; URL installs stream to a temp file, resumable via HTTP Range with
+   │   │   backoff-retry; GET /:id/install-progress + /install-progress expose live
+   │   │   received/total/speed of in-flight downloads for the UI progress bar +
+   │   │   cross-tab re-attach), remove, enable/disable, /:id/health-check
   │   │   (health check re-hashes only when the `model.bin.verified` sidecar — size+mtime+hash of
   │   │   the last successful full verify — is stale, so unchanged multi-GB models check instantly)
    │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)
