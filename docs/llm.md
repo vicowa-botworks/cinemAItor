@@ -142,9 +142,15 @@ usable weight file / bad repo id / unknown `file`, `404` unknown repo, `409` id 
 
 ## Model Copilot (agent)
 
-`POST /api/v1/llm/agent` runs a bounded tool-calling loop (max 16 tool iterations, max 32 messages
-in `history`). The LLM is told it is the cinemaItor model copilot and handed the tools in OpenAI
-function-calling form.
+`POST /api/v1/llm/agent` runs a bounded tool-calling loop (max 16 tool iterations). The LLM is told
+it is the cinemaItor model copilot and handed the tools in OpenAI function-calling form.
+
+**History budget.** Each request re-sends the whole conversation to the LLM (once per tool-loop
+iteration), so `history` is bounded to the newest 32 messages. Longer histories are **trimmed, not
+rejected** — the oldest turns are dropped, the window is re-anchored at a user turn, and a short
+synthetic note ("the earliest turns … were omitted") is prepended so the copilot knows the context
+was cut. The full conversation still lands in the caller's conversation log (see below), so nothing
+is lost for review.
 
 The system prompt carries **live context** so the copilot answers from actual state: the current
 model/skill registry, and the **hardware the server runs on** (RAM, CPU count, GPU model, total and

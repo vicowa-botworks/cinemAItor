@@ -1,6 +1,14 @@
 import { dirname, join } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertExists, assertMatch, assertNotEquals } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertMatch,
+  assertNotEquals,
+  assertThrows,
+} from "@std/assert";
+import { AppError } from "../src/errors.ts";
 import { closeDb, getDb } from "../src/db/database.ts";
 import { BENCHMARK_JOB_TYPE, createJob } from "../src/db/jobs.ts";
 import {
@@ -13,11 +21,13 @@ import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
 import { modelDir } from "../src/services/model_files.ts";
 import {
+  AGENT_MAX_HISTORY,
   claimsProposalReply,
   copilotSystemPrompt,
   createProposal,
   rejectProposal,
   resetProposals,
+  validateAgentHistory,
 } from "../src/services/llm_agent.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
@@ -195,12 +205,40 @@ describe("llm agent", () => {
           { history: [] },
           { history: [{ role: "system", content: "x" }] },
           { history: [{ role: "user", content: "  " }] },
-          { history: Array.from({ length: 33 }, (_, i) => ({ role: "user", content: `m${i}` })) },
         ]
       ) {
         const res = await post("/api/v1/llm/agent", bad, adminToken);
         assertEquals(res.status, 400, JSON.stringify(bad));
       }
+    });
+  });
+
+  it("trims an over-budget history instead of rejecting it", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint(llm.url);
+      script = [{ content: "Fine, context trimmed." }];
+      const history = Array.from(
+        { length: 40 },
+        (_, i) => ({
+          role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+          content: `m${i}`,
+        }),
+      );
+      const res = await post("/api/v1/llm/agent", { history }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as Record<string, unknown>;
+      assertEquals(body.reply, "Fine, context trimmed.");
+      // The LLM saw the system prompt, the trim note, then the newest 32
+      // turns (m8..m39).
+      const sent = llm.requests.at(-1)?.messages ?? [];
+      assertEquals(
+        sent[1]?.content,
+        "Note: the earliest turns of this conversation were omitted to stay within the context budget. Rely only on the turns shown below.",
+      );
+      assertEquals(sent[2]?.content, "m8");
+      assertEquals(sent.at(-1)?.content, "m39");
+      assertEquals(sent.length, 34);
     });
   });
 
@@ -1357,6 +1395,65 @@ describe("claimsProposalReply", () => {
     assert(!claimsProposalReply("I did not propose anything — I need the repo ID first."));
     assert(!claimsProposalReply("All done, the plan is complete."));
     assert(!claimsProposalReply(""));
+  });
+});
+
+describe("validateAgentHistory trim", () => {
+  const alt = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+      content: `msg-${i}`,
+    }));
+
+  it("passes short histories through untouched", () => {
+    const history = alt(6);
+    assertEquals(validateAgentHistory(history), history);
+  });
+
+  it("trims to the newest window instead of rejecting", () => {
+    const history = alt(AGENT_MAX_HISTORY + 8);
+    const result = validateAgentHistory(history);
+    // Trim note + the newest 32 turns.
+    assertEquals(result.length, AGENT_MAX_HISTORY + 1);
+    assertEquals(result[0].role, "user");
+    assertMatch(result[0].content ?? "", /earliest turns.*omitted/);
+    // The window is the newest 32 of the original 40.
+    assertEquals(result[1].content, `msg-${8}`);
+    assertEquals(result.at(-1)?.content, `msg-39`);
+  });
+
+  it("re-anchors the window at a user turn", () => {
+    // 41 messages: the newest-32 window (msg-9..msg-40) starts with an
+    // assistant reply (odd index 9) — it must be dropped, not sent first.
+    const history = alt(AGENT_MAX_HISTORY + 9);
+    const result = validateAgentHistory(history);
+    assertEquals(result[1].role, "user");
+    assertEquals(result[1].content, "msg-10");
+    assertEquals(result.at(-1)?.content, "msg-40");
+  });
+
+  it("keeps a window of all-assistant messages rather than emptying it", () => {
+    const history = [
+      { role: "user", content: "old question" },
+      ...Array.from({ length: AGENT_MAX_HISTORY }, (_, i) => ({
+        role: "assistant" as const,
+        content: `a-${i}`,
+      })),
+    ];
+    const result = validateAgentHistory(history);
+    assertEquals(result.length, AGENT_MAX_HISTORY + 1);
+    assertEquals(result[1].role, "assistant");
+    assertEquals(result[1].content, "a-0");
+  });
+
+  it("still rejects malformed entries inside the window", () => {
+    const history = [...alt(AGENT_MAX_HISTORY + 8)];
+    history[history.length - 1] = { role: "user", content: "   " };
+    assertThrows(
+      () => validateAgentHistory(history),
+      AppError,
+      `history[${AGENT_MAX_HISTORY + 7}].content must be a non-empty string`,
+    );
   });
 });
 

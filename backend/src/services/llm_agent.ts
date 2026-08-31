@@ -41,6 +41,12 @@ export const AGENT_MAX_TOOL_ITERATIONS = 16;
  * (see claimsProposalReply) when a reply promises a proposal that was never
  * created. */
 export const AGENT_CLAIM_NUDGE_ITERATIONS = 3;
+/**
+ * Conversation budget for agent requests: the newest 32 messages are the
+ * most history sent to the LLM. Longer histories are trimmed (oldest
+ * dropped) instead of rejected — a long copilot conversation must not
+ * permanently 400 — and a short synthetic note marks the gap.
+ */
 export const AGENT_MAX_HISTORY = 32;
 const PROPOSAL_TTL_MS = 60 * 60 * 1000;
 const TOOL_RESULT_MAX_CHARS = 8000;
@@ -830,22 +836,43 @@ export interface AgentRunResult {
 export function validateAgentHistory(raw: unknown): LlmMessage[] {
   if (!Array.isArray(raw)) throw badRequest("history must be an array");
   if (raw.length === 0) throw badRequest("history must contain at least one message");
-  if (raw.length > AGENT_MAX_HISTORY) {
-    throw badRequest(`history is limited to ${AGENT_MAX_HISTORY} messages`);
+  let entries: unknown[] = raw;
+  let trimmed = false;
+  if (entries.length > AGENT_MAX_HISTORY) {
+    // Keep the newest window, never reject: the conversation log keeps the
+    // full history, and re-sending a growing transcript to the LLM every
+    // turn is what the budget is for.
+    entries = entries.slice(-AGENT_MAX_HISTORY);
+    trimmed = true;
+    // Start the window at a user turn so the conversation sent to the LLM
+    // does not begin with an orphaned assistant reply.
+    const firstUser = entries.findIndex((entry) =>
+      typeof entry === "object" && entry !== null && (entry as { role?: unknown }).role === "user"
+    );
+    if (firstUser > 0) entries = entries.slice(firstUser);
   }
-  return raw.map((entry, i) => {
+  const offset = raw.length - entries.length;
+  const messages = entries.map((entry, i) => {
     if (typeof entry !== "object" || entry === null) {
-      throw badRequest(`history[${i}] must be an object`);
+      throw badRequest(`history[${offset + i}] must be an object`);
     }
     const { role, content } = entry as { role?: unknown; content?: unknown };
     if (role !== "user" && role !== "assistant") {
-      throw badRequest(`history[${i}].role must be 'user' or 'assistant'`);
+      throw badRequest(`history[${offset + i}].role must be 'user' or 'assistant'`);
     }
     if (typeof content !== "string" || content.trim() === "") {
-      throw badRequest(`history[${i}].content must be a non-empty string`);
+      throw badRequest(`history[${offset + i}].content must be a non-empty string`);
     }
-    return { role, content: content.slice(0, 20000) };
+    return { role: role as "user" | "assistant", content: content.slice(0, 20000) };
   });
+  if (trimmed) {
+    messages.unshift({
+      role: "user",
+      content:
+        "Note: the earliest turns of this conversation were omitted to stay within the context budget. Rely only on the turns shown below.",
+    });
+  }
+  return messages;
 }
 
 /**
