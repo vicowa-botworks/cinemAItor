@@ -44,8 +44,15 @@ export function installProgressLabel(state) {
   const received = state?.received_bytes;
   const total = state?.total_bytes;
   const hasReceived = typeof received === "number" && Number.isFinite(received);
+  const hasTotal = typeof total === "number" && Number.isFinite(total) && total > 0;
+  if (hasReceived && hasTotal && received >= total) {
+    // The full file is on disk; the backend is renaming, hashing and
+    // recording verification. The last speed sample is stale, so it is
+    // not appended.
+    return "Download complete — finalizing…";
+  }
   let label;
-  if (hasReceived && typeof total === "number" && Number.isFinite(total) && total > 0) {
+  if (hasReceived && hasTotal) {
     const pct = Math.floor(installProgressPercent(state));
     label = `${formatInstallBytes(received)} of ${formatInstallBytes(total)} (${pct}%)`;
   } else if (hasReceived) {

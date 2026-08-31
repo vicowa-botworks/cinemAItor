@@ -69,6 +69,25 @@ describe("installProgressLabel", () => {
     );
   });
 
+  it("reports finalizing once the full file is on disk", () => {
+    assertEquals(
+      installProgressLabel({
+        received_bytes: 10 * 1024 ** 3,
+        total_bytes: 10 * 1024 ** 3,
+        speed_bytes_per_sec: 12.5 * 1024 ** 2,
+      }),
+      "Download complete — finalizing…",
+    );
+    assertEquals(
+      installProgressLabel({
+        received_bytes: 2048,
+        total_bytes: 1024,
+        speed_bytes_per_sec: 0,
+      }),
+      "Download complete — finalizing…",
+    );
+  });
+
   it("degrades when the total is unknown", () => {
     assertEquals(installProgressLabel({ received_bytes: 4096 }), "4 KiB downloaded");
   });
