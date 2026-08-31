@@ -417,9 +417,14 @@ server.ts (entry point)
    │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.
    │   │   A turn ends when it creates its proposals, so the UI auto-continues: after each
     │   │   approval/rejection it sends a follow-up turn (synthetic `auto-continue` message
-    │   │   with outcome + still-pending steps) so multi-step setups chain to completion —
-    │   │   each next action still requires explicit approval (see docs/llm.md).
-   │   │   Conversation logging: `conversation_id` on the agent request (or on a proposal
+     │   │   with outcome + still-pending steps) so multi-step setups chain to completion —
+     │   │   each next action still requires explicit approval (see docs/llm.md).
+    │   │   Guard rails: proposals dedupe per conversation (same tool + identical args while
+    │   │   pending → the existing proposal is returned, `duplicate` step), and a reply that
+    │   │   claims a proposal ("I've proposed…") while creating none triggers one in-loop
+    │   │   verification nudge so the tool call actually happens (the frontend's
+    │   │   "Ask for the proposal" button is the second safety net).
+    │   │   Conversation logging: `conversation_id` on the agent request (or on a proposal
    │   │   via its origin turn) persists the exchange to the llm_conversations/llm_messages
    │   │   tables (db/llm_conversations.ts, migration 0025) — user/assistant rows with
    │   │   tool-step + proposal JSON, plus an event row per approve/reject; GET/DELETE

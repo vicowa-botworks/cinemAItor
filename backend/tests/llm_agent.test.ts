@@ -1,6 +1,6 @@
 import { dirname, join } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists, assertMatch, assertNotEquals } from "@std/assert";
 import { closeDb, getDb } from "../src/db/database.ts";
 import { BENCHMARK_JOB_TYPE, createJob } from "../src/db/jobs.ts";
 import {
@@ -12,7 +12,13 @@ import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
 import { modelDir } from "../src/services/model_files.ts";
-import { copilotSystemPrompt, createProposal, resetProposals } from "../src/services/llm_agent.ts";
+import {
+  claimsProposalReply,
+  copilotSystemPrompt,
+  createProposal,
+  rejectProposal,
+  resetProposals,
+} from "../src/services/llm_agent.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
 // Scripted fake LLM: each call pops the next response (tool call or final
@@ -1332,5 +1338,165 @@ describe("copilot system prompt", () => {
     // pending proposal, so auto-approval cannot apply to them.
     const user = await copilotSystemPrompt(1, false);
     assert(!user.includes("Agent auto-approval is ON"));
+  });
+});
+
+describe("claimsProposalReply", () => {
+  it("detects proposal-claim phrasing", () => {
+    assert(claimsProposalReply("I've proposed running a smoke test to validate the fix."));
+    assert(claimsProposalReply("I proposed updating the runner script."));
+    assert(claimsProposalReply("I have proposed the next step."));
+    assert(claimsProposalReply("I've created a proposal for the venv install."));
+    assert(claimsProposalReply("The proposal is pending — you can approve it."));
+    assert(claimsProposalReply("I've proposed installing the dependencies."));
+  });
+
+  it("ignores honest negatives and ordinary replies", () => {
+    assert(!claimsProposalReply("The model is registered and installed."));
+    assert(!claimsProposalReply("There are no pending proposals."));
+    assert(!claimsProposalReply("I did not propose anything — I need the repo ID first."));
+    assert(!claimsProposalReply("All done, the plan is complete."));
+    assert(!claimsProposalReply(""));
+  });
+});
+
+describe("proposal deduplication", () => {
+  beforeEach(() => resetProposals());
+
+  it("returns the existing pending proposal for identical args", () => {
+    const first = createProposal(
+      "write_model_file",
+      { model_id: "m", filename: "runner.py", content: "x" },
+      1,
+      "conv1",
+    );
+    assertEquals(first.duplicate, false);
+    // Key order must not matter for the identity comparison.
+    const second = createProposal(
+      "write_model_file",
+      { content: "x", filename: "runner.py", model_id: "m" },
+      1,
+      "conv1",
+    );
+    assertEquals(second.duplicate, true);
+    assertEquals(second.proposal.id, first.proposal.id);
+  });
+
+  it("allows different args and different conversations", () => {
+    createProposal(
+      "write_model_file",
+      { model_id: "m", filename: "r.py", content: "x" },
+      1,
+      "conv1",
+    );
+    const otherArgs = createProposal(
+      "write_model_file",
+      { model_id: "m", filename: "r.py", content: "y" },
+      1,
+      "conv1",
+    );
+    assertEquals(otherArgs.duplicate, false);
+    const otherConv = createProposal(
+      "write_model_file",
+      { model_id: "m", filename: "r.py", content: "x" },
+      1,
+      "conv2",
+    );
+    assertEquals(otherConv.duplicate, false);
+  });
+
+  it("does not dedupe once the first proposal resolved", () => {
+    const first = createProposal("update_model", { model_id: "m", enabled: true }, 1, "conv1");
+    rejectProposal(first.proposal.id, true);
+    const again = createProposal("update_model", { model_id: "m", enabled: true }, 1, "conv1");
+    assertEquals(again.duplicate, false);
+    assertNotEquals(again.proposal.id, first.proposal.id);
+  });
+});
+
+describe("llm agent claim-verification nudge", () => {
+  beforeEach(async () => {
+    script = [];
+    llm = startScriptedLlm();
+    freshMemoryDb();
+    await withServer(async (base) => {
+      baseUrl = base;
+      const health = await fetchWithRetry(`${baseUrl}/api/v1/health`);
+      assertEquals(health.status, 200);
+      const res = await post("/api/v1/auth/bootstrap", {
+        email: `admin.${Math.random().toString(36).slice(2)}@example.com`,
+        password: "password123",
+        display_name: "Studio Admin",
+      });
+      assertEquals(res.status, 201);
+      adminToken = ((await res.json()) as { token: string }).token;
+    });
+  });
+
+  afterEach(() => {
+    llm.shutdown();
+    closeDb();
+  });
+
+  it("nudges once when a reply claims a proposal that was never created", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint(llm.url);
+      script = [
+        { content: "I've proposed running a smoke test to validate the fix." },
+        {
+          toolCalls: [{
+            id: "call_smoke",
+            name: "run_smoke_test",
+            args: { model_id: "smoke_nudge_model" },
+          }],
+        },
+        { content: "Done — the smoke test proposal is ready for approval." },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "fix the model" }],
+      }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        reply: string;
+        steps: Array<{ tool: string; status: string }>;
+        proposals: Array<{ id: string; tool: string }>;
+      };
+      assertEquals(body.proposals.length, 1);
+      assertEquals(body.proposals[0].tool, "run_smoke_test");
+      assertEquals(body.steps.length, 1);
+      assertEquals(body.steps[0].status, "proposal");
+      // The second LLM request carries the verification nudge.
+      const second = llm.requests[1].messages as Array<{ role: string; content?: string }>;
+      const last = second[second.length - 1];
+      assertEquals(last.role, "user");
+      assertMatch(String(last.content), /no proposal was created this turn/);
+      assertEquals(llm.requests.length, 3);
+    });
+  });
+
+  it("nudges at most once when the copilot reports it cannot create the proposal", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint(llm.url);
+      script = [
+        { content: "I've proposed running a smoke test." },
+        { content: "Actually I could not create it — the model is not installed yet." },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "fix the model" }],
+      }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        reply: string;
+        steps: unknown[];
+        proposals: unknown[];
+      };
+      assertEquals(body.proposals.length, 0);
+      assertEquals(body.steps.length, 0);
+      assertMatch(body.reply, /not installed/);
+      // Two LLM calls: the claimed turn + one nudge pass. No loop.
+      assertEquals(llm.requests.length, 2);
+    });
   });
 });

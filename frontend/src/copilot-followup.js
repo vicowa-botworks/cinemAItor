@@ -91,10 +91,10 @@ export function followUpMessage(tool, verb, summary = "", pendingTools = []) {
 
 /**
  * Detect the "promise without a proposal" dead end: an assistant reply that
- * asks the user to approve/confirm an action even though the turn created no
- * proposals (so there is nothing to approve — the copilot promised a
- * proposal it never made). The UI offers a nudge button that sends the
- * copilot back to create the missing proposal.
+ * asks the user to approve/confirm an action — or claims a proposal was
+ * already made ("I've proposed running a smoke test") — even though the turn
+ * created no proposals (so there is nothing to approve). The UI offers a
+ * nudge button that sends the copilot back to create the missing proposal.
  *
  * Only consulted for turns with zero proposals, so replies that DO carry
  * proposal cards never match.
@@ -120,5 +120,16 @@ export function needsProposalNudge(content) {
     "your approval",
     "your consent",
     "go ahead",
+    "i've proposed",
+    "i have proposed",
+    "i proposed",
+    "i've created a proposal",
+    "i've created the proposal",
+    "proposed running",
+    "proposed installing",
+    "proposed writing",
+    "proposed updating",
+    "the proposal is",
+    "approval request",
   ].some((phrase) => c.includes(phrase));
 }

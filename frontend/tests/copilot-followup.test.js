@@ -152,9 +152,25 @@ describe("needsProposalNudge", () => {
     assertEquals(needsProposalNudge("PLEASE APPROVE THIS"), true);
   });
 
+  it("detects proposal-claim phrasing ('I've proposed X' with no card)", () => {
+    assertEquals(
+      needsProposalNudge("I've proposed running a smoke test to validate the fix."),
+      true,
+    );
+    assertEquals(needsProposalNudge("I proposed updating the runner script."), true);
+    assertEquals(needsProposalNudge("I have proposed the next step."), true);
+    assertEquals(needsProposalNudge("I've created a proposal for the venv install."), true);
+    assertEquals(needsProposalNudge("The proposal is pending \u2014 you can approve it."), true);
+  });
+
   it("does not nudge ordinary replies", () => {
     assertEquals(needsProposalNudge("The model is registered and installed."), false);
     assertEquals(needsProposalNudge("I ran the smoke test; it passed."), false);
+    assertEquals(needsProposalNudge("There are no pending proposals."), false);
+    assertEquals(
+      needsProposalNudge("I did not propose anything \u2014 I need the repo ID first."),
+      false,
+    );
   });
 
   it("ignores empty and non-string content", () => {

@@ -162,9 +162,25 @@ caller's copilot conversation log (see [Conversation logging](#conversation-logg
 the turn is stateless as before.
 
 **Response:** `{reply, model, iterations, truncated, steps, proposals}` where `steps` is one entry
-per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, proposal_id?}` — and
+per tool call —
+`{tool, args, status: "ok" | "error" | "proposal" | "duplicate", summary,
+proposal_id?}` — and
 `proposals` is the list of proposals created in this turn (empty when the turn only read data).
 `truncated` is true when the loop stopped at the iteration cap without a final reply.
+
+**Duplicate proposals.** Proposals are deduplicated per conversation: if a pending proposal already
+exists with the same tool and identical (key-order-insensitive) arguments, the mutating tool call
+does not create a new one — it returns the existing proposal with a `duplicate` step ("an identical
+`<tool>` proposal is already pending") so the model stops re-proposing it. Once the first proposal
+is approved or rejected, new proposals for the same step are allowed again.
+
+**Claim verification.** A reply that _claims_ a proposal was created ("I've proposed running…")
+while the turn produced no proposals is the classic dead end — the user has nothing to approve. The
+loop detects this phrasing and, if no proposal was created, sends the copilot back **once** with a
+verification nudge ("no proposal was created this turn — call the matching mutating tool now"). The
+nudge fires at most once per turn; if the copilot honestly reports it cannot create the proposal,
+the turn ends with that explanation. The frontend shows a matching "Ask for the proposal" nudge
+button on such replies as a second safety net.
 
 **Read-only tools (auto-execute):**
 
