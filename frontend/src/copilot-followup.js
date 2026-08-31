@@ -88,3 +88,37 @@ export function followUpMessage(tool, verb, summary = "", pendingTools = []) {
     : " Diagnose the failure: if the step's arguments are wrong, propose the CORRECTED version as a new proposal (and tell the user the old pending one can be rejected), or explain the fix if no new proposal is needed.";
   return `The user just ${outcome}.${pendingNote}${next}`;
 }
+
+/**
+ * Detect the "promise without a proposal" dead end: an assistant reply that
+ * asks the user to approve/confirm an action even though the turn created no
+ * proposals (so there is nothing to approve — the copilot promised a
+ * proposal it never made). The UI offers a nudge button that sends the
+ * copilot back to create the missing proposal.
+ *
+ * Only consulted for turns with zero proposals, so replies that DO carry
+ * proposal cards never match.
+ *
+ * @param {unknown} content Assistant turn text.
+ * @returns {boolean}
+ */
+export function needsProposalNudge(content) {
+  if (typeof content !== "string" || content.trim() === "") return false;
+  const c = content.toLowerCase();
+  return [
+    "please approve",
+    "approve this",
+    "approve the",
+    "awaiting approval",
+    "awaiting your approval",
+    "waiting for approval",
+    "waiting for your approval",
+    "needs approval",
+    "needs your approval",
+    "requires approval",
+    "requires your approval",
+    "your approval",
+    "your consent",
+    "go ahead",
+  ].some((phrase) => c.includes(phrase));
+}

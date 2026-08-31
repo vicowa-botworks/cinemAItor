@@ -1,7 +1,12 @@
 import { css, html, LitElement } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { api } from "../api.js";
-import { agentHistory, collectPendingTools, followUpMessage } from "../copilot-followup.js";
+import {
+  agentHistory,
+  collectPendingTools,
+  followUpMessage,
+  needsProposalNudge,
+} from "../copilot-followup.js";
 import "./confirm-dialog.js";
 
 const TASK_TYPES = [
@@ -525,6 +530,18 @@ export class ModelManager extends LitElement {
       text-transform: uppercase;
       color: var(--color-text-muted);
       opacity: 0.7;
+    }
+
+    .copilot-nudge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      padding: 6px 10px;
+      border: 1px dashed rgba(251, 191, 36, 0.5);
+      border-radius: 8px;
+      font-size: 12px;
+      color: #fbbf24;
     }
 
     .copilot-steps {
@@ -1675,8 +1692,12 @@ export class ModelManager extends LitElement {
         </div>
         <p class="admin-note">
           Ask about models, registry state, or HuggingFace repos. Read-only tools
-          run directly; mutating tools (register, install, remove) create a
-          proposal that you must approve explicitly.
+          run directly; mutating tools create a proposal that you must approve
+          explicitly — except under a model's "Auto-approve" toggle, where its
+          model-scoped tools (update, write file, install deps, smoke test,
+          benchmark) run automatically so the copilot can drive a broken model
+          to a working state end-to-end (register, install, remove always need
+          your approval).
           ${!this.isAdmin ? "You are not an admin, so mutating tools are not available." : ""}
         </p>
         ${this.copilotHistoryOpen ? this._renderCopilotHistory() : html`
@@ -1746,6 +1767,15 @@ export class ModelManager extends LitElement {
           `,
       );
     const proposals = (turn.proposals ?? []).map((p) => this._renderProposal(p));
+    // "Promise without a proposal": the reply asks the user to approve
+    // something, but the turn created no proposals — there is nothing to
+    // approve. Offer a nudge that sends the copilot back to create the
+    // missing proposal (the backend prompt rule now forbids this, but a
+    // dead-ended reply can still reach the UI).
+    const nudge = turn.role === "assistant" &&
+      !turn.synthetic &&
+      (turn.proposals ?? []).length === 0 &&
+      needsProposalNudge(turn.content);
     return html`
       <div class="copilot-msg ${turn.role}">
         ${turn.synthetic ? html`<div class="copilot-auto-label">auto-continue</div>` : null}
@@ -1756,6 +1786,19 @@ export class ModelManager extends LitElement {
           : null}
         ${steps.length > 0 ? html`<div class="copilot-steps">${steps}</div>` : null}
         ${proposals.length > 0 ? html`<div class="copilot-steps">${proposals}</div>` : null}
+        ${nudge
+          ? html`
+            <div class="copilot-nudge">
+              <span>This reply asks for approval but created no proposal.</span>
+              <button
+                class="btn btn-secondary btn-small"
+                ?disabled=${this.copilotBusy}
+                @click=${() => this._copilotNudge()}>
+                Request the proposal
+              </button>
+            </div>
+          `
+          : null}
       </div>
     `;
   }
@@ -1822,6 +1865,23 @@ export class ModelManager extends LitElement {
     if (tool === "install_model_deps") {
       return `venv ready (${(result.packages ?? []).length} package(s))`;
     }
+    if (tool === "run_smoke_test") {
+      const secs = typeof result.duration_ms === "number"
+        ? `${(result.duration_ms / 1000).toFixed(1)}s`
+        : "";
+      if (result.status === "failed") {
+        return `smoke test failed (exit ${result.exit_code ?? "?"} in ${secs})`;
+      }
+      if (result.status === "started_ok") {
+        return `smoke test: started OK (ran the full ${secs} timeout)`;
+      }
+      return `smoke test passed in ${secs}`;
+    }
+    if (tool === "run_benchmark") {
+      return `benchmark enqueued (job ${result.job_id ?? "?"}, ${
+        (result.tasks ?? []).length
+      } task(s))`;
+    }
     return "";
   }
 
@@ -1887,6 +1947,21 @@ export class ModelManager extends LitElement {
     } finally {
       this.copilotBusy = false;
     }
+  }
+
+  /**
+   * Nudge for the "promise without a proposal" dead end: the last assistant
+   * reply asked for approval but created no proposals, so there was nothing
+   * to approve. Send a synthetic turn that points out the gap and demands
+   * the mutating tool call (mirrors the backend prompt rule).
+   */
+  async _copilotNudge() {
+    if (this.copilotBusy) return;
+    await this._runCopilotTurn(
+      "Your previous reply asked me to approve something, but it did not create any proposal, so there was nothing to approve. " +
+        "Call the matching mutating tool now so the approval request exists — or state exactly what information is missing that prevents you from creating it.",
+      { synthetic: true },
+    );
   }
 
   /**
@@ -2724,6 +2799,14 @@ export class ModelManager extends LitElement {
                 @click=${() => this._remove(m)}>
                 Remove
               </button>
+              <button
+                class="btn-small"
+                ?disabled=${busy}
+                ?auto=${m.agent_auto_approve}
+                title="Auto-approve the copilot's model-scoped tools for this model (update, write file, install deps, smoke test, benchmark) so it can run a fix loop end-to-end. Register/install/remove always need manual approval."
+                @click=${() => this._setAutoApprove(m, !m.agent_auto_approve)}>
+                ${m.agent_auto_approve ? "Auto-approve: on" : "Auto-approve: off"}
+              </button>
             `
             : null}
         </div>
@@ -3155,6 +3238,26 @@ export class ModelManager extends LitElement {
       this.notice = {
         kind: "ok",
         text: `"${m.name}" ${enabled ? "enabled" : "disabled"}.`,
+      };
+      await this._loadModels();
+    } catch (err) {
+      this.error = err.message || "Failed to update model.";
+    } finally {
+      this.busyId = null;
+    }
+  }
+
+  async _setAutoApprove(m, value) {
+    this.busyId = m.id;
+    this.notice = null;
+    this.error = "";
+    try {
+      await api.updateModel(m.id, { agent_auto_approve: value });
+      this.notice = {
+        kind: "ok",
+        text: value
+          ? `"${m.name}": auto-approval ON — the copilot's model-scoped tools run without asking.`
+          : `"${m.name}": auto-approval OFF — every tool call needs your approval again.`,
       };
       await this._loadModels();
     } catch (err) {

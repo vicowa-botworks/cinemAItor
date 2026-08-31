@@ -402,9 +402,16 @@ server.ts (entry point)
   │   │   LLM (services/llm_agent.ts) — the system prompt carries live context
   │   │   (model/skill registry + detected hardware: RAM/CPU/GPU model, total & free
   │   │   VRAM, from the 60s-cached detectHardware) so it judges model fit from real
-  │   │   numbers; read-only tools auto-execute, mutating tools (admin-only) create
-  │   │   in-memory proposals executed only after explicit approval
-  │   │   (POST /api/v1/llm/proposals/:id/approve). Approvals are single-flight: the
+   │   │   numbers; read-only tools auto-execute, mutating tools (admin-only) create
+   │   │   in-memory proposals executed only after explicit approval
+   │   │   (POST /api/v1/llm/proposals/:id/approve) — except under a model's per-model
+   │   │   `agent_auto_approve` flag (migration 0026, admin toggle), where the model-scoped
+   │   │   tools (update_model, write_model_file, install_model_deps, run_smoke_test,
+   │   │   run_benchmark) auto-execute in-loop so the copilot can drive a broken model to a
+   │   │   working state (register/install/remove always stay manual). New tools:
+   │   │   run_smoke_test (local_cli command once, bounded 60–180 s, returns exit code +
+   │   │   stderr tail — services/model_smoke.ts), run_benchmark (enqueues the async
+   │   │   deterministic benchmark job), benchmark_results (read its rows + job status)
    │   │   proposal is in_flight while the tool executes (duplicate approve/reject
    │   │   409s), and GET /api/v1/llm/proposals lists live status (in_flight +
    │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.

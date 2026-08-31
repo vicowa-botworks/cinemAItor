@@ -1,0 +1,12 @@
+-- 0026: Per-model agent auto-approval for the Model Copilot
+--
+-- When an admin flags a model, the copilot's mutating tools that are scoped
+-- to that model (update_model, write_model_file, install_model_deps,
+-- run_smoke_test, run_benchmark) are auto-approved and executed in the same
+-- agent turn. This lets the copilot drive a broken/uninstalled model to a
+-- working state (fix -> smoke test -> fix) without a per-step approval
+-- round trip. Every auto-approved proposal is still recorded with an
+-- "auto_approved" event, so the conversation log keeps the full audit trail.
+-- Tools that are not model-scoped (register/remove, install, settings) are
+-- never auto-approved.
+ALTER TABLE models ADD COLUMN agent_auto_approve INTEGER NOT NULL DEFAULT 0;

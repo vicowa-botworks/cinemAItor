@@ -90,6 +90,7 @@ describe("migrations", () => {
         "0023_sessions_jti.sql",
         "0024_email_system.sql",
         "0025_llm_conversations.sql",
+        "0026_model_agent_auto_approve.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -120,12 +121,13 @@ describe("migrations", () => {
         "0023_sessions_jti.sql",
         "0024_email_system.sql",
         "0025_llm_conversations.sql",
+        "0026_model_agent_auto_approve.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        25,
+        26,
       );
     } finally {
       db.close();
@@ -162,6 +164,7 @@ describe("migrations", () => {
       "0023_sessions_jti.sql",
       "0024_email_system.sql",
       "0025_llm_conversations.sql",
+      "0026_model_agent_auto_approve.sql",
     ]);
   });
 

@@ -142,8 +142,8 @@ usable weight file / bad repo id / unknown `file`, `404` unknown repo, `409` id 
 
 ## Model Copilot (agent)
 
-`POST /api/v1/llm/agent` runs a bounded tool-calling loop (max 8 tool iterations, max 32 messages in
-`history`). The LLM is told it is the cinemaItor model copilot and handed the tools in OpenAI
+`POST /api/v1/llm/agent` runs a bounded tool-calling loop (max 16 tool iterations, max 32 messages
+in `history`). The LLM is told it is the cinemaItor model copilot and handed the tools in OpenAI
 function-calling form.
 
 The system prompt carries **live context** so the copilot answers from actual state: the current
@@ -176,8 +176,10 @@ per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, pr
 - `huggingface_search` `{query, limit?}`
 - `huggingface_model_info` `{repo_id}`
 - `comfyui_status` `{endpoint}` — GETs `{endpoint}/system_stats` (queue, devices, VRAM)
+- `benchmark_results` `{model_id}` — the model's benchmark measurement rows plus the status of its
+  three most recent benchmark jobs
 
-**Mutating tools (admin-only, never auto-executed):**
+**Mutating tools (admin-only; proposals unless the model's auto-approval is on):**
 
 - `register_model`
   `{name, model_id?, backend, task_types, file_url?, repository_url?, version?, min_vram_mb?, dependencies?, known_limitations?, default_settings?}`
@@ -191,6 +193,18 @@ per tool call — `{tool, args, status: "ok" | "error" | "proposal", summary, pr
   venv python path to use as the `local_cli` `command`
 - `install_model` `{model_id}`
 - `remove_model` `{model_id}`
+- `run_smoke_test` `{model_id, timeout_seconds?}` — runs the model's `local_cli` command ONCE with a
+  minimal prompt and a bounded timeout (default 60 s, max 180 s, `services/model_smoke.ts`): the
+  result is
+  `{status: "ok" | "failed" | "started_ok", exit_code, duration_ms, output_written,
+  error_tail?, note}`
+  — `failed` carries the stderr tail (the error to fix); `started_ok` means the process ran the full
+  timeout without failing (startup healthy, not a speed/quality measurement). `local_cli` models
+  only, must be installed.
+- `run_benchmark` `{model_id}` — enqueues the deterministic benchmark job (fixed prompts, 2
+  candidates per benchmarkable task type; `services/model_benchmark.ts`). It returns the job id
+  immediately — the run is asynchronous in the job queue (hours on CPU); 400 when a benchmark for
+  the model is already queued/running.
 
 When the model calls a mutating tool, the harness creates a **proposal**
 (`{id, tool, args, status, created_at, expires_at, user_id, in_flight?, started_at?}` — in-memory, 1
@@ -249,6 +263,35 @@ referencing the runner script by absolute path with the `{prompt}/{seed}/{output
 reference images) placeholders, and a device flag matching the detected hardware (`cuda` when the
 GPU has sufficient free VRAM, `cpu` otherwise). Every file the copilot writes (scripts, `.venv`)
 lives inside the model's own storage directory, so removing the model removes its runtime too.
+
+**Agent auto-approval (per model).** Every model has an admin-set `agent_auto_approve` flag (model
+card toggle, `PATCH /api/v1/models/:id {agent_auto_approve: true}`; migration 0026, default off).
+When it is on, the copilot's **model-scoped** mutating tools — `update_model`, `write_model_file`,
+`install_model_deps`, `run_smoke_test`, `run_benchmark` — auto-execute the moment the agent calls
+them: the harness still creates the proposal (same audit trail, same conversation event log), then
+immediately runs it through the same single-flight approval path and feeds the tool result back into
+the loop in the same turn. Non-scoped tools (`register_model`, `register_model_from_huggingface`,
+`install_model`, `remove_model`) are never auto-approved — installing or deleting a model always
+costs a human decision.
+
+This is what lets the copilot drive a broken or freshly-set-up model to a working state end-to-end
+inside one turn: change → `run_smoke_test` → read the `error_tail` → fix the root cause →
+`run_smoke_test` again → `run_benchmark` once it passes. The 16-iteration cap bounds both the cost
+and the wall time of such a loop (each iteration is one LLM call; a smoke test itself is bounded at
+180 s). An auto-approval that fails leaves the proposal **pending** (the proposal card still
+appears, so a human can retry or reject it) and the step is reported as
+`auto-approval failed: <error>`; successes log an `auto_approved` event row on the conversation. The
+system prompt tells the copilot which models have auto-approval on, and its fix-loop rule is
+smoke-test-first: validate every change with `run_smoke_test` instead of asking the user to run the
+model and paste the error back, and only run a (slow, asynchronous) benchmark after the smoke test
+passes.
+
+**No approval without a proposal.** The system prompt forbids the dead end where the copilot ends a
+turn asking the user to approve something it never proposed: "If you ask the user to approve
+something, you must have called the matching mutating tool in this same turn." As a UI-level
+backstop, an assistant reply that asks for approval but created zero proposals shows a
+`Request the proposal` nudge button, which sends a synthetic follow-up pointing out the gap and
+demanding the tool call.
 
 ## Conversation logging
 
