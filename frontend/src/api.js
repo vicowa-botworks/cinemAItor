@@ -788,6 +788,32 @@ class ApiClient {
     });
   }
 
+  listWorkflows() {
+    return this.request("/workflows");
+  }
+
+  getWorkflow(id) {
+    return this.request(`/workflows/${encodeURIComponent(id)}`);
+  }
+
+  // `content` is the raw ComfyUI API-format JSON text (or a parsed object).
+  // The backend validates + canonicalizes it.
+  uploadWorkflow({ name, filename, content }) {
+    const body = { content };
+    if (name !== undefined) body.name = name;
+    if (filename !== undefined) body.filename = filename;
+    return this.request("/workflows", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteWorkflow(id) {
+    return this.request(`/workflows/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
   searchHuggingFace({ q = "", filter = "", limit = 12 } = {}) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);

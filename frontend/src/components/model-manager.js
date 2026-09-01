@@ -742,6 +742,79 @@ export class ModelManager extends LitElement {
       margin-top: 6px;
     }
 
+    .copilot-workflows {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+    }
+
+    .copilot-wf-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 4px 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text);
+      text-align: left;
+    }
+
+    .copilot-wf-toggle .chip {
+      margin-left: auto;
+    }
+
+    .copilot-wf-upload.busy {
+      pointer-events: none;
+      opacity: 0.6;
+    }
+
+    .copilot-wf-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .copilot-wf-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+    }
+
+    .copilot-wf-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .copilot-wf-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .copilot-wf-meta {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .reg-field label {
       font-size: 12px;
       color: var(--color-text-muted);
@@ -1093,6 +1166,10 @@ export class ModelManager extends LitElement {
     copilotHistoryDetail: { state: true },
     copilotHistoryBusy: { state: true },
     copilotHistoryError: { state: true },
+    copilotWorkflowsOpen: { state: true },
+    copilotWorkflows: { state: true },
+    copilotWorkflowBusy: { state: true },
+    copilotWorkflowError: { state: true },
     showRegister: { state: true },
     regBusy: { state: true },
     regForm: { state: true },
@@ -1153,6 +1230,10 @@ export class ModelManager extends LitElement {
     this.copilotHistoryDetail = null;
     this.copilotHistoryBusy = false;
     this.copilotHistoryError = "";
+    this.copilotWorkflowsOpen = false;
+    this.copilotWorkflows = [];
+    this.copilotWorkflowBusy = false;
+    this.copilotWorkflowError = "";
     this.showRegister = false;
     this.regBusy = false;
     this.regForm = { ...EMPTY_REG_FORM };
@@ -1706,6 +1787,7 @@ export class ModelManager extends LitElement {
           your approval).
           ${!this.isAdmin ? "You are not an admin, so mutating tools are not available." : ""}
         </p>
+        ${this.isAdmin && !this.copilotHistoryOpen ? this._renderCopilotWorkflows() : null}
         ${this.copilotHistoryOpen ? this._renderCopilotHistory() : html`
           ${this.copilot.length > 0
             ? html`
@@ -2092,6 +2174,113 @@ export class ModelManager extends LitElement {
     // A cleared conversation is a new one: the next turn mints a fresh id.
     this.#copilotConversationId = null;
     this._copilotFollow = false;
+  }
+
+  // --- Saved workflows (data the copilot references by id, not context) ---
+
+  async _toggleCopilotWorkflows() {
+    this.copilotWorkflowsOpen = !this.copilotWorkflowsOpen;
+    if (this.copilotWorkflowsOpen && this.copilotWorkflows.length === 0) {
+      await this._loadCopilotWorkflows();
+    }
+  }
+
+  async _loadCopilotWorkflows() {
+    this.copilotWorkflowBusy = true;
+    this.copilotWorkflowError = "";
+    try {
+      this.copilotWorkflows = await api.listWorkflows();
+    } catch (err) {
+      this.copilotWorkflowError = err.message || "Failed to load workflows.";
+    } finally {
+      this.copilotWorkflowBusy = false;
+    }
+  }
+
+  async _onCopilotWorkflowFile(e) {
+    const input = e.target;
+    const file = input.files && input.files[0];
+    input.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    this.copilotWorkflowBusy = true;
+    this.copilotWorkflowError = "";
+    try {
+      const content = await file.text();
+      await api.uploadWorkflow({ filename: file.name, content });
+      await this._loadCopilotWorkflows();
+    } catch (err) {
+      this.copilotWorkflowError = err.message || "Failed to save the workflow.";
+    } finally {
+      this.copilotWorkflowBusy = false;
+    }
+  }
+
+  async _deleteCopilotWorkflow(id) {
+    if (!window.confirm("Delete this saved workflow? Models referencing it keep a copy.")) {
+      return;
+    }
+    this.copilotWorkflowBusy = true;
+    this.copilotWorkflowError = "";
+    try {
+      await api.deleteWorkflow(id);
+      await this._loadCopilotWorkflows();
+    } catch (err) {
+      this.copilotWorkflowError = err.message || "Failed to delete the workflow.";
+    } finally {
+      this.copilotWorkflowBusy = false;
+    }
+  }
+
+  _renderCopilotWorkflows() {
+    const open = this.copilotWorkflowsOpen;
+    const list = this.copilotWorkflows;
+    const busy = this.copilotWorkflowBusy;
+    const rows = list.map((wf) => {
+      const size = wf.size >= 1048576
+        ? `${(wf.size / 1048576).toFixed(1)} MB`
+        : `${Math.max(1, Math.ceil(wf.size / 1024))} KB`;
+      return html`
+        <div class="copilot-wf-row">
+          <div class="copilot-wf-info">
+            <span class="copilot-wf-name">${wf.name}</span>
+            <span class="copilot-wf-meta" title="${wf.id}">
+              ${wf.id} · ${wf.node_count} nodes · ${size}
+            </span>
+          </div>
+          <button class="btn btn-secondary btn-small" ?disabled=${busy}
+            @click=${() => this._deleteCopilotWorkflow(wf.id)}>Delete</button>
+        </div>
+      `;
+    });
+    return html`
+      <div class="copilot-workflows">
+        <button class="copilot-wf-toggle" type="button" @click=${() =>
+          this._toggleCopilotWorkflows()}>
+          <span>${open ? "▾" : "▸"} Workflows</span>
+          <span class="chip">${list.length}</span>
+        </button>
+        ${open
+          ? html`
+            <p class="admin-note">
+              Upload a ComfyUI workflow (API format) once; the copilot references it by id
+              (as workflow_ref in a model's settings) instead of inlining the full JSON, so
+              large graphs (30k–100k+ chars) are not truncated.
+            </p>
+            <label class="btn btn-secondary btn-small copilot-wf-upload ${busy ? "busy" : ""}">
+              ${busy ? "Saving..." : "Upload .json"}
+              <input type="file" accept=".json,application/json" hidden
+                @change=${(e) => this._onCopilotWorkflowFile(e)}>
+            </label>
+            ${this.copilotWorkflowError
+              ? html`<div class="error">${this.copilotWorkflowError}</div>`
+              : null}
+            ${list.length === 0 && !busy
+              ? html`<p class="admin-note">No saved workflows yet.</p>`
+              : html`<div class="copilot-wf-list">${rows}</div>`}
+          `
+          : null}
+      </div>
+    `;
   }
 
   // --- Copilot conversation history (server-logged) ---

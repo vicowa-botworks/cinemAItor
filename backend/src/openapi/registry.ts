@@ -29,6 +29,8 @@ import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { openApiOps as modelOps } from "@cinemaItor/routes/models.ts";
 import { router as llmRouter } from "@cinemaItor/routes/llm.ts";
 import { openApiOps as llmOps } from "@cinemaItor/routes/llm.ts";
+import { router as workflowRouter } from "@cinemaItor/routes/workflows.ts";
+import { openApiOps as workflowOps } from "@cinemaItor/routes/workflows.ts";
 import { jobRouter } from "@cinemaItor/routes/jobs.ts";
 import { openApiOps as jobOps } from "@cinemaItor/routes/jobs.ts";
 import { reviewRouter } from "@cinemaItor/routes/review.ts";
@@ -70,6 +72,7 @@ export function apiRouters(): ApiRouterRef[] {
     { tag: "audio", router: audioRouter },
     { tag: "models", router: modelRouter },
     { tag: "llm", router: llmRouter },
+    { tag: "workflows", router: workflowRouter },
     { tag: "jobs", router: jobRouter },
     { tag: "review", router: reviewRouter },
     { tag: "renders", router: renderRouter },
@@ -101,6 +104,7 @@ export function allOps(): Record<string, OperationMeta> {
     ["audio", audioOps],
     ["models", modelOps],
     ["llm", llmOps],
+    ["workflows", workflowOps],
     ["jobs", jobOps],
     ["review", reviewOps],
     ["renders", renderOps],

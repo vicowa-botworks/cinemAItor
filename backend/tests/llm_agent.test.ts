@@ -17,6 +17,7 @@ import {
   updateModel as dbUpdateModel,
 } from "../src/db/models.ts";
 import { createUser } from "../src/db/schema.ts";
+import { createWorkflow } from "../src/db/workflows.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
 import { modelDir } from "../src/services/model_files.ts";
@@ -1300,6 +1301,38 @@ describe("llm agent runtime tools", () => {
         assertEquals(names.includes(mutating), false, mutating);
       }
       assertEquals(names.includes("model_files"), true);
+    });
+  });
+
+  it("list_workflows and get_workflow read saved workflows as data", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const admin = getDb()
+        .prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+        .get() as { id: number };
+      const wf = createWorkflow(admin.id, {
+        name: "My Flow",
+        content: { "1": { class_type: "KSampler", inputs: { seed: 7, model: ["2", 0] } } },
+      });
+      const listBody = await agentTurn(
+        [{ id: "call_lw", name: "list_workflows", args: {} }],
+        "list my workflows",
+      );
+      assertEquals(stepsOf(listBody)[0].status, "ok");
+      assertMatch(String(stepsOf(listBody)[0].summary), /result/);
+
+      const getBody = await agentTurn(
+        [{ id: "call_gw", name: "get_workflow", args: { workflow_id: wf.id } }],
+        "show my flow structure",
+      );
+      assertEquals(stepsOf(getBody)[0].status, "ok");
+
+      const missing = await agentTurn(
+        [{ id: "call_gw2", name: "get_workflow", args: { workflow_id: "wf_missing" } }],
+        "show a missing flow",
+      );
+      assertEquals(stepsOf(missing)[0].status, "error");
+      assertMatch(String(stepsOf(missing)[0].summary), /Unknown workflow/);
     });
   });
 });
