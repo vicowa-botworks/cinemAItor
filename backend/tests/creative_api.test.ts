@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { closeDb } from "../src/db/database.ts";
-import { createAsset } from "../src/db/assets.ts";
+import { createAsset, createAssetVersion } from "../src/db/assets.ts";
 import { createProject } from "../src/db/projects.ts";
 import { registerModel } from "../src/db/models.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
@@ -327,6 +327,238 @@ describe("storyboards and scenes api", () => {
           "failed",
         ]);
         assertEquals(sceneJob.status, "succeeded");
+      })();
+    });
+  });
+
+  it("threads the device choice and VRAM requirement into creative job settings", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const localT2iId = registerModel(ownerId, {
+          name: "local-cli-t2i",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["text_to_image"],
+          enabled: true,
+          vram_requirement_mb: 51200,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+        const localI2vId = registerModel(ownerId, {
+          name: "local-cli-i2v",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["image_to_video"],
+          enabled: true,
+          vram_requirement_mb: 65536,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+
+        const board = await req(
+          "POST",
+          "/api/v1/storyboards",
+          { project_id: projectId, name: "VRAM board" },
+          ownerToken,
+        );
+        const boardId = (board.json as { id: string }).id;
+        const p1 = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels`,
+          { panel_order: 1, prompt: "a quiet harbor" },
+          ownerToken,
+        );
+        const p1Id = (p1.json as { id: string }).id;
+        const p2 = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels`,
+          { panel_order: 2, prompt: "waves at night" },
+          ownerToken,
+        );
+        const p2Id = (p2.json as { id: string }).id;
+
+        // Panel preview: explicit device + the model's VRAM requirement.
+        const preview = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels/${p1Id}/generate-preview`,
+          { model_id: localT2iId, device: "cpu" },
+          ownerToken,
+        );
+        assertEquals(preview.status, 202);
+        const previewJobId = (preview.json as { job_id: string }).job_id;
+        const p1job = (await req(
+          "GET",
+          `/api/v1/jobs/${previewJobId}`,
+          undefined,
+          ownerToken,
+        )).json as { settings: Record<string, unknown> };
+        assertEquals(p1job.settings.device, "cpu");
+        assertEquals(p1job.settings.min_free_vram_mb, 51200);
+
+        // Scene generation (i2v from a linked panel preview) with a device.
+        const preview2 = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels/${p2Id}/generate-preview`,
+          { model_id: t2iModelId },
+          ownerToken,
+        );
+        const p2done = await waitForJob(
+          ownerToken,
+          (preview2.json as { job_id: string }).job_id,
+          ["succeeded", "failed"],
+        );
+        assertEquals(p2done.status, "succeeded");
+        const scene = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Harbor scene", prompt: "waves" },
+          ownerToken,
+        );
+        const sceneId = (scene.json as { id: string }).id;
+        const link = await req(
+          "PATCH",
+          `/api/v1/storyboards/${boardId}/panels/${p2Id}`,
+          { linked_scene_id: sceneId },
+          ownerToken,
+        );
+        assertEquals(link.status, 200);
+        const sceneGen = await req(
+          "POST",
+          `/api/v1/scenes/${sceneId}/generate`,
+          { model_id: localI2vId, device: "cpu" },
+          ownerToken,
+        );
+        assertEquals(sceneGen.status, 202);
+        const sceneJob = (await req(
+          "GET",
+          `/api/v1/jobs/${(sceneGen.json as { job_id: string }).job_id}`,
+          undefined,
+          ownerToken,
+        )).json as { settings: Record<string, unknown> };
+        assertEquals(sceneJob.settings.device, "cpu");
+        assertEquals(sceneJob.settings.min_free_vram_mb, 65536);
+
+        // No device and no declared requirement: neither key is injected.
+        const preview3 = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels/${p2Id}/generate-preview`,
+          { model_id: t2iModelId },
+          ownerToken,
+        );
+        const p3job = (await req(
+          "GET",
+          `/api/v1/jobs/${(preview3.json as { job_id: string }).job_id}`,
+          undefined,
+          ownerToken,
+        )).json as { settings: Record<string, unknown> };
+        assertEquals(p3job.settings.device, undefined);
+        assertEquals(p3job.settings.min_free_vram_mb, undefined);
+      })();
+    });
+  });
+
+  it("threads the device choice into audio and timeline-score job settings", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const localMusicId = registerModel(ownerId, {
+          name: "local-cli-music",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["music"],
+          enabled: true,
+          vram_requirement_mb: 40000,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+
+        // Audio generation: explicit device + the model's VRAM requirement.
+        const audio = await req(
+          "POST",
+          "/api/v1/audio/generate",
+          {
+            kind: "music",
+            prompt: "tense underscore",
+            project_id: projectId,
+            model_id: localMusicId,
+            device: "cuda",
+          },
+          ownerToken,
+        );
+        assertEquals(audio.status, 202);
+        const audioJob = (await req(
+          "GET",
+          `/api/v1/jobs/${(audio.json as { job_id: string }).job_id}`,
+          undefined,
+          ownerToken,
+        )).json as { settings: Record<string, unknown> };
+        assertEquals(audioJob.settings.device, "cuda");
+        assertEquals(audioJob.settings.min_free_vram_mb, 40000);
+
+        // Timeline score: a cut is required, so stage a video item first.
+        const clip = createAsset(
+          {
+            unique_slug: `vram_clip_${Math.random().toString(36).slice(2, 8)}`,
+            display_name: "Clip",
+            asset_type: "video",
+            library_scope: "global",
+          },
+          ownerId,
+        );
+        const clipVersion = createAssetVersion(clip.id, ownerId, {
+          content_hash: "f".repeat(64),
+          file_path: "/tmp/vram_clip.mp4",
+          format: "mp4",
+          mime_type: "video/mp4",
+          file_size: 1000,
+          make_active: true,
+        }).id;
+        const tl = await req(
+          "POST",
+          "/api/v1/timelines",
+          { project_id: projectId, name: "Score cut" },
+          ownerToken,
+        );
+        assertEquals(tl.status, 201);
+        const timelineId = (tl.json as { id: string }).id;
+        const track = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/tracks`,
+          { track_type: "video", name: "V1" },
+          ownerToken,
+        );
+        assertEquals(track.status, 201);
+        const trackId = (track.json as { id: string }).id;
+        const item = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/items`,
+          { track_id: trackId, asset_version_id: clipVersion, start_time: 0, end_time: 4 },
+          ownerToken,
+        );
+        assertEquals(item.status, 201);
+
+        const score = await req(
+          "POST",
+          `/api/v1/timelines/${timelineId}/score`,
+          { prompt: "tense underscore", model_id: localMusicId, device: "cpu" },
+          ownerToken,
+        );
+        assertEquals(score.status, 202);
+        const scoreJob = (await req(
+          "GET",
+          `/api/v1/jobs/${(score.json as { job: { job_id: string } }).job.job_id}`,
+          undefined,
+          ownerToken,
+        )).json as { settings: Record<string, unknown> };
+        assertEquals(scoreJob.settings.device, "cpu");
+        assertEquals(scoreJob.settings.min_free_vram_mb, 40000);
       })();
     });
   });

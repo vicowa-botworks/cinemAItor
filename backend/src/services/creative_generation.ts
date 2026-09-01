@@ -14,11 +14,32 @@ import { creativePromptFor, getScene } from "../db/scenes.ts";
 import { getProjectAccessible } from "../db/projects.ts";
 import { listReferencesForSource, type ReferenceRow } from "../db/references.ts";
 import { getDb } from "../db/database.ts";
+import { type GenerationDevice, resolveDevice } from "./asset_generation.ts";
 
 export interface GenerateOptions {
   model_id?: string;
   seed?: string;
+  device?: unknown;
   settings?: Record<string, unknown>;
+}
+
+/**
+ * Device-override job settings (the local_cli VRAM-choice modal). `device`
+ * forces the runner's device (RUNNER_DEVICE env); for local_cli models with a
+ * declared VRAM requirement, `min_free_vram_mb` aligns the runner's
+ * auto-fallback threshold with the UI's pre-generation check (other backends
+ * ignore both — see asset_generation.ts).
+ */
+export function deviceJobSettings(
+  model: Model,
+  device?: GenerationDevice,
+): Record<string, unknown> {
+  const settings: Record<string, unknown> = {};
+  if (device) settings.device = device;
+  if (model.backend === "local_cli" && model.vram_requirement_mb != null) {
+    settings.min_free_vram_mb = model.vram_requirement_mb;
+  }
+  return settings;
 }
 
 export function pickModel(taskType: string, modelId: string | undefined): Model {
@@ -107,7 +128,10 @@ export function generatePanelPreview(
     asset_id: asset.id,
     prompt_text: prompt.content,
     seed: options.seed,
-    settings: (options.settings ?? {}) as Record<string, unknown>,
+    settings: {
+      ...deviceJobSettings(model, resolveDevice(options.device)),
+      ...(options.settings ?? {}),
+    },
     input_asset_versions: inputs,
     storyboard_panel_id: panelId,
   });
@@ -205,7 +229,10 @@ export function generateScene(
     scene_id: sceneId,
     prompt_text: prompt.content,
     seed: options.seed,
-    settings: (options.settings ?? {}) as Record<string, unknown>,
+    settings: {
+      ...deviceJobSettings(model, resolveDevice(options.device)),
+      ...(options.settings ?? {}),
+    },
     input_asset_versions: inputs,
   });
 
@@ -304,7 +331,10 @@ export function batchGenerateScene(
       prompt_text: prompt.content,
       prompt_version_id: prompt.version_id,
       seed: options.seed,
-      settings: (options.settings ?? {}) as Record<string, unknown>,
+      settings: {
+        ...deviceJobSettings(model, resolveDevice(options.device)),
+        ...(options.settings ?? {}),
+      },
       input_asset_versions: inputs,
     });
 
@@ -349,6 +379,7 @@ export interface AudioGenerateOptions {
   scene_id?: string;
   model_id?: string;
   seed?: string;
+  device?: unknown;
   settings?: Record<string, unknown>;
 }
 
@@ -415,7 +446,10 @@ export function generateAudio(
     scene_id: options.scene_id,
     prompt_text: prompt,
     seed: options.seed,
-    settings: (options.settings ?? {}) as Record<string, unknown>,
+    settings: {
+      ...deviceJobSettings(model, resolveDevice(options.device)),
+      ...(options.settings ?? {}),
+    },
   });
 
   return {
@@ -436,6 +470,7 @@ export const SUBTITLE_JOB_TYPE = "transcribe";
 export interface SubtitleGenerateOptions {
   model_id?: string;
   seed?: string;
+  device?: unknown;
   settings?: Record<string, unknown>;
 }
 
@@ -492,6 +527,7 @@ export function generateSubtitles(
   );
 
   const settings: Record<string, unknown> = {
+    ...deviceJobSettings(model, resolveDevice(options.device)),
     ...(options.settings ?? {}),
     source: {
       asset_id: assetId,

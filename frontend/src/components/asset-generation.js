@@ -72,6 +72,17 @@ export function normalizeCandidates(value) {
 }
 
 /**
+ * Unwrap the GET /models/hardware response envelope to its inner `hardware`
+ * object (the shape `vramPreCheck`/`vramSufficient` expect). The endpoint
+ * answers `{hardware, warnings}` — passing the envelope to the helpers reads
+ * `hardware.gpu` off a missing key and silently fails the check open.
+ * @param {{hardware?: {gpu?: object}} | null | undefined} response
+ */
+export function hardwareOf(response) {
+  return response?.hardware ?? null;
+}
+
+/**
  * Decide whether a generation job needs a pre-submit VRAM choice, and report
  * how much VRAM is free versus required.
  *

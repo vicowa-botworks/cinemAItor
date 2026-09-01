@@ -49,7 +49,7 @@ import { generateAudio } from "@cinemaItor/services/creative_generation.ts";
 import { type ScoreInput, suggestScore } from "@cinemaItor/services/score_suggestion.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
-import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
+import { deviceProperty, errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -712,6 +712,7 @@ export const timelineRouter = new Router()
         prompt,
         project_id: timeline.project_id,
         model_id: modelId,
+        device: body.device,
       });
       ctx.response.status = 202;
       ctx.response.body = {
@@ -1064,6 +1065,7 @@ export const openApiOps: Record<string, OperationMeta> = {
         properties: {
           prompt: { type: "string" },
           model_id: { type: "string" },
+          device: deviceProperty(),
         },
       },
     },

@@ -125,6 +125,7 @@ export const audioRouter = new Router()
       scene_id: typeof raw.scene_id === "string" ? raw.scene_id : undefined,
       model_id: typeof raw.model_id === "string" ? raw.model_id : undefined,
       seed: typeof raw.seed === "string" ? raw.seed : undefined,
+      device: raw.device,
       settings: raw.settings && typeof raw.settings === "object"
         ? raw.settings as Record<string, unknown>
         : undefined,
@@ -318,7 +319,7 @@ export const audioRouter = new Router()
         userId,
         param(ctx as ParamsContext, "id"),
         param(ctx as ParamsContext, "versionId"),
-        { model_id: modelId, seed, settings },
+        { model_id: modelId, seed, device: raw.device, settings },
       );
       ctx.response.status = 202;
       ctx.response.body = result;

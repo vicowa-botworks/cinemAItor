@@ -5,6 +5,7 @@ import { detailToState, UndoHistory } from "../undo-history.js";
 import { filmstripFramesFor } from "../timeline-playback.js";
 import { parseAudioMetadata } from "../audio-adjustments.js";
 import "./audio-dialog.js";
+import { VramGuard } from "./vram-guard.js";
 
 const SCALE = 60;
 const LABEL_W = 210;
@@ -63,7 +64,7 @@ function isTextTrack(track) {
   return TEXT_TRACK_TYPES.includes(track.track_type);
 }
 
-export class TimelineDetail extends LitElement {
+export class TimelineDetail extends VramGuard(LitElement) {
   static styles = css`
     .detail {
       display: flex;
@@ -1641,11 +1642,25 @@ export class TimelineDetail extends LitElement {
   async _generateScore() {
     const prompt = this.scorePrompt.trim();
     if (!prompt) return;
+    // No model picker here — the backend auto-picks the first enabled music
+    // model, so the gate checks that same model.
+    let model = null;
+    try {
+      const models = await api.listModels({ task_type: "music", enabled: true });
+      model = models[0] ?? null;
+    } catch {
+      model = null;
+    }
+    const device = await this.resolveVramDevice(model);
+    if (device === "cancel") return;
     this.scoreBusy = true;
     this.scoreError = "";
     this.scoreResult = null;
     try {
-      const res = await api.generateScore(this.timelineId, { prompt });
+      const res = await api.generateScore(
+        this.timelineId,
+        device ? { prompt, device } : { prompt },
+      );
       this.scoreResult = res.job;
       this.score = res.suggestion;
     } catch (err) {
@@ -1830,6 +1845,7 @@ export class TimelineDetail extends LitElement {
           ${this._renderSnapshotsCard()}
           ${this._renderRenderCard()}
         </div>
+        ${this.vramDialog}
       </div>
     `;
   }

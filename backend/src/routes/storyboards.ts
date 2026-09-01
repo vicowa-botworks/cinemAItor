@@ -18,7 +18,7 @@ import {
 import { generatePanelPreview } from "@cinemaItor/services/creative_generation.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
-import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
+import { deviceProperty, errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -214,6 +214,7 @@ export const storyboardRouter = new Router()
       const result = generatePanelPreview(userId, idParam(ctx, "panelId"), {
         model_id: optionalString(body, "model_id"),
         seed: optionalString(body, "seed"),
+        device: body.device,
         settings: optionalJsonObject(body, "settings"),
       });
       ctx.response.status = 202;
@@ -366,6 +367,7 @@ export const openApiOps: Record<string, OperationMeta> = {
         properties: {
           model_id: { type: "string" },
           seed: { type: "string" },
+          device: deviceProperty(),
           settings: { type: "object", additionalProperties: true },
         },
       },

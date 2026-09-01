@@ -26,7 +26,7 @@ import { batchGenerateScene, generateScene } from "@cinemaItor/services/creative
 import { analyzeContinuity, type ContinuityInput } from "@cinemaItor/services/continuity.ts";
 import { badRequest, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
-import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
+import { deviceProperty, errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 
 function loadContinuityInput(projectId: string, userId: number): ContinuityInput {
   const boards = listStoryboards(userId, { project_id: projectId });
@@ -286,6 +286,7 @@ export const sceneRouter = new Router()
     const result = generateScene(userId, idParam(ctx, "id"), {
       model_id: optionalString(body, "model_id"),
       seed: optionalString(body, "seed"),
+      device: body.device,
       settings: optionalJsonObject(body, "settings"),
     });
     ctx.response.status = 202;
@@ -297,6 +298,7 @@ export const sceneRouter = new Router()
     const result = batchGenerateScene(userId, idParam(ctx, "id"), {
       model_id: optionalString(body, "model_id"),
       seed: optionalString(body, "seed"),
+      device: body.device,
       settings: optionalJsonObject(body, "settings"),
     });
     ctx.response.status = 202;
@@ -517,6 +519,7 @@ export const openApiOps: Record<string, OperationMeta> = {
         properties: {
           model_id: { type: "string" },
           seed: { type: "string" },
+          device: deviceProperty(),
           settings: { type: "object", additionalProperties: true },
         },
       },
@@ -537,6 +540,7 @@ export const openApiOps: Record<string, OperationMeta> = {
         properties: {
           model_id: { type: "string" },
           seed: { type: "string" },
+          device: deviceProperty(),
           settings: { type: "object", additionalProperties: true },
         },
       },
