@@ -9,7 +9,8 @@ leases, and model runtimes behind a common adapter interface.
   settings (JSON), input asset versions, reference roles, status, progress, error, and the ids of
   what it produced.
 - **Job event** (`job_events`): append-only log per job (`created`, `claimed`, `started`,
-  `progress`, `candidate.created`, `succeeded`, `failed`, `cancelled`, `retried`, `recovered`).
+  `progress`, `runner.log`, `candidate.created`, `succeeded`, `failed`, `cancelled`, `retried`,
+  `recovered`).
 - **Statuses**: `queued` -> `running` -> `succeeded` | `failed` | `cancelled` (cancelling a running
   job goes through `cancelling` first).
 - **Adapter interface** (GEN-007): `backend/src/services/adapters.ts` defines
@@ -47,6 +48,15 @@ except for image-input tasks.
   stages.
 - **Recovery** (GEN-017): on startup (and on each tick) jobs still marked running whose lease
   expired are re-queued with a `recovered` event.
+- **Runner status lines**: a local_cli command may print `RUNNER_STATUS {"key": value}` lines to
+  stdout (e.g. the device a long generation runs on:
+  `RUNNER_STATUS {"device":"cuda","free_vram_gib":95.1}`). Each line is forwarded live as a
+  `runner.log` job event formatted as `key=value, ...`, so the job card reports runtime state while
+  the CLI is still running.
+- **Seeds are strings**: the `{seed}` placeholder is rendered verbatim — benchmark jobs pass
+  `bench-<model-id>` and per-candidate seeds derive as `<seed>:<index>` for non-numeric seeds.
+  Runner scripts must accept arbitrary seed strings (numeric ones pass through unchanged; runtimes
+  typically hash non-numeric ones deterministically into their integer RNG seed).
 - Candidates are stored through the content store and registered as asset versions of the target
   asset (or a newly created `gen_*` asset when none is given). The last candidate becomes the active
   version.
