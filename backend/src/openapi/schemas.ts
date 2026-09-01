@@ -2978,6 +2978,30 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
     },
   },
+  WorkflowPatchRequest: {
+    type: "object",
+    required: ["patches"],
+    properties: {
+      patches: {
+        type: "array",
+        description:
+          "Node-level input edits to apply (create or overwrite a node's input value). Each edit " +
+          "targets a node from the compact GET preview, so the full graph is never resubmitted.",
+        items: {
+          type: "object",
+          required: ["node_id", "input"],
+          properties: {
+            node_id: { type: "string", description: "Node id in the prompt graph" },
+            input: { type: "string", description: "Input name to set on the node" },
+            value: {
+              description:
+                "New input value (JSON). String placeholders like {{prompt}}/{{seed}} are typical.",
+            },
+          },
+        },
+      },
+    },
+  },
 };
 
 /** Tag descriptions shown in Swagger UI's tag list. */

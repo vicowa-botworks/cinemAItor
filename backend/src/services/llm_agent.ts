@@ -14,7 +14,7 @@ import {
   type UpdateModelInput,
 } from "../db/models.ts";
 import { listSkills } from "../db/skills.ts";
-import { getWorkflowDetail, listWorkflows } from "../db/workflows.ts";
+import { getWorkflowDetail, listWorkflows, patchWorkflow } from "../db/workflows.ts";
 import { storageLayout } from "../storage/paths.ts";
 import { AppError, badRequest, conflict, ERROR_CODES, forbidden, notFound } from "../errors.ts";
 import {
@@ -63,6 +63,7 @@ export type AgentToolName =
   | "comfyui_status"
   | "list_workflows"
   | "get_workflow"
+  | "update_workflow"
   | "register_model"
   | "register_model_from_huggingface"
   | "update_model"
@@ -107,6 +108,7 @@ const MUTATING_AGENT_TOOLS: readonly AgentToolName[] = [
   "register_model",
   "register_model_from_huggingface",
   "update_model",
+  "update_workflow",
   "write_model_file",
   "install_model_deps",
   "install_model",
@@ -192,6 +194,37 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       type: "object",
       required: ["workflow_id"],
       properties: { workflow_id: stringProperty("Saved workflow id (wf_…)") },
+    },
+  ),
+  toolDef(
+    "update_workflow",
+    "Patch a saved workflow's node inputs in place (create or overwrite one input value per " +
+      "edit) — e.g. set the prompt node's text to {{prompt}} and the sampler's seed to {{seed}}. " +
+      "Target node_id/input from the get_workflow preview; the full graph is never resubmitted. " +
+      "Mutating: creates an approval proposal. After it is applied, re-point the model via " +
+      "update_model with default_settings.workflow_ref to re-bake the updated graph.",
+    {
+      type: "object",
+      required: ["workflow_id", "patches"],
+      properties: {
+        workflow_id: stringProperty("Saved workflow id (wf_…)"),
+        patches: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["node_id", "input"],
+            properties: {
+              node_id: stringProperty("Node id in the prompt graph"),
+              input: stringProperty("Input name to set on the node"),
+              value: {
+                description:
+                  "New input value (JSON). String placeholders like {{prompt}}/{{seed}} are typical.",
+              },
+            },
+          },
+          description: "Node-level input edits to apply",
+        },
+      },
     },
   ),
   toolDef("register_model", "Register a generation model row (no download).", {
@@ -728,6 +761,15 @@ export async function runTool(
       const workflowId = argStringRequired(args, "workflow_id");
       return getWorkflowDetail(workflowId);
     }
+    case "update_workflow": {
+      const workflowId = argStringRequired(args, "workflow_id");
+      const workflow = patchWorkflow(workflowId, args["patches"]);
+      return {
+        workflow,
+        note: "Saved workflow patched. Re-point the model via update_model with " +
+          `default_settings: {"workflow_ref": "${workflowId}"} to re-bake the updated graph.`,
+      };
+    }
     case "register_model": {
       const input = buildRegisterInput(args);
       const model = registerModel(ctx.userId, input);
@@ -955,7 +997,7 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
     "(3) install_model_deps to build a .venv with the packages the script needs — its result carries the venv python path; " +
     "(4) register_model / register_model_from_huggingface (or update_model for an existing row) with default_settings.command set to that venv python path, args referencing the runner script by its absolute path with the {prompt}/{seed}/{output} placeholders and a BARE '{input:0}' token (as its own args entry, after its flag) for the reference image — the app drops it when a job has no references, so dual t2i/i2i models work from one settings row — plus a device flag matching this server's hardware (cuda when a GPU with sufficient free VRAM is detected, cpu otherwise). " +
     "Never leave a local_cli model whose command or referenced script is missing — if you are unsure what the runtime needs, propose the setup steps instead of guessing.",
-    "ComfyUI workflows: a comfyui model's default_settings needs its prompt graph as 'workflow'. For a LARGE workflow (tens of KB of JSON), do NOT inline it into the conversation — the user uploads it once via the Model Copilot panel (it becomes a saved workflow, listed by list_workflows) and you reference it by id: set default_settings.workflow_ref to that workflow id (plus 'endpoint'). The stored graph is substituted for 'workflow' at registration/update, so the full JSON never has to pass through the LLM. To inspect a saved workflow's shape (which node carries the text prompt, which the seed), use get_workflow — it returns a compact per-node preview (class_type + input previews), not the full graph. If the user pastes a large workflow inline, tell them to upload it via the panel instead, then reference it.",
+    "ComfyUI workflows: a comfyui model's default_settings needs its prompt graph as 'workflow'. For a LARGE workflow (tens of KB of JSON), do NOT inline it into the conversation — the user uploads it once via the Model Copilot panel (it becomes a saved workflow, listed by list_workflows) and you reference it by id: set default_settings.workflow_ref to that workflow id (plus 'endpoint'). The stored graph is substituted for 'workflow' at registration/update, so the full JSON never has to pass through the LLM. To inspect a saved workflow's shape (which node carries the text prompt, which the seed), use get_workflow — it returns a compact per-node preview (class_type + input previews), not the full graph. To EDIT a saved workflow (e.g. add the {{prompt}}/{{seed}} placeholders it is missing), do NOT ask the user to edit it externally — use update_workflow with node-level patches: first get_workflow to find the target node ids/inputs (the text node's 'text' input, the sampler's 'seed' input), then update_workflow with patches like [{node_id, input:'text', value:'{{prompt}}'}, {node_id, input:'seed', value:'{{seed}}'}] — each patch creates/overwrites just that one input, so the full graph never passes through you. update_workflow is mutating (approval-gated). A registered model holds a BAKED-IN copy of the graph, so after the patch is applied, re-point the model via update_model with default_settings: {workflow_ref: '<that workflow id>'} to re-bake the updated graph. If the user pastes a large workflow inline, tell them to upload it via the panel instead, then reference it.",
     'GGUF weights (a single .gguf file, e.g. city96-style FLUX/SD3.5/Wan/LTX/HiDream/Qwen quants): diffusers has a native GGUF loader, but it is BACKBONE-ONLY and the backbone must be a DiT/transformer — UNet models (SD 1.5/SDXL) CANNOT be loaded from GGUF in diffusers (4-D conv weights are not representable; third-party SDXL GGUFs store convs as flat 2-D matrices and the loader rejects them — for those models use the full-precision checkpoint or ComfyUI). `Pipeline.from_pretrained("....gguf")` is also NOT supported, and a failure there does NOT mean the GGUF is unsupported; do not conclude \'diffusers has no GGUF support\' from it. Recipe: add `gguf>=0.10`, `accelerate` (and `transformers` for the pipeline classes) to the venv; load the backbone with `backbone = <TransformerClass>.from_single_file(gguf_path, quantization_config=GGUFQuantizationConfig(compute_dtype=...))`, passing `config="<diffusers-format repo>", subfolder="transformer"` explicitly for diffusers-format GGUFs (the shape heuristic misidentifies the base model otherwise); original-layout (city96) files embed their source repo and load without it. Then build the pipeline from the diffusers-format base repo, injecting the backbone, and load the text encoder(s)/VAE/tokenizer(s) as usual (their .safetensors also work via from_single_file). Supported quants: BF16, Q4_0/Q4_1, Q5_0/Q5_1, Q8_0, Q2_K–Q6_K. Weights stay uint8 and dequantize per forward pass, so a quantized model needs far less RAM/VRAM than its full-precision size and runs on CPU. The app sets two env vars on the runner: RUNNER_DEVICE (cpu|cuda — the user\'s explicit device choice from the pre-generation VRAM dialog; honour it when set) and RUNNER_MIN_FREE_VRAM_MB (the model\'s declared VRAM requirement in MB — use it as the auto-fallback threshold when set, else a conservative default). Workstations often share the GPU with other processes (LLM servers, other pipelines): when deciding the device yourself (no RUNNER_DEVICE), check `torch.cuda.mem_get_info()` before moving the pipeline to cuda and fall back to cpu when free VRAM is below the threshold — a .to(`cuda`) on a saturated GPU dies with an OOM mid-move. Once the device is decided, print a flushed machine-readable line `RUNNER_STATUS {"device": "cuda" or "cpu"}` (optionally with free_vram_gib) to stdout — the app forwards it to the job card as a runner.log event, so a multi-hour run tells the user which device it is actually using.',
     "Fixing a model: validate EVERY change (settings, runner script, venv) with run_smoke_test instead of asking the user to run the model and paste the error back — when auto-approval is on the test runs in the same turn, so chain change -> smoke test -> fix -> smoke test; otherwise propose the smoke test and continue once it is approved. On a smoke-test failure, read its error_tail, fix the ROOT CAUSE (wrong path, missing module, bad flag — never a workaround), and smoke-test again. Run a full run_benchmark only once the smoke test passes — benchmarks are slow (hours on CPU) and async: report the job id and check benchmark_results when asked.",
     "If you ask the user to approve something, you must have called the matching mutating tool in this same turn. Never end a turn asking for approval of a proposal you did not create; if you cannot create the proposal because information is missing, say exactly what is missing instead of asking for approval. Never write 'I've proposed ...' / 'I've created a proposal ...' unless the mutating tool call has actually been made in this turn and returned — describe what you intend to do instead.",

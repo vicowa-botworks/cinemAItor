@@ -6,8 +6,10 @@ import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/error
 import {
   createWorkflow,
   deleteWorkflow,
+  getWorkflowContent,
   getWorkflowDetail,
   listWorkflows,
+  patchWorkflow,
   type WorkflowCreateRequest,
 } from "@cinemaItor/db/workflows.ts";
 import { getUserById } from "@cinemaItor/db/schema.ts";
@@ -84,6 +86,20 @@ function handleGet(ctx: Context): void {
   ctx.response.body = getWorkflowDetail(id);
 }
 
+async function handlePatch(ctx: Context): Promise<void> {
+  requireAdmin(ctx);
+  const id = requireIdParam(ctx);
+  const body = await readJsonBody(ctx);
+  const workflow = patchWorkflow(id, body["patches"]);
+  ctx.response.body = workflow;
+}
+
+function handleRaw(ctx: Context): void {
+  requireAdmin(ctx);
+  const id = requireIdParam(ctx);
+  ctx.response.body = JSON.parse(getWorkflowContent(id)) as Record<string, unknown>;
+}
+
 function handleDelete(ctx: Context): void {
   requireAdmin(ctx);
   const id = requireIdParam(ctx);
@@ -96,6 +112,8 @@ router
   .post("/api/v1/workflows", authMiddleware, handleCreate)
   .get("/api/v1/workflows", authMiddleware, handleList)
   .get("/api/v1/workflows/:id", authMiddleware, handleGet)
+  .get("/api/v1/workflows/:id/raw", authMiddleware, handleRaw)
+  .patch("/api/v1/workflows/:id", authMiddleware, handlePatch)
   .delete("/api/v1/workflows/:id", authMiddleware, handleDelete);
 
 export const openApiOps: Record<string, OperationMeta> = {
@@ -130,6 +148,29 @@ export const openApiOps: Record<string, OperationMeta> = {
     responses: {
       "200": { description: "Workflow detail", schema: ref("WorkflowDetail") },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  "GET /api/v1/workflows/{id}/raw": {
+    summary: "Get a saved workflow's full JSON",
+    description: "Returns the stored API-format prompt graph verbatim (for download/export).",
+    adminOnly: true,
+    responses: {
+      "200": { description: "The workflow's prompt graph", schema: { type: "object" } },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  "PATCH /api/v1/workflows/{id}": {
+    summary: "Patch a saved workflow's node inputs",
+    description:
+      "Applies node-level input edits (create or overwrite a node's input value) to a stored " +
+      "workflow. Target nodes/inputs from the compact GET preview — the full graph is never " +
+      "resubmitted. After patching, re-point a model via default_settings.workflow_ref to " +
+      "re-bake the updated graph.",
+    adminOnly: true,
+    requestBody: { schema: ref("WorkflowPatchRequest") },
+    responses: {
+      "200": { description: "Workflow updated", schema: ref("Workflow") },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   "DELETE /api/v1/workflows/{id}": {

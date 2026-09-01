@@ -814,6 +814,19 @@ class ApiClient {
     });
   }
 
+  // Surgical node-level edits: each patch is { node_id, input, value }.
+  patchWorkflow(id, patches) {
+    return this.request(`/workflows/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ patches }),
+    });
+  }
+
+  // Full stored workflow JSON (for downloading / re-importing).
+  getWorkflowRaw(id) {
+    return this.request(`/workflows/${encodeURIComponent(id)}/raw`);
+  }
+
   searchHuggingFace({ q = "", filter = "", limit = 12 } = {}) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);

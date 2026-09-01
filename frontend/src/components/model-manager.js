@@ -784,10 +784,15 @@ export class ModelManager extends LitElement {
     .copilot-wf-row {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 8px;
       padding: 6px 8px;
       border: 1px solid var(--color-border);
       border-radius: var(--radius);
+    }
+
+    .copilot-wf-row .btn-small {
+      margin-left: 0;
     }
 
     .copilot-wf-info {
@@ -2231,6 +2236,38 @@ export class ModelManager extends LitElement {
     }
   }
 
+  async _downloadCopilotWorkflow(wf) {
+    this.copilotWorkflowError = "";
+    try {
+      const content = await api.getWorkflowRaw(wf.id);
+      const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base = (wf.filename || wf.name || wf.id).replace(/\.json$/i, "");
+      a.download = `${base}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      this.copilotWorkflowError = err.message || "Failed to download the workflow.";
+    }
+  }
+
+  _askCopilotAboutWorkflow(wf) {
+    const lines = [
+      `Help me edit the saved workflow "${wf.name}" (${wf.id}).`,
+      "Use get_workflow to see its nodes, then update_workflow to set the node inputs I need — for example the prompt node's text to {{prompt}} and the sampler's seed to {{seed}}.",
+      "After patching, re-point the comfyui model that references it via update_model's workflow_ref so it picks up the change.",
+    ];
+    this.copilotInput = lines.join("\n");
+    this.updateComplete.then(() => {
+      this.shadowRoot?.querySelector(".copilot-input textarea")?.focus();
+    });
+  }
+
   _renderCopilotWorkflows() {
     const open = this.copilotWorkflowsOpen;
     const list = this.copilotWorkflows;
@@ -2247,6 +2284,10 @@ export class ModelManager extends LitElement {
               ${wf.id} · ${wf.node_count} nodes · ${size}
             </span>
           </div>
+          <button class="btn btn-secondary btn-small" ?disabled=${busy}
+            @click=${() => this._askCopilotAboutWorkflow(wf)}>Ask copilot</button>
+          <button class="btn btn-secondary btn-small" ?disabled=${busy}
+            @click=${() => this._downloadCopilotWorkflow(wf)}>Download</button>
           <button class="btn btn-secondary btn-small" ?disabled=${busy}
             @click=${() => this._deleteCopilotWorkflow(wf.id)}>Delete</button>
         </div>
