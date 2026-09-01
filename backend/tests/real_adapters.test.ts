@@ -14,6 +14,7 @@ import {
   type AdapterHooks,
   candidateSeed,
   cliExtraEnv,
+  comfySeedToInt,
   ComfyUIAdapter,
   LocalCliAdapter,
   renderCliArgs,
@@ -83,6 +84,43 @@ describe("candidateSeed", () => {
     for (const seed of ["1", "42", "0", "abc", "bench-flux_2_dev", "0x10"]) {
       const derivedAll = Array.from({ length: 8 }, (_, i) => candidateSeed(seed, i));
       assertEquals(new Set(derivedAll).size, 8);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// comfySeedToInt
+// ---------------------------------------------------------------------------
+
+describe("comfySeedToInt", () => {
+  it("passes numeric seeds through verbatim", () => {
+    assertEquals(comfySeedToInt("1234"), 1234);
+    assertEquals(comfySeedToInt("0"), 0);
+    assertEquals(comfySeedToInt("  42 "), 42);
+  });
+
+  it("hashes non-numeric seeds to a stable in-range INT", () => {
+    const a = comfySeedToInt("bench-minimax_h3");
+    const b = comfySeedToInt("bench-minimax_h3");
+    assertEquals(a, b);
+    assert(Number.isInteger(a));
+    assert(a >= 0 && a <= 0xffffffff);
+  });
+
+  it("keeps per-candidate derived benchmark seeds distinct", () => {
+    const base = "bench-minimax_h3";
+    const derived = Array.from(
+      { length: 8 },
+      (_, i) => comfySeedToInt(candidateSeed(base, i)),
+    );
+    assertEquals(new Set(derived).size, 8);
+  });
+
+  it("still yields a valid INT for negative and oversized numeric strings", () => {
+    for (const seed of ["-5", "9007199254740993", "1e40"]) {
+      const asInt = comfySeedToInt(seed);
+      assert(Number.isInteger(asInt));
+      assert(asInt >= 0 && asInt <= 0xffffffff);
     }
   });
 });
@@ -820,6 +858,31 @@ describe("ComfyUIAdapter", () => {
   const t2iWorkflow = {
     "3": { class_type: "KSampler", inputs: { text: "{{prompt}}", seed: "{{seed}}" } },
   };
+
+  it("submits non-numeric (benchmark) seeds as INTs", async () => {
+    const adapter = new ComfyUIAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "bench-minimax_h3",
+        settings: comfySettings(fake.url, { workflow: t2iWorkflow }),
+        inputs: [],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assertEquals(result.seedUsed, "bench-minimax_h3");
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    const seedValue = submitted["3"].inputs.seed;
+    assertEquals(typeof seedValue, "number");
+    const seedAsNumber = seedValue as number;
+    assert(Number.isInteger(seedAsNumber) && seedAsNumber >= 0);
+    assertEquals(seedAsNumber, comfySeedToInt("bench-minimax_h3"));
+  });
 
   it("surfaces ComfyUI execution errors", async () => {
     const adapter = new ComfyUIAdapter();
