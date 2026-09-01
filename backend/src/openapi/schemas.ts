@@ -2917,6 +2917,67 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
     },
   },
+  /** Saved ComfyUI workflow (summary view). */
+  Workflow: {
+    type: "object",
+    required: ["id", "name", "size", "node_count", "created_at"],
+    properties: {
+      id: { type: "string", description: "Workflow id (wf_…)" },
+      name: { type: "string" },
+      filename: {
+        type: ["string", "null"],
+        description: "Original file name, when uploaded from one",
+      },
+      size: { type: "integer", description: "Stored JSON size in bytes" },
+      node_count: { type: "integer", description: "Number of nodes in the prompt graph" },
+      created_at: isoDate,
+    },
+  },
+  /** Saved ComfyUI workflow with a compact per-node structure preview. */
+  WorkflowDetail: {
+    type: "object",
+    required: ["id", "name", "size", "node_count", "created_at", "nodes"],
+    properties: {
+      id: { type: "string", description: "Workflow id (wf_…)" },
+      name: { type: "string" },
+      filename: { type: ["string", "null"] },
+      size: { type: "integer" },
+      node_count: { type: "integer" },
+      created_at: isoDate,
+      nodes: {
+        type: "array",
+        description: "Compact per-node view (id, class_type, input previews) so the copilot can " +
+          "reason about the graph without the full JSON",
+        items: {
+          type: "object",
+          required: ["id", "class_type", "inputs"],
+          properties: {
+            id: { type: "string" },
+            class_type: { type: ["string", "null"] },
+            inputs: {
+              type: "object",
+              additionalProperties: true,
+              description: "Input name -> compact preview (strings truncated, link refs as [link])",
+            },
+          },
+        },
+      },
+    },
+  },
+  WorkflowCreateRequest: {
+    type: "object",
+    required: ["content"],
+    properties: {
+      name: { type: "string", description: "Display name (default: file name or generated)" },
+      filename: { type: "string", description: "Original file name" },
+      content: {
+        type: ["string", "object"],
+        description:
+          "The ComfyUI API-format prompt graph as a JSON string or object — a node map of " +
+          '{"<id>": {"class_type": ..., "inputs": {...}}}',
+      },
+    },
+  },
 };
 
 /** Tag descriptions shown in Swagger UI's tag list. */
@@ -2930,6 +2991,7 @@ export const TAG_DESCRIPTIONS: Record<string, string> = {
   assets: "Media assets, versions, aliases, tags, previews, proxies",
   audio: "Audio generation, upload, analysis, adjustments, cleanup",
   models: "Model registry, health, benchmarks, hardware",
+  workflows: "Saved ComfyUI workflows referenced by model settings (workflow_ref)",
   jobs: "Generation job queue, events, WebSocket stream",
   review: "Job candidate review: approve, reject, shortlist",
   renders: "Render presets, render queue, exports",

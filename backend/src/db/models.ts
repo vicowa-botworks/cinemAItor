@@ -1,5 +1,6 @@
 import { getDb } from "./database.ts";
 import { badRequest, conflict } from "../errors.ts";
+import { materializeWorkflowRef } from "./workflows.ts";
 
 export const MODEL_BACKENDS = ["mock", "local_cli", "comfyui", "local_http"] as const;
 export type ModelBackend = (typeof MODEL_BACKENDS)[number];
@@ -327,7 +328,11 @@ export function registerModel(
     throw badRequest(`source must be one of: ${MODEL_SOURCES.join(", ")}`);
   }
   const taskTypes = validateTaskTypes(input.task_types, "task_types");
-  validateBackendSettings(input.backend, input.default_settings ?? {});
+  // Resolve a default_settings.workflow_ref to the stored workflow's node map
+  // before validating + storing, so the comfyui adapter reads `workflow` and
+  // the ref is never persisted into default_settings_json.
+  const defaultSettings = materializeWorkflowRef(input.default_settings);
+  validateBackendSettings(input.backend, defaultSettings ?? {});
 
   const db = getDb();
   let id: string;
@@ -377,7 +382,7 @@ export function registerModel(
     input.vram_requirement_mb ?? null,
     input.ram_requirement_mb ?? null,
     JSON.stringify(input.dependencies ?? []),
-    JSON.stringify(input.default_settings ?? {}),
+    JSON.stringify(defaultSettings ?? {}),
     JSON.stringify(input.known_limitations ?? null),
     input.enabled === false ? 0 : 1,
     now,
@@ -406,10 +411,15 @@ export function updateModel(
   // Only re-validate the adapter contract when the caller actually touches the
   // settings or the backend — otherwise an unrelated edit (e.g. task types) on
   // an already-misconfigured model would be blocked by its existing settings.
+  // Resolve a workflow_ref in the (merged) settings before validating/storing,
+  // so a partial settings patch can swap in a saved workflow by id.
+  const mergedSettings = materializeWorkflowRef(
+    patch.default_settings ?? existing.default_settings,
+  );
   if (patch.default_settings !== undefined || patch.backend !== undefined) {
     validateBackendSettings(
       patch.backend ?? existing.backend,
-      patch.default_settings ?? existing.default_settings,
+      mergedSettings ?? {},
     );
   }
   const taskTypes = patch.task_types !== undefined
@@ -450,9 +460,7 @@ export function updateModel(
       ? patch.ram_requirement_mb
       : existing.ram_requirement_mb,
     dependencies_json: JSON.stringify(patch.dependencies ?? existing.dependencies),
-    default_settings_json: JSON.stringify(
-      patch.default_settings ?? existing.default_settings,
-    ),
+    default_settings_json: JSON.stringify(mergedSettings),
     known_limitations_json: JSON.stringify(
       patch.known_limitations !== undefined ? patch.known_limitations : existing.known_limitations,
     ),
