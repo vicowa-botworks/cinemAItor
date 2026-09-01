@@ -300,7 +300,10 @@ passing `config=`/`subfolder="transformer"` explicitly for diffusers-format GGUF
 heuristic misidentifies the base model otherwise); build the pipeline from the diffusers-format base
 repo, injecting the backbone, with text encoders/VAE/tokenizers loaded as usual. Weights stay uint8
 and dequantize per forward pass, so a quantized model needs far less RAM/VRAM than its
-full-precision size and runs on CPU. A reference runner exercising the recipe against the
+full-precision size and runs on CPU. Workstations often share the GPU with other processes (LLM
+servers, other pipelines), so runners should check `torch.cuda.mem_get_info()` before moving the
+pipeline to cuda and fall back to cpu when free VRAM is below the model's needs — a `.to('cuda')` on
+a saturated GPU dies with an OOM mid-move. A reference runner exercising the recipe against the
 SD3.5-medium Q4_0 GGUF lives at `backend/tests/gguf_smoke/runner.py`, with an availability-gated
 smoke test in `backend/tests/gguf_smoke.test.ts` (skips when the Python env or the multi-GB weights
 are absent).
