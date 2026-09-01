@@ -17,7 +17,7 @@ import {
   updateModel as dbUpdateModel,
 } from "../src/db/models.ts";
 import { createUser } from "../src/db/schema.ts";
-import { createWorkflow } from "../src/db/workflows.ts";
+import { createWorkflow, getWorkflow } from "../src/db/workflows.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { storageLayout } from "../src/storage/paths.ts";
 import { modelDir } from "../src/services/model_files.ts";
@@ -491,6 +491,7 @@ describe("llm agent", () => {
           "register_model",
           "register_model_from_huggingface",
           "update_model",
+          "update_workflow",
           "write_model_file",
           "install_model_deps",
           "install_model",
@@ -1292,6 +1293,7 @@ describe("llm agent runtime tools", () => {
       for (
         const mutating of [
           "update_model",
+          "update_workflow",
           "write_model_file",
           "install_model_deps",
           "run_smoke_test",
@@ -1333,6 +1335,41 @@ describe("llm agent runtime tools", () => {
       );
       assertEquals(stepsOf(missing)[0].status, "error");
       assertMatch(String(stepsOf(missing)[0].summary), /Unknown workflow/);
+    });
+  });
+
+  it("update_workflow patches a saved workflow through an approved proposal", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const admin = getDb()
+        .prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+        .get() as { id: number };
+      const wf = createWorkflow(admin.id, {
+        name: "Patch Me",
+        content: {
+          "3": { class_type: "KSampler", inputs: { seed: 42, steps: 20 } },
+          "5": { class_type: "CLIPTextEncode", inputs: { text: "a cat" } },
+        },
+      });
+      const proposalId = await makeProposalFor("update_workflow", {
+        workflow_id: wf.id,
+        patches: [
+          { node_id: "5", input: "text", value: "{{prompt}}" },
+          { node_id: "3", input: "seed", value: "{{seed}}" },
+        ],
+      });
+      const { status, body } = await approve(proposalId);
+      assertEquals(status, 200);
+      assert(body["result"]);
+      const patched = getWorkflow(wf.id);
+      const parsed = JSON.parse(patched!.content) as Record<
+        string,
+        { inputs: Record<string, unknown> }
+      >;
+      assertEquals(parsed["5"].inputs["text"], "{{prompt}}");
+      assertEquals(parsed["3"].inputs["seed"], "{{seed}}");
+      // An unpatched input survives.
+      assertEquals(parsed["3"].inputs["steps"], 20);
     });
   });
 });

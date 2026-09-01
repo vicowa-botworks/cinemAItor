@@ -139,6 +139,15 @@ export interface WorkflowCreateRequest {
   content: unknown;
 }
 
+/** A single node-level input edit: set (create or overwrite) `input` on the
+ *  node `node_id` to `value`. Values are JSON (string placeholders like
+ *  "{{prompt}}", numbers, etc.). */
+export interface WorkflowInputPatch {
+  node_id: string;
+  input: string;
+  value: unknown;
+}
+
 export function createWorkflow(
   userId: number,
   input: WorkflowCreateRequest,
@@ -214,6 +223,74 @@ export function deleteWorkflow(id: string): boolean {
     id,
   ) as unknown as number;
   return changes > 0;
+}
+
+/** The stored workflow's raw API-format JSON (throws notFound). */
+export function getWorkflowContent(id: string): string {
+  const row = getWorkflow(id.trim());
+  if (!row) throw notFound(`Unknown workflow id '${id.trim()}'`);
+  return row["content"];
+}
+
+/**
+ * Apply node-level input edits to a stored workflow (create or overwrite a
+ * node's input value). This is the surgical-patch path: the caller (the Model
+ * Copilot) targets a specific node + input from the compact get_workflow
+ * preview, so the full graph never has to pass through the LLM. Returns the
+ * updated summary.
+ */
+export function patchWorkflow(id: string, patches: unknown): WorkflowSummary {
+  const row = getWorkflow(id.trim());
+  if (!row) throw notFound(`Unknown workflow id '${id.trim()}'`);
+  if (!Array.isArray(patches) || patches.length === 0) {
+    throw badRequest("patches must be a non-empty array", "patches");
+  }
+  const workflow = JSON.parse(row["content"]) as Record<string, unknown>;
+  for (const raw of patches) {
+    const patch = (typeof raw === "object" && raw !== null ? raw : {}) as Record<
+      string,
+      unknown
+    >;
+    if (typeof patch["node_id"] !== "string" || patch["node_id"] === "") {
+      throw badRequest("each patch needs a non-empty string node_id", "patches");
+    }
+    if (typeof patch["input"] !== "string" || patch["input"] === "") {
+      throw badRequest("each patch needs a non-empty string input", "patches");
+    }
+    const node = workflow[patch["node_id"]];
+    if (typeof node !== "object" || node === null) {
+      throw badRequest(`Node '${patch["node_id"]}' not found in workflow`, "patches");
+    }
+    const nodeObj = node as Record<string, unknown>;
+    let inputs = nodeObj["inputs"];
+    if (typeof inputs !== "object" || inputs === null) {
+      inputs = {};
+      nodeObj["inputs"] = inputs;
+    }
+    (inputs as Record<string, unknown>)[patch["input"]] = patch["value"];
+  }
+  const content = JSON.stringify(workflow);
+  const size = byteLength(content);
+  if (size > WORKFLOW_MAX_BYTES) {
+    throw badRequest(
+      `Workflow is ${size} bytes after patching; the limit is ${WORKFLOW_MAX_BYTES}`,
+      "content",
+    );
+  }
+  const nodeCount = Object.keys(workflow).length;
+  const now = nowIso();
+  const stmt = getDb().prepare(
+    `UPDATE workflows SET content = ?, size = ?, node_count = ?, updated_at = ? WHERE id = ?`,
+  );
+  (stmt.run as (...params: unknown[]) => unknown)(content, size, nodeCount, now, row["id"]);
+  return {
+    id: row["id"],
+    name: row["name"],
+    filename: row["filename"],
+    size,
+    node_count: nodeCount,
+    created_at: row["created_at"],
+  };
 }
 
 /** Resolve a workflow_ref to its stored API-format node map (throws notFound). */

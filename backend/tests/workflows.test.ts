@@ -7,10 +7,12 @@ import {
   createWorkflow,
   deleteWorkflow,
   getWorkflow,
+  getWorkflowContent,
   getWorkflowDetail,
   listWorkflows,
   materializeWorkflowRef,
   parseWorkflowContent,
+  patchWorkflow,
   resolveWorkflowRef,
   WORKFLOW_MAX_BYTES,
 } from "../src/db/workflows.ts";
@@ -195,5 +197,61 @@ describe("workflow_ref resolution", () => {
     });
     assertEquals(updated!.default_settings["workflow"], GRAPH);
     assertEquals(updated!.default_settings["workflow_ref"], undefined);
+  });
+});
+
+describe("patchWorkflow", () => {
+  beforeEach(() => {
+    getDb(":memory:");
+    userId = freshUser();
+  });
+  afterEach(() => {
+    resetDb();
+  });
+
+  it("creates or overwrites node inputs and returns the updated summary", () => {
+    const wf = createWorkflow(userId, { content: GRAPH });
+    const out = patchWorkflow(wf.id, [
+      { node_id: "3", input: "seed", value: 7 }, // overwrite an existing input
+      { node_id: "5", input: "text", value: "{{prompt}}" }, // overwrite with a placeholder
+      { node_id: "4", input: "custom", value: "x" }, // create a new input
+    ]);
+    assertEquals(out.node_count, 3);
+    const parsed = JSON.parse(getWorkflowContent(wf.id)) as Record<
+      string,
+      { inputs: Record<string, unknown> }
+    >;
+    assertEquals(parsed["3"].inputs["seed"], 7);
+    assertEquals(parsed["5"].inputs["text"], "{{prompt}}");
+    assertEquals(parsed["4"].inputs["custom"], "x");
+    // Unpatched inputs survive.
+    assertEquals(parsed["3"].inputs["steps"], 20);
+  });
+
+  it("rejects unknown workflow, empty patches, and missing nodes/fields", () => {
+    assertThrows(
+      () => patchWorkflow("wf_missing", [{ node_id: "1", input: "a", value: 1 }]),
+      Error,
+      "Unknown workflow",
+    );
+    const wf = createWorkflow(userId, { content: GRAPH });
+    assertThrows(() => patchWorkflow(wf.id, []), Error, "non-empty");
+    assertThrows(() => patchWorkflow(wf.id, [{}]), Error, "node_id");
+    assertThrows(() => patchWorkflow(wf.id, [{ node_id: "3" }]), Error, "input");
+    assertThrows(
+      () => patchWorkflow(wf.id, [{ node_id: "99", input: "a", value: 1 }]),
+      Error,
+      "not found",
+    );
+  });
+
+  it("enforces the byte cap after patching", () => {
+    const wf = createWorkflow(userId, { content: GRAPH });
+    const pad = "x".repeat(WORKFLOW_MAX_BYTES + 1024);
+    assertThrows(
+      () => patchWorkflow(wf.id, [{ node_id: "5", input: "text", value: pad }]),
+      Error,
+      "limit is",
+    );
   });
 });
