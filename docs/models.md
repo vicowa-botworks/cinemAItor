@@ -295,14 +295,15 @@ Submits a workflow graph to a ComfyUI server (local or hosted):
 | `workflow`             | object, req | ComfyUI prompt graph (node map)                                  |
 | `timeout_seconds`      | number      | Default 600, clamped 1–6h; on timeout `POST /interrupt` and fail |
 
-Placeholders in workflow string values: `{{prompt}}`, `{{seed}}` (coerced to a number when the whole
-value is numeric), and `{{input:<i>}}`. Referenced inputs are uploaded first via
-`POST /upload/image` (unique filename, `overwrite=true`) and the returned name is substituted. The
-adapter then submits `POST /prompt` with a unique `client_id`, polls `GET /history/<prompt_id>`
-every second, surfaces `execution_error` details from the entry status, collects every
-`images`/`gifs`/`videos` file ref from the node outputs, and downloads each through `GET /view`. An
-unreachable server, a rejected prompt, and a run with zero outputs all fail the job; cancellation
-issues `POST /interrupt`.
+Placeholders in workflow string values: `{{prompt}}`, `{{seed}}` (always rendered as an INT —
+numeric seeds pass through, non-numeric ones such as the benchmark seed `bench-<model-id>` are
+hashed deterministically, so INT inputs like `noise_seed` always validate), and `{{input:<i>}}`.
+Referenced inputs are uploaded first via `POST /upload/image` (unique filename, `overwrite=true`)
+and the returned name is substituted. The adapter then submits `POST /prompt` with a unique
+`client_id`, polls `GET /history/<prompt_id>` every second, surfaces `execution_error` details from
+the entry status, collects every `images`/`gifs`/`videos` file ref from the node outputs, and
+downloads each through `GET /view`. An unreachable server, a rejected prompt, and a run with zero
+outputs all fail the job; cancellation issues `POST /interrupt`.
 
 **Using a hosted ComfyUI** (e.g. `https://comfyui.internal.example.com`):
 

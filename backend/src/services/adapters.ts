@@ -93,6 +93,27 @@ export function candidateSeed(seedUsed: string, index: number): string {
   return `${seedUsed}:${index}`;
 }
 
+/**
+ * ComfyUI INT seed: map any seed string to a non-negative integer that fits a
+ * ComfyUI INT input (noise_seed is 0..2^64-1). Numeric seeds pass through
+ * verbatim; non-numeric ones (benchmark jobs use 'bench-<model-id>') hash via
+ * FNV-1a so the same string always yields the same seed across processes and
+ * distinct strings yield distinct seeds.
+ */
+export function comfySeedToInt(seed: string): number {
+  const trimmed = seed.trim();
+  const asNumber = Number(trimmed);
+  if (trimmed !== "" && Number.isSafeInteger(asNumber) && asNumber >= 0) {
+    return asNumber;
+  }
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
 // ---------------------------------------------------------------------------
 // Mock adapter (GEN-008/009/010): deterministic pseudo-output so tests and
 // development can simulate generation without model binaries.
@@ -603,8 +624,9 @@ export class LocalCliAdapter implements ModelAdapter {
 //   endpoint (string, required)  e.g. http://127.0.0.1:8188
 //   workflow (object, required)  ComfyUI prompt graph (node map)
 //   timeout_seconds (number)     default 600
-// String placeholders in the workflow: {{prompt}}, {{seed}} (coerced to a
-// number when it is the whole value and numeric), {{input:<i>}} (uploaded
+// String placeholders in the workflow: {{prompt}}, {{seed}} (always rendered
+// as an INT — numeric seeds pass through, non-numeric ones like benchmark
+// seeds hash deterministically; see comfySeedToInt), {{input:<i>}} (uploaded
 // to the server first; the returned file name is substituted).
 // ---------------------------------------------------------------------------
 
@@ -627,8 +649,7 @@ function substituteWorkflow(
   const walk = (value: unknown): unknown => {
     if (typeof value === "string") {
       if (value.trim() === "{{seed}}") {
-        const asNumber = Number(ctx.seed);
-        return Number.isFinite(asNumber) ? asNumber : ctx.seed;
+        return comfySeedToInt(ctx.seed);
       }
       return value
         .replace(/\{\{\s*prompt\s*\}\}/g, ctx.prompt)
