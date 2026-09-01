@@ -269,6 +269,51 @@ describe("asset generation api", () => {
     });
   });
 
+  it("threads the device choice and the model VRAM requirement into job settings", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const localModelId = registerModel(ownerId, {
+          name: "local-cli-t2i",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["text_to_image"],
+          enabled: true,
+          vram_requirement_mb: 51200,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+        const gen = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "a lighthouse at dusk",
+            unique_slug: uniqueSlug("vramcheck"),
+            display_name: "VRAM check",
+            model_id: localModelId,
+            device: "cuda",
+          },
+          ownerToken,
+        );
+        assertEquals(gen.status, 202);
+        const body = gen.json as { job_id: string };
+        const { status, json } = await req(
+          "GET",
+          `/api/v1/jobs/${body.job_id}`,
+          undefined,
+          ownerToken,
+        );
+        assertEquals(status, 200);
+        const settings = (json as { settings: Record<string, unknown> }).settings;
+        assertEquals(settings.device, "cuda");
+        assertEquals(settings.min_free_vram_mb, 51200);
+      })();
+    });
+  });
+
   it("generates a new video asset with the text_to_video task", async () => {
     await withServer((base) => {
       baseUrl = base;

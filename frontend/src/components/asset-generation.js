@@ -72,6 +72,63 @@ export function normalizeCandidates(value) {
 }
 
 /**
+ * Decide whether a generation job needs a pre-submit VRAM choice, and report
+ * how much VRAM is free versus required.
+ *
+ * A choice is offered only when ALL of these hold:
+ *   - the model runs as a local CLI (`backend === "local_cli"`), since that is
+ *     the only backend whose runner honors a device override (RUNNER_DEVICE);
+ *   - the model declares a VRAM requirement (`vram_requirement_mb > 0`);
+ *   - a GPU is present and reports usable VRAM numbers; and
+ *   - the free VRAM (total − used) is below the requirement.
+ *
+ * Everything else (mock/comfyui, no requirement, no GPU, or unknown VRAM) is
+ * left to the runner's own auto fallback, so we return `needed: false` rather
+ * than block the user with a modal we can't meaningfully answer.
+ *
+ * @param {{backend?: string, vram_requirement_mb?: number|null} | null | undefined} model
+ * @param {{gpu?: {vram_mb?: number|null, vram_used_mb?: number|null, model?: string}|null} | null | undefined} hardware
+ * @returns {{needed: boolean, freeMb: number|null, requirementMb: number|null, gpuModel: string|null}}
+ */
+export function vramPreCheck(model, hardware) {
+  const requirementMb = model &&
+      typeof model.vram_requirement_mb === "number" &&
+      model.vram_requirement_mb > 0
+    ? Math.round(model.vram_requirement_mb)
+    : null;
+  const gpu = hardware?.gpu ?? null;
+  const freeMb = gpu && typeof gpu.vram_mb === "number" && typeof gpu.vram_used_mb === "number"
+    ? gpu.vram_mb - gpu.vram_used_mb
+    : null;
+  const needed = model?.backend === "local_cli" &&
+    requirementMb !== null &&
+    freeMb !== null &&
+    freeMb < requirementMb;
+  return { needed, freeMb, requirementMb, gpuModel: gpu?.model ?? null };
+}
+
+/**
+ * Whether a (re)checked hardware snapshot now has enough free VRAM for the
+ * model, so a "free VRAM & recheck" can auto-continue on the GPU. Returns true
+ * when there is no declared requirement to check against.
+ */
+export function vramSufficient(model, hardware) {
+  const check = vramPreCheck(model, hardware);
+  if (check.requirementMb === null) return true;
+  return check.freeMb !== null && check.freeMb >= check.requirementMb;
+}
+
+/**
+ * Format a megabyte count as a short GB label for the VRAM dialog ("50.0 GB").
+ * Unknown values render as "?".
+ * @param {number|null|undefined} mb
+ */
+export function formatGb(mb) {
+  if (mb === null || mb === undefined) return "?";
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/**
  * Client-side validation of a generation form.
  * @param {object} fields
  * @param {boolean} [opts.isNew] true when creating a NEW asset (slug +

@@ -109,17 +109,36 @@ def main():
     if args.image:
         print(f"note: --image given but this t2i reference runner ignores it ({args.image})", file=sys.stderr)
 
-    min_free_vram_gb = 50  # weights (~35 GiB) + activations at 1024px
-    device = args.device
+    # RUNNER_MIN_FREE_VRAM_MB: the app passes the model's declared VRAM
+    # requirement (model.vram_requirement_mb via job.settings.min_free_vram_mb),
+    # so the auto-fallback threshold matches the UI's pre-generation VRAM
+    # check. A conservative default covers standalone runs and models without
+    # a declared requirement.
+    default_min_free_vram_gb = 50  # weights (~35 GiB) + activations at 1024px
+    env_min_free_mb = os.environ.get("RUNNER_MIN_FREE_VRAM_MB", "").strip()
+    min_free_vram_gb = (
+        int(env_min_free_mb) / 1024
+        if env_min_free_mb.isdigit() and int(env_min_free_mb) > 0
+        else default_min_free_vram_gb
+    )
+    # RUNNER_DEVICE: the app signals the user's explicit device choice (from
+    # job.settings.device via the local_cli adapter). It overrides the CLI
+    # default (auto); an explicit non-auto --device still wins over the env.
+    env_device = os.environ.get("RUNNER_DEVICE", "").strip().lower() or None
+    device = args.device if args.device != "auto" else (env_device or "auto")
     free_vram_gib = None
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cuda":
-        free, total = torch.cuda.mem_get_info()
-        free_vram_gib = round(free / 1024 ** 3, 1)
-        if free < min_free_vram_gb * 1024 ** 3:
-            print(f"gpu free {free_vram_gib} GiB < {min_free_vram_gb} GiB required — falling back to cpu", flush=True)
+        if not torch.cuda.is_available():
+            print("device=cuda requested but no CUDA device — falling back to cpu", flush=True)
             device = "cpu"
+        else:
+            free, total = torch.cuda.mem_get_info()
+            free_vram_gib = round(free / 1024 ** 3, 1)
+            if free < min_free_vram_gb * 1024 ** 3:
+                print(f"gpu free {free_vram_gib} GiB < {min_free_vram_gb} GiB required — falling back to cpu", flush=True)
+                device = "cpu"
     # Machine-readable status line: the local_cli adapter forwards it to the
     # job card as a runner.log event (which device the run uses, live).
     status = {"device": device}

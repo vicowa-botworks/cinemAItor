@@ -270,6 +270,7 @@ export const assetRouter = new Router()
       seed: optionalString(body, "seed"),
       candidates: body.candidates,
       references: parseReferences(body.references),
+      device: body.device,
     });
     ctx.response.status = 202;
     ctx.response.body = result;
@@ -286,6 +287,7 @@ export const assetRouter = new Router()
       candidates: body.candidates,
       include_current: body.include_current === true,
       references: parseReferences(body.references),
+      device: body.device,
     });
     ctx.response.status = 202;
     ctx.response.body = result;

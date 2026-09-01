@@ -95,11 +95,12 @@ app-root (main router)
 │   ├── asset-card (tile with lazy blob-preview thumbnail)
 │   ├── asset-form (create metadata-only asset)
 │   ├── asset-upload (create + raw-bytes streaming file upload → first version)
-│   ├── asset-generate (prompt-based generation: new image/video asset OR new versions of an
-│   │   │               existing asset; text→image/video or reference→image/video task upgrade,
-│   │   │               model/seed/candidates pickers, "use current version" toggle in edit mode)
-│   └── asset-reference-picker (pick existing image/video assets as generation references,
-│   │                           active version by default, max 8)
+ │   ├── asset-generate (prompt-based generation: new image/video asset OR new versions of an
+ │   │   │               existing asset; text→image/video or reference→image/video task upgrade,
+ │   │   │               model/seed/candidates pickers, "use current version" toggle in edit mode,
+ │   │   │               pre-generation VRAM check → vram-choice-dialog for local_cli models)
+ │   └── asset-reference-picker (pick existing image/video assets as generation references,
+ │   │                           active version by default, max 8)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
   │   │              version A/B compare (two versions side by side: synced play + metadata diff,
   │   │              see compare.js),
@@ -142,9 +143,13 @@ app-root (main router)
 │   │              `confirm`/`cancel` events, `tone` default|danger, `busy` mode that
 │   │              suppresses dismissal (buttons/Escape/overlay) and shows a spinner +
 │   │              `busyLabel` on the confirm button; `progress` object ({percent, label})
-│   │              renders a progress bar (indeterminate while percent is null) + caption;
-│   │              first consumer: model-manager install/remove)
-├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
+ │   │              renders a progress bar (indeterminate while percent is null) + caption;
+ │   │              first consumer: model-manager install/remove)
+ ├── vram-choice-dialog (pre-generation VRAM guard for local_cli generation: shown when free
+ │   │   VRAM is below the model's `vram_requirement_mb`; "start on CPU" sends device=cpu, or
+ │   │   "free up VRAM" + a refresh button re-probes live via /hardware?refresh=1 and auto-starts
+ │   │   on the GPU once enough VRAM is free; pure helpers in asset-generation.js)
+ ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)
 ├── job-events (shared WebSocket client: one socket multiplexed across consumers, token
@@ -261,9 +266,10 @@ server.ts (entry point)
  │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
   │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
   │   │     pointers, prompt references, AST-015; feeds the UI "Used in" view)
-  │   │   + prompt-based generation: POST /generate (new image/video asset) and
-  │   │     POST /:id/generate (new versions; reference inputs, include_current) —
-  │   │     t2i/t2v or i2i/i2v by presence of references (see docs/assets.md)
+   │   │   + prompt-based generation: POST /generate (new image/video asset) and
+   │   │     POST /:id/generate (new versions; reference inputs, include_current, optional
+   │   │     device cpu|cuda → job settings → RUNNER_DEVICE env) — t2i/t2v or i2i/i2v by
+   │   │     presence of references (see docs/assets.md)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)
@@ -286,7 +292,8 @@ server.ts (entry point)
    │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)
    │   │   + /:id/benchmarks (GET); deterministic per-task prompts, 2 candidates each,
    │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows
-   │   ├── Hardware detection + requirement warnings (/hardware)
+   │   ├── Hardware detection + requirement warnings (/hardware; 60s cache, ?refresh=1
+   │   │   re-probes live for the pre-generation VRAM re-check)
    │   ├── HuggingFace catalog: /huggingface/search, /huggingface/:repoId (recursive file
    │   │   listing + README, `main`→`master` branch fallback, entries keyed by `path`),
    │   │   /huggingface/settings (+/test) optional token (stored > env),
@@ -304,8 +311,11 @@ server.ts (entry point)
    │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
     │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
      │   │   model default_settings, passes per-job workDir; HF-origin models (repository_url on
-     │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
-     │   │   runners can fetch gated-repo files; provenance on produced asset versions; local_cli
+      │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
+      │   │   runners can fetch gated-repo files; a user-chosen device (job settings) is injected
+      │   │   as RUNNER_DEVICE and the model's vram_requirement_mb as RUNNER_MIN_FREE_VRAM_MB so
+      │   │   the runner's CPU/GPU auto-fallback matches the UI's pre-generation VRAM check;
+      │   │   provenance on produced asset versions; local_cli
      │   │   streams stdout and forwards `RUNNER_STATUS {json}` lines live as `runner.log` job
      │   │   events (runners report e.g. device=cuda/cpu so the job card shows it mid-run);
      │   │   {seed} renders the seed string verbatim (benchmarks use `bench-<model-id>`)

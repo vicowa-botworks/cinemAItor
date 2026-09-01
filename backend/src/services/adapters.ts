@@ -119,6 +119,40 @@ export function outputForTask(jobType: string): { extension: string; mime_type: 
   return { extension: "png", mime_type: "image/png" };
 }
 
+/**
+ * Extra environment for local_cli spawns: the string values of
+ * `settings.env`, the HF hub token (so runners can fetch gated-repo files —
+ * an explicit settings.env entry wins), RUNNER_DEVICE when the job settings
+ * carry a user-chosen device (the runner must honour it instead of its own
+ * auto fallback), and RUNNER_MIN_FREE_VRAM_MB when the job settings carry a
+ * VRAM requirement (the runner's auto-fallback threshold, so it matches the
+ * UI's pre-generation VRAM check). Returns undefined when nothing is added.
+ */
+export function cliExtraEnv(
+  settingsEnv: Record<string, string> | undefined,
+  hfToken: string,
+  device: "cpu" | "cuda" | undefined,
+  minFreeVramMb: number | undefined,
+): Record<string, string> | undefined {
+  const env: Record<string, string> = { ...(settingsEnv ?? {}) };
+  if (hfToken) {
+    if (env.HF_TOKEN === undefined) env.HF_TOKEN = hfToken;
+    if (env.HUGGING_FACE_HUB_TOKEN === undefined) {
+      env.HUGGING_FACE_HUB_TOKEN = hfToken;
+    }
+  }
+  if (device !== undefined && env.RUNNER_DEVICE === undefined) {
+    env.RUNNER_DEVICE = device;
+  }
+  if (
+    minFreeVramMb !== undefined && minFreeVramMb > 0 &&
+    env.RUNNER_MIN_FREE_VRAM_MB === undefined
+  ) {
+    env.RUNNER_MIN_FREE_VRAM_MB = String(Math.round(minFreeVramMb));
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
 /** Source audio duration in seconds from job settings (route-probed), clamped. */
 function subtitleSourceDuration(settings: Record<string, unknown>): number {
   const value = settings.source_duration;
@@ -506,15 +540,15 @@ export class LocalCliAdapter implements ModelAdapter {
     // HF token for gated-repo hub access at job time: an explicit
     // settings.env entry (user's choice) wins over the injected one.
     const hfToken = typeof input.hfToken === "string" ? input.hfToken.trim() : "";
-    let extraEnv = settingsEnv;
-    if (hfToken) {
-      const env: Record<string, string> = { ...(settingsEnv ?? {}) };
-      if (env.HF_TOKEN === undefined) env.HF_TOKEN = hfToken;
-      if (env.HUGGING_FACE_HUB_TOKEN === undefined) {
-        env.HUGGING_FACE_HUB_TOKEN = hfToken;
-      }
-      extraEnv = env;
-    }
+    const device = settings.device === "cpu" || settings.device === "cuda"
+      ? (settings.device as "cpu" | "cuda")
+      : undefined;
+    const rawMinFree = settings.min_free_vram_mb;
+    const minFreeVramMb =
+      typeof rawMinFree === "number" && Number.isFinite(rawMinFree) && rawMinFree > 0
+        ? rawMinFree
+        : undefined;
+    const extraEnv = cliExtraEnv(settingsEnv, hfToken, device, minFreeVramMb);
     const seedUsed = input.seed && input.seed !== "random" ? input.seed : randomSeed();
     const count = candidateCount(settings);
     const def = outputForTask(input.jobType);

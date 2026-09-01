@@ -1,6 +1,7 @@
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
+  formatGb,
   generationKindForAsset,
   generationTaskType,
   isValidSlug,
@@ -8,6 +9,8 @@ import {
   normalizeSeed,
   slugify,
   validateGenerationForm,
+  vramPreCheck,
+  vramSufficient,
 } from "../src/components/asset-generation.js";
 
 describe("generationKindForAsset", () => {
@@ -212,5 +215,109 @@ describe("validateGenerationForm", () => {
         { isNew: true },
       ).some((e) => e.toLowerCase().includes("references")),
     );
+  });
+});
+
+describe("vramPreCheck", () => {
+  const localCli = { backend: "local_cli", vram_requirement_mb: 51200 };
+
+  it("needs a choice when free VRAM is below the requirement", () => {
+    const check = vramPreCheck(localCli, {
+      gpu: { model: "RTX", vram_mb: 100 * 1024, vram_used_mb: 95 * 1024 },
+    });
+    assertEquals(check.needed, true);
+    assertEquals(check.freeMb, 5 * 1024);
+    assertEquals(check.requirementMb, 51200);
+    assertEquals(check.gpuModel, "RTX");
+  });
+
+  it("needs no choice when free VRAM covers the requirement", () => {
+    const check = vramPreCheck(localCli, {
+      gpu: { model: "RTX", vram_mb: 100 * 1024, vram_used_mb: 10 * 1024 },
+    });
+    assertEquals(check.needed, false);
+  });
+
+  it("ignores non-local_cli backends (comfyui/mock)", () => {
+    for (const backend of ["comfyui", "mock"]) {
+      const check = vramPreCheck(
+        { backend, vram_requirement_mb: 51200 },
+        { gpu: { vram_mb: 1024, vram_used_mb: 1024 } },
+      );
+      assertEquals(check.needed, false);
+    }
+  });
+
+  it("ignores models with no VRAM requirement", () => {
+    const check = vramPreCheck(
+      { backend: "local_cli", vram_requirement_mb: 0 },
+      { gpu: { vram_mb: 1024, vram_used_mb: 1024 } },
+    );
+    assertEquals(check.needed, false);
+    assertEquals(check.requirementMb, null);
+  });
+
+  it("ignores hardware without a GPU (no VRAM numbers)", () => {
+    const check = vramPreCheck(localCli, { gpu: null });
+    assertEquals(check.needed, false);
+    assertEquals(check.freeMb, null);
+  });
+
+  it("ignores a GPU whose VRAM is unknown", () => {
+    const check = vramPreCheck(localCli, {
+      gpu: { model: "RTX", vram_mb: null, vram_used_mb: null },
+    });
+    assertEquals(check.needed, false);
+    assertEquals(check.freeMb, null);
+  });
+
+  it("tolerates a missing model or hardware", () => {
+    assertEquals(vramPreCheck(null, { gpu: { vram_mb: 1, vram_used_mb: 1 } }).needed, false);
+    assertEquals(vramPreCheck(localCli, null).needed, false);
+    assertEquals(vramPreCheck(undefined, undefined).needed, false);
+  });
+});
+
+describe("vramSufficient", () => {
+  const model = { backend: "local_cli", vram_requirement_mb: 2048 };
+
+  it("is true when free VRAM meets the requirement", () => {
+    assertEquals(
+      vramSufficient(model, { gpu: { vram_mb: 4096, vram_used_mb: 2048 } }),
+      true,
+    );
+  });
+
+  it("is false when free VRAM is below the requirement", () => {
+    assertEquals(
+      vramSufficient(model, { gpu: { vram_mb: 4096, vram_used_mb: 3072 } }),
+      false,
+    );
+  });
+
+  it("is false when there is no GPU", () => {
+    assertEquals(vramSufficient(model, { gpu: null }), false);
+  });
+
+  it("is true when the model declares no requirement", () => {
+    assertEquals(
+      vramSufficient({ backend: "local_cli", vram_requirement_mb: 0 }, {
+        gpu: null,
+      }),
+      true,
+    );
+  });
+});
+
+describe("formatGb", () => {
+  it("formats megabytes as a GB label", () => {
+    assertEquals(formatGb(51200), "50.0 GB");
+    assertEquals(formatGb(1024), "1.0 GB");
+    assertEquals(formatGb(1536), "1.5 GB");
+  });
+
+  it("renders unknown values as a question mark", () => {
+    assertEquals(formatGb(null), "?");
+    assertEquals(formatGb(undefined), "?");
   });
 });
