@@ -26,7 +26,11 @@ import {
 } from "@cinemaItor/services/model_files.ts";
 import { checkModelHealth } from "@cinemaItor/services/model_health.ts";
 import { requestBenchmark } from "@cinemaItor/services/model_benchmark.ts";
-import { detectHardware, modelRequirementWarnings } from "@cinemaItor/services/hardware.ts";
+import {
+  detectHardware,
+  invalidateHardwareCache,
+  modelRequirementWarnings,
+} from "@cinemaItor/services/hardware.ts";
 import {
   getHuggingFaceRepo,
   hfEffectiveToken,
@@ -221,6 +225,10 @@ export const modelRouter = new Router()
   })
   .get("/api/v1/models/hardware", authMiddleware, async (ctx, _next) => {
     requireUserId(ctx);
+    // ?refresh=1 bypasses the 60s detection cache — the pre-generation VRAM
+    // re-check (free-up-VRAM flow) needs a live reading, not a stale one.
+    const params = (ctx.request.url as unknown as URL).searchParams;
+    if (params.get("refresh") === "1") invalidateHardwareCache();
     const hardware = await detectHardware();
     const warnings = (
       await Promise.all(
@@ -415,7 +423,15 @@ export const openApiOps: Record<string, OperationMeta> = {
   "GET /api/v1/models/hardware": {
     summary: "Hardware report + requirement warnings",
     description: "Detects CPU/RAM/GPU/OS and checks every enabled model's " +
-      "requirements against it (VRAM/RAM warnings).",
+      "requirements against it (VRAM/RAM warnings). Results are cached for " +
+      "60s; pass refresh=1 to force a live re-probe (used by the " +
+      "pre-generation VRAM re-check after the user frees up memory).",
+    parameters: {
+      refresh: {
+        schema: { type: "string", enum: ["1"] },
+        description: "Set to 1 to bypass the 60s detection cache and re-probe now",
+      },
+    },
     responses: {
       200: {
         description: "Hardware and warnings",

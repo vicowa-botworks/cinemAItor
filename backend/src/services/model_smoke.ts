@@ -8,7 +8,7 @@
 import { badRequest, notFound } from "../errors.ts";
 import { getModel, type Model } from "../db/models.ts";
 import { getContentStore } from "../storage/content_store.ts";
-import { renderCliArgs } from "./adapters.ts";
+import { cliExtraEnv, renderCliArgs } from "./adapters.ts";
 import { hfTokenForUrl } from "./huggingface.ts";
 
 export const SMOKE_TEST_DEFAULT_TIMEOUT_SECONDS = 60;
@@ -39,7 +39,10 @@ function normalizeTimeout(value: number | undefined): number {
 }
 
 /** settings.env (string entries) + HF hub token for gated-repo downloads —
- * same rules as the local_cli adapter: an explicit settings.env entry wins. */
+ * same rules as the local_cli adapter: an explicit settings.env entry wins.
+ * device is undefined so the runner keeps its own auto CPU/GPU fallback, but
+ * the model's declared VRAM requirement is passed so that fallback threshold
+ * matches production (the local_cli adapter injects the same value). */
 function buildEnv(model: Model): Record<string, string> | undefined {
   const rawEnv = model.default_settings.env;
   const settingsEnv = rawEnv && typeof rawEnv === "object" && !Array.isArray(rawEnv)
@@ -48,15 +51,13 @@ function buildEnv(model: Model): Record<string, string> | undefined {
         .filter(([, v]) => typeof v === "string")
         .map(([k, v]) => [k, v as string]),
     )
-    : {};
-  const hfToken = hfTokenForUrl(model.repository_url);
-  if (hfToken) {
-    if (settingsEnv.HF_TOKEN === undefined) settingsEnv.HF_TOKEN = hfToken;
-    if (settingsEnv.HUGGING_FACE_HUB_TOKEN === undefined) {
-      settingsEnv.HUGGING_FACE_HUB_TOKEN = hfToken;
-    }
-  }
-  return Object.keys(settingsEnv).length > 0 ? settingsEnv : undefined;
+    : undefined;
+  return cliExtraEnv(
+    settingsEnv,
+    hfTokenForUrl(model.repository_url),
+    undefined,
+    model.vram_requirement_mb ?? undefined,
+  );
 }
 
 function tailOf(output: Deno.CommandOutput): string {

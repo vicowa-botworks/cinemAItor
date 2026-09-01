@@ -13,6 +13,7 @@ import {
 import {
   type AdapterHooks,
   candidateSeed,
+  cliExtraEnv,
   ComfyUIAdapter,
   LocalCliAdapter,
   renderCliArgs,
@@ -50,7 +51,7 @@ if [ "$prompt" = "FAIL" ]; then
   echo "boom: $prompt" >&2
   exit 3
 fi
-echo "PROMPT=$prompt SEED=$seed CAND=$cand FROM=$from HFTOKEN=\${HF_TOKEN:-}" > "$out"
+echo "PROMPT=$prompt SEED=$seed CAND=$cand FROM=$from HFTOKEN=\${HF_TOKEN:-} DEVICE=\${RUNNER_DEVICE:-} MINFREE=\${RUNNER_MIN_FREE_VRAM_MB:-}" > "$out"
 `;
 
 const fakeSleepScript = `#!/bin/sh
@@ -215,6 +216,64 @@ describe("renderCliArgs", () => {
 });
 
 // ---------------------------------------------------------------------------
+// cliExtraEnv
+// ---------------------------------------------------------------------------
+
+describe("cliExtraEnv", () => {
+  it("returns undefined when nothing is added", () => {
+    assertEquals(cliExtraEnv(undefined, "", undefined, undefined), undefined);
+  });
+
+  it("injects RUNNER_DEVICE for a user-chosen device", () => {
+    assertEquals(cliExtraEnv(undefined, "", "cuda", undefined), {
+      RUNNER_DEVICE: "cuda",
+    });
+  });
+
+  it("injects RUNNER_MIN_FREE_VRAM_MB (rounded) for a VRAM requirement", () => {
+    assertEquals(cliExtraEnv(undefined, "", undefined, 25600), {
+      RUNNER_MIN_FREE_VRAM_MB: "25600",
+    });
+  });
+
+  it("combines token, device, and VRAM requirement", () => {
+    assertEquals(cliExtraEnv(undefined, "hf_tok", "cpu", 51200), {
+      HF_TOKEN: "hf_tok",
+      HUGGING_FACE_HUB_TOKEN: "hf_tok",
+      RUNNER_DEVICE: "cpu",
+      RUNNER_MIN_FREE_VRAM_MB: "51200",
+    });
+  });
+
+  it("lets explicit settings.env entries win for every key", () => {
+    assertEquals(
+      cliExtraEnv(
+        {
+          HF_TOKEN: "u",
+          HUGGING_FACE_HUB_TOKEN: "u",
+          RUNNER_DEVICE: "cpu",
+          RUNNER_MIN_FREE_VRAM_MB: "1",
+        },
+        "hf_tok",
+        "cuda",
+        51200,
+      ),
+      {
+        HF_TOKEN: "u",
+        HUGGING_FACE_HUB_TOKEN: "u",
+        RUNNER_DEVICE: "cpu",
+        RUNNER_MIN_FREE_VRAM_MB: "1",
+      },
+    );
+  });
+
+  it("ignores non-positive VRAM requirements", () => {
+    assertEquals(cliExtraEnv(undefined, "", undefined, 0), undefined);
+    assertEquals(cliExtraEnv(undefined, "", undefined, -5), undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // LocalCliAdapter
 // ---------------------------------------------------------------------------
 
@@ -363,8 +422,8 @@ describe("LocalCliAdapter", () => {
         },
         noopHooks,
       );
-      const out = new TextDecoder().decode(result.candidates[0].content).trimEnd();
-      assertEquals(out.slice(-8), "HFTOKEN=");
+      const out = new TextDecoder().decode(result.candidates[0].content);
+      assertStringIncludes(out, "HFTOKEN= DEVICE= MINFREE=");
     } finally {
       if (prevToken !== undefined) Deno.env.set("HF_TOKEN", prevToken);
     }
@@ -387,6 +446,47 @@ describe("LocalCliAdapter", () => {
     );
     const out = new TextDecoder().decode(result.candidates[0].content);
     assertStringIncludes(out, "HFTOKEN=user_token");
+  });
+
+  it("injects RUNNER_DEVICE and RUNNER_MIN_FREE_VRAM_MB from settings", async () => {
+    const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+    const adapter = new LocalCliAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "42",
+        settings: cliSettings(script, {
+          device: "cuda",
+          min_free_vram_mb: 51200,
+        }),
+        inputs: [],
+        promptText: "a lighthouse",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    const out = new TextDecoder().decode(result.candidates[0].content);
+    assertStringIncludes(out, "DEVICE=cuda");
+    assertStringIncludes(out, "MINFREE=51200");
+  });
+
+  it("injects no device env when settings carry none", async () => {
+    const script = writeScript(dir, "fake-gen.sh", fakeGenScript);
+    const adapter = new LocalCliAdapter();
+    const result = await adapter.generate(
+      {
+        jobType: "text_to_image",
+        seed: "42",
+        settings: cliSettings(script),
+        inputs: [],
+        promptText: "a lighthouse",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    const out = new TextDecoder().decode(result.candidates[0].content).trimEnd();
+    // The trailing env fields are empty (no RUNNER_DEVICE / RUNNER_MIN_FREE_VRAM_MB).
+    assertMatch(out, /DEVICE= MINFREE=$/);
   });
 
   it("uses a random numeric seed when none is given", async () => {

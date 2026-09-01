@@ -119,6 +119,12 @@ itself is created synchronously in the new-asset case, with no versions yet):
 - `include_current` (edit endpoint only): attach the asset's active version as a reference.
 - `prompt` (required), `model_id` (optional — first enabled model for the task otherwise), `seed`
   (optional integer string), `candidates` (1–8, default 2).
+- `device` (optional, `cpu` | `cuda`): run the generation on this device. Without it a `local_cli`
+  runner decides for itself (GPU when enough VRAM is free, CPU otherwise). The UI sends `cpu` when
+  the user accepts the slow path after the pre-generation VRAM check (free VRAM below the model's
+  `vram_requirement_mb`), and re-checks — sending no `device` — once enough VRAM is free. The value
+  reaches the runner as the `RUNNER_DEVICE` env var; the model's `vram_requirement_mb` is passed as
+  `RUNNER_MIN_FREE_VRAM_MB` so the runner's own fallback threshold matches the UI check.
 - New-asset only: `unique_slug`, `display_name`, `asset_type` (image kind: `image` / `character` /
   `location` / `prop`; video kind: `video`), `library_scope` + `project_id` (same rules as
   `POST /api/v1/assets`).

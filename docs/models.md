@@ -19,7 +19,7 @@ task mapping, hardware detection, and requirement warnings.
 | ------ | ------------------------------------------ | ---------------------------------------------------------------------------- |
 | GET    | `/api/v1/models`                           | List (filter: `enabled`, `task_type`, `query`)                               |
 | POST   | `/api/v1/models`                           | Register metadata (admin)                                                    |
-| GET    | `/api/v1/models/hardware`                  | Detected hardware + requirement warnings for enabled models                  |
+| GET    | `/api/v1/models/hardware`                  | Detected hardware + requirement warnings (`?refresh=1` re-probes)            |
 | GET    | `/api/v1/models/huggingface/search`        | Search the public HuggingFace catalog (`?q=&filter=&limit=`)                 |
 | GET    | `/api/v1/models/huggingface/:repoId`       | Repo metadata + recursive file listing + README (`:repoId` = `owner%2Fname`) |
 | GET    | `/api/v1/models/huggingface/settings`      | HF token status, masked (`{tokenSet, tokenSource}`) (admin)                  |
@@ -205,7 +205,10 @@ repo, `409` model id already registered, `502` HuggingFace unreachable, timed ou
   is invalid, so the core fields must be queried separately). The GPU object is
   `{ vendor, model, vram_mb, vram_used_mb, driver_version, cuda_version }` with every field null
   when undetectable — both the models hardware endpoint and the diagnostics hardware report
-  (DIA-001) return this same object, so the UIs must use these exact keys.
+  (DIA-001) return this same object, so the UIs must use these exact keys. Detection spawns
+  `nvidia-smi`, so results are cached for 60s; `GET /api/v1/models/hardware?refresh=1` bypasses the
+  cache and re-probes live (used by the pre-generation VRAM re-check after the user frees up
+  memory).
 - **Requirement warnings**: each enabled model is compared against detected hardware (VRAM / total
   RAM / missing dependencies) and reported by `/api/v1/models/hardware`.
 - **Disable**: disabled models are excluded from task-mapping lookups, so the generation pipeline

@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import {
+  formatGb,
   generationKindForAsset,
   generationTaskType,
   IMAGE_ASSET_TYPES,
@@ -9,7 +10,10 @@ import {
   slugify,
   validateGenerationForm,
   VIDEO_ASSET_TYPES,
+  vramPreCheck,
+  vramSufficient,
 } from "./asset-generation.js";
+import "./vram-choice-dialog.js";
 
 /**
  * Prompt-based generation form for image/video assets.
@@ -203,6 +207,15 @@ export class AssetGenerate extends LitElement {
     this.status = "";
     this.queuedResult = null;
     this._modelCache = new Map();
+    this._vram = {
+      open: false,
+      requirementGb: "",
+      freeGb: "",
+      gpuModel: "",
+      rechecking: false,
+    };
+    this._vramModel = null;
+    this._vramResolve = null;
   }
 
   firstUpdated() {
@@ -348,6 +361,14 @@ export class AssetGenerate extends LitElement {
     }
 
     const payload = this._buildPayload();
+
+    // Pre-submit VRAM choice for local_cli models: opens the dialog when the
+    // GPU's free VRAM can't cover the model's requirement, and resolves to an
+    // explicit device. "cancel" aborts the submit.
+    const device = await this._resolveVramDevice();
+    if (device === "cancel") return;
+    if (device === "cpu" || device === "cuda") payload.device = device;
+
     this.busy = true;
     this.status = "Queueing generation job...";
     try {
@@ -380,6 +401,96 @@ export class AssetGenerate extends LitElement {
 
   _typeOptions() {
     return this.kind === "video" ? VIDEO_ASSET_TYPES : IMAGE_ASSET_TYPES;
+  }
+
+  /** The model the job will run on: the explicit pick, or the "auto" first. */
+  _selectedModel() {
+    if (this.modelId) {
+      return this.models.find((m) => m.id === this.modelId) ?? null;
+    }
+    // Matches the backend's pickModel auto-pick (first enabled model for the
+    // task, ordered by name, version).
+    return this.models[0] ?? null;
+  }
+
+  /**
+   * Pre-submit VRAM gate. Returns a Promise that resolves to:
+   *   null   — no check applies (not local_cli / no requirement / enough VRAM
+   *            / VRAM unknown) → the runner's own auto fallback decides
+   *   "cpu"  — the user chose to generate on the CPU
+   *   "cuda" — a "free VRAM & recheck" now shows enough free VRAM → GPU
+   *   "cancel" — the user dismissed the dialog
+   */
+  async _resolveVramDevice() {
+    const model = this._selectedModel();
+    if (!model || model.backend !== "local_cli") return null;
+    if (
+      !(typeof model.vram_requirement_mb === "number" &&
+        model.vram_requirement_mb > 0)
+    ) {
+      return null;
+    }
+    let hw;
+    try {
+      hw = await api.getModelsHardware();
+    } catch {
+      return null; // can't determine VRAM — let the runner decide
+    }
+    const check = vramPreCheck(model, hw);
+    if (!check.needed) return null;
+    this._vram = {
+      open: true,
+      requirementGb: formatGb(check.requirementMb),
+      freeGb: formatGb(check.freeMb),
+      gpuModel: check.gpuModel ?? "",
+      rechecking: false,
+    };
+    this._vramModel = model;
+    return new Promise((resolve) => {
+      this._vramResolve = resolve;
+    });
+  }
+
+  _settleVram(value) {
+    if (!this._vramResolve) return;
+    const resolve = this._vramResolve;
+    this._vramResolve = null;
+    this._vram = { ...this._vram, open: false, rechecking: false };
+    resolve(value);
+  }
+
+  _onVramChoose(e) {
+    this._settleVram(e.detail?.device ?? "cpu");
+  }
+
+  _onVramCancel() {
+    this._settleVram("cancel");
+  }
+
+  _onVramRecheck() {
+    if (!this._vramResolve || this._vram.rechecking) return;
+    const model = this._vramModel;
+    this._vram = { ...this._vram, rechecking: true };
+    api
+      .getModelsHardware({ refresh: true })
+      .then((hw) => {
+        if (vramSufficient(model, hw)) {
+          this._settleVram("cuda"); // enough now — continue on the GPU
+          return;
+        }
+        const check = vramPreCheck(model, hw);
+        // Still short — stay open with the refreshed numbers.
+        this._vram = {
+          ...this._vram,
+          rechecking: false,
+          requirementGb: formatGb(check.requirementMb),
+          freeGb: formatGb(check.freeMb),
+          gpuModel: check.gpuModel ?? "",
+        };
+      })
+      .catch(() => {
+        this._vram = { ...this._vram, rechecking: false };
+      });
   }
 
   render() {
@@ -616,6 +727,16 @@ export class AssetGenerate extends LitElement {
           </button>
         </div>
       </form>
+      <vram-choice-dialog
+        .open=${this._vram.open}
+        .requirementGb=${this._vram.requirementGb}
+        .freeGb=${this._vram.freeGb}
+        .gpuModel=${this._vram.gpuModel}
+        .rechecking=${this._vram.rechecking}
+        @choose=${this._onVramChoose}
+        @recheck=${this._onVramRecheck}
+        @cancel=${this._onVramCancel}
+      ></vram-choice-dialog>
     `;
   }
 }

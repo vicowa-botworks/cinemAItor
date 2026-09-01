@@ -43,6 +43,16 @@ export const MIN_CANDIDATES = 1;
 export const MAX_CANDIDATES = 8;
 export const DEFAULT_CANDIDATES = 2;
 
+/**
+ * Execution device hint for local_cli generation. When set, the runner is
+ * told via RUNNER_DEVICE to use it instead of its own auto fallback (GPU
+ * when enough VRAM is free, CPU otherwise). The UI offers this from the
+ * pre-generation VRAM check: "use CPU" when free VRAM is short of the
+ * model's requirement.
+ */
+export const GENERATION_DEVICES = ["cpu", "cuda"] as const;
+export type GenerationDevice = (typeof GENERATION_DEVICES)[number];
+
 export interface AssetReferenceInput {
   asset_id: string;
   version_number?: number;
@@ -60,6 +70,7 @@ export interface GenerateNewAssetOptions {
   seed?: string;
   candidates?: unknown;
   references?: AssetReferenceInput[];
+  device?: unknown;
 }
 
 export interface GenerateIntoAssetOptions {
@@ -70,6 +81,7 @@ export interface GenerateIntoAssetOptions {
   candidates?: unknown;
   include_current?: boolean;
   references?: AssetReferenceInput[];
+  device?: unknown;
 }
 
 export interface AssetGenerateResult {
@@ -101,6 +113,14 @@ export function resolveCandidateCount(value: unknown): number {
     throw badRequest(
       `candidates must be an integer between ${MIN_CANDIDATES} and ${MAX_CANDIDATES}`,
     );
+  }
+  return value;
+}
+
+export function resolveDevice(value: unknown): GenerationDevice | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value !== "cpu" && value !== "cuda") {
+    throw badRequest(`device must be one of: ${GENERATION_DEVICES.join(", ")}`);
   }
   return value;
 }
@@ -204,6 +224,7 @@ function enqueueGeneration(
   candidates: number,
   inputs: { asset_id: string; version_number: number }[],
   target: { asset_id: string; project_id: string | null },
+  device: GenerationDevice | undefined,
 ) {
   const taskType = inputs.length > 0 ? KIND_TASK_TYPES[kind].input : KIND_TASK_TYPES[kind].text;
   const model = pickModel(taskType, modelId);
@@ -214,7 +235,16 @@ function enqueueGeneration(
     project_id: target.project_id ?? undefined,
     prompt_text: prompt,
     seed,
-    settings: { candidates },
+    settings: {
+      candidates,
+      ...(device ? { device } : {}),
+      // The model's declared VRAM requirement, so the runner's auto-fallback
+      // threshold matches the UI's pre-generation VRAM check (both read
+      // vram_requirement_mb). local_cli only — other backends ignore it.
+      ...(model.backend === "local_cli" && model.vram_requirement_mb != null
+        ? { min_free_vram_mb: model.vram_requirement_mb }
+        : {}),
+    },
     input_asset_versions: inputs,
   });
   return { job_id: job.id, job_type: taskType, asset_id: target.asset_id, model_id: model.id };
@@ -276,6 +306,7 @@ export function generateNewAsset(
     candidates,
     inputs,
     { asset_id: asset.id, project_id: projectId ?? null },
+    resolveDevice(options.device),
   );
 }
 
@@ -334,5 +365,6 @@ export function generateIntoAsset(
     candidates,
     inputs,
     { asset_id: asset.id, project_id: asset.project_id },
+    resolveDevice(options.device),
   );
 }

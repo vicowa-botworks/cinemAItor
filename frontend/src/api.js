@@ -684,8 +684,15 @@ class ApiClient {
     return this.request(`/models/${encodeURIComponent(id)}/benchmarks`);
   }
 
-  getModelsHardware() {
-    return this.request("/models/hardware");
+  /**
+   * Detected hardware (CPU/RAM/GPU/VRAM). With `refresh: true` the backend
+   * bypasses its 60 s cache and re-probes live, so a UI "recheck" button sees
+   * VRAM the user just freed.
+   * @param {{refresh?: boolean}} [options]
+   */
+  getModelsHardware(options = {}) {
+    const qs = options.refresh ? "?refresh=1" : "";
+    return this.request(`/models/hardware${qs}`);
   }
 
   // --- v1 llm ---

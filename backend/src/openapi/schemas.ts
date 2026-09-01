@@ -852,6 +852,15 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         maxItems: 8,
         items: ref("AssetReference"),
       },
+      device: {
+        type: "string",
+        enum: ["cpu", "cuda"],
+        description: "Run the generation on this device. Without it the runner " +
+          "decides by itself (GPU when enough VRAM is free, CPU otherwise). " +
+          "The UI sends 'cpu' when the user accepts the slow path after the " +
+          "pre-generation VRAM check, and rechecks (no device) once enough VRAM " +
+          "is free.",
+      },
     },
   },
 
@@ -882,6 +891,15 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         type: "array",
         maxItems: 8,
         items: ref("AssetReference"),
+      },
+      device: {
+        type: "string",
+        enum: ["cpu", "cuda"],
+        description: "Run the generation on this device. Without it the runner " +
+          "decides by itself (GPU when enough VRAM is free, CPU otherwise). " +
+          "The UI sends 'cpu' when the user accepts the slow path after the " +
+          "pre-generation VRAM check, and rechecks (no device) once enough VRAM " +
+          "is free.",
       },
     },
   },

@@ -53,6 +53,11 @@ except for image-input tasks.
   `RUNNER_STATUS {"device":"cuda","free_vram_gib":95.1}`). Each line is forwarded live as a
   `runner.log` job event formatted as `key=value, ...`, so the job card reports runtime state while
   the CLI is still running.
+- **Device env for local_cli**: the adapter injects `RUNNER_DEVICE` (`cpu`/`cuda`) when the job
+  settings carry a user-chosen device (from the pre-generation VRAM check) and
+  `RUNNER_MIN_FREE_VRAM_MB` when the model declares a `vram_requirement_mb` — so a runner's auto
+  CPU/GPU fallback threshold matches the UI's check. An explicit `settings.env` entry always wins
+  over both.
 - **Seeds are strings**: the `{seed}` placeholder is rendered verbatim — benchmark jobs pass
   `bench-<model-id>` and per-candidate seeds derive as `<seed>:<index>` for non-numeric seeds.
   Runner scripts must accept arbitrary seed strings (numeric ones pass through unchanged; runtimes
