@@ -255,14 +255,20 @@ Runs a user-configured command, once per candidate:
 stays reproducible), candidate _i_ gets a derived one — numeric seeds offset numerically (`42` →
 `42,43,…`), non-numeric seeds suffix the index (`abc` → `abc,abc:1,…`) — so deterministic runtimes
 (e.g. a CPU diffusers runner) produce distinct candidates instead of byte-identical copies. The
-per-candidate seed is recorded in each version's `technical_metadata.seed_used`. A **bare**
-`{input:<i>}` token (the whole `args` entry) is an _optional_ reference: when the job carries no
-such input the token — and a lone flag token directly before it, e.g. `["--image", "{input:0}"]` —
-is dropped from the command line, so one settings row can serve both text-to-image and
-image-to-image jobs (dual-mode models). `{input:<i>}` embedded in a larger token still fails the job
-when the input is absent. Each candidate is written to a temp file in the job's working directory,
-read back as the candidate bytes, then removed. A non-zero exit fails the job with the last 1500
-chars of stderr (stdout as fallback). Cancellation kills the child between candidates.
+per-candidate seed is recorded in each version's `technical_metadata.seed_used`. Seeds reach the CLI
+**as strings** (benchmark jobs pass `bench-<model-id>`), so runner scripts must accept arbitrary
+seed strings and map them to their runtime's integer RNG seed (numeric seeds pass through unchanged;
+non-numeric ones are typically hashed deterministically). A **bare** `{input:<i>}` token (the whole
+`args` entry) is an _optional_ reference: when the job carries no such input the token — and a lone
+flag token directly before it, e.g. `["--image", "{input:0}"]` — is dropped from the command line,
+so one settings row can serve both text-to-image and image-to-image jobs (dual-mode models).
+`{input:<i>}` embedded in a larger token still fails the job when the input is absent. Each
+candidate is written to a temp file in the job's working directory, read back as the candidate
+bytes, then removed. A non-zero exit fails the job with the last 1500 chars of stderr (stdout as
+fallback). Cancellation kills the child between candidates. Runners may also print
+`RUNNER_STATUS {"key": value}` lines to stdout — each line is forwarded live to the job card as a
+`runner.log` event (e.g. `device=cuda, free_vram_gib=95.1`, so multi-hour generations report which
+device they use; see `docs/jobs.md`).
 
 Example:
 

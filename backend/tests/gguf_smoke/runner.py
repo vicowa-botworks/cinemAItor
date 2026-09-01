@@ -41,6 +41,7 @@ grep for it.
 
 import argparse
 import glob
+import json
 import os
 import sys
 import time
@@ -70,10 +71,24 @@ def find_gguf(weights_dir, explicit=None):
     return path
 
 
+def seed_to_int(seed: str) -> int:
+    """The app passes seed strings through verbatim (benchmark seeds like
+    'bench-<model-id>' and the per-candidate '<seed>:<i>' derivation).
+    Numeric seeds are used as-is; anything else is hashed (FNV-1a) to a
+    deterministic uint32."""
+    s = seed.strip()
+    if s.lstrip("-").isdigit():
+        return int(s)
+    h = 0x811C9DC5
+    for b in s.encode("utf-8"):
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prompt", required=True)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", default="42")
     parser.add_argument("--output", required=True)
     parser.add_argument(
         "--image",
@@ -96,13 +111,21 @@ def main():
 
     min_free_vram_gb = 50  # weights (~35 GiB) + activations at 1024px
     device = args.device
+    free_vram_gib = None
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cuda":
         free, total = torch.cuda.mem_get_info()
+        free_vram_gib = round(free / 1024 ** 3, 1)
         if free < min_free_vram_gb * 1024 ** 3:
-            print(f"gpu free {free / 1024 ** 3:.1f} GiB < {min_free_vram_gb} GiB required — falling back to cpu", flush=True)
+            print(f"gpu free {free_vram_gib} GiB < {min_free_vram_gb} GiB required — falling back to cpu", flush=True)
             device = "cpu"
+    # Machine-readable status line: the local_cli adapter forwards it to the
+    # job card as a runner.log event (which device the run uses, live).
+    status = {"device": device}
+    if free_vram_gib is not None:
+        status["free_vram_gib"] = free_vram_gib
+    print("RUNNER_STATUS " + json.dumps(status), flush=True)
     torch.set_num_threads(min(16, os.cpu_count() or 1))
 
     gguf_path = find_gguf(args.weights_dir, args.transformer_gguf)
@@ -168,7 +191,7 @@ def main():
     print(f"pipeline ready in {time.time() - t0:.1f}s, generating on {device}", file=sys.stderr)
 
     t1 = time.time()
-    generator = torch.Generator(device="cpu").manual_seed(args.seed)
+    generator = torch.Generator(device="cpu").manual_seed(seed_to_int(args.seed))
     image = pipe(
         args.prompt,
         num_inference_steps=args.steps,

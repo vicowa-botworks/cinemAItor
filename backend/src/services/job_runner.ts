@@ -176,6 +176,9 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
           updateJobProgress(jobId, progress);
           if (message) addJobEvent(jobId, "progress", message, { progress });
         },
+        onLog(message: string): void {
+          addJobEvent(jobId, "runner.log", message);
+        },
         isCancelled(): boolean {
           return getJob(jobId)?.status === "cancelling";
         },
@@ -258,6 +261,9 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
         onProgress(progress: number, message: string | null): void {
           updateJobProgress(jobId, progress);
           if (message) addJobEvent(jobId, "progress", message, { progress });
+        },
+        onLog(message: string): void {
+          addJobEvent(jobId, "runner.log", message);
         },
         isCancelled(): boolean {
           return getJob(jobId)?.status === "cancelling";
@@ -390,6 +396,9 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
         onProgress(progress: number, message: string | null): void {
           updateJobProgress(jobId, progress);
           addJobEvent(jobId, "progress", message, { progress });
+        },
+        onLog(message: string): void {
+          addJobEvent(jobId, "runner.log", message);
         },
         isCancelled(): boolean {
           return getJob(jobId)?.status === "cancelling";

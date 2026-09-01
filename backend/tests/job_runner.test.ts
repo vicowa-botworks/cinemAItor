@@ -411,6 +411,42 @@ describe("job runner", () => {
     assertEquals(types.filter((t) => t === "recovered").length, 0);
   });
 
+  it("surfaces RUNNER_STATUS lines from CLI runners as runner.log events", async () => {
+    // The FLUX.2 GGUF runners emit `RUNNER_STATUS {"device":...}` right after
+    // device selection; the job card must report the device while the
+    // (multi-hour) generation is still running. Benchmark jobs pass
+    // non-numeric seed strings (bench-<model-id>), so mirror that here.
+    const model = registerModel(ownerId, {
+      name: "status-cli",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+      enabled: true,
+      default_settings: {
+        command: "sh",
+        args: [
+          "-c",
+          'echo \'RUNNER_STATUS {"device":"cuda","free_vram_gib":95.1}\'; : > {output}',
+        ],
+        timeout_seconds: 30,
+      },
+    });
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "device check",
+      seed: `bench-${model.id}`,
+    });
+    const runner = startJobRunner({ pollMs: 5 });
+    runners.push(runner);
+    await waitFor(() => getJob(job.id)?.status === "succeeded");
+    const log = listJobEvents(job.id).find((e) => e.event_type === "runner.log");
+    assert(log);
+    assertEquals(log.message, "device=cuda, free_vram_gib=95.1");
+  });
+
   it("updateJobLease only extends leases owned by the caller", async () => {
     const model = mockT2IModel();
     const asset = canvasAsset();

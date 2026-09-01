@@ -303,9 +303,12 @@ server.ts (entry point)
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
    │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
     │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
-    │   │   model default_settings, passes per-job workDir; HF-origin models (repository_url on
-    │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
-    │   │   runners can fetch gated-repo files; provenance on produced asset versions
+     │   │   model default_settings, passes per-job workDir; HF-origin models (repository_url on
+     │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
+     │   │   runners can fetch gated-repo files; provenance on produced asset versions; local_cli
+     │   │   streams stdout and forwards `RUNNER_STATUS {json}` lines live as `runner.log` job
+     │   │   events (runners report e.g. device=cuda/cpu so the job card shows it mid-run);
+     │   │   {seed} renders the seed string verbatim (benchmarks use `bench-<model-id>`)
   │   ├── Model-less `proxy` jobs (ffmpeg or mock transcode of media proxies); list filter
   │   │   `?job_type=`
   │   ├── WebSocket `/ws/v1/jobs` (?token= auth): pushes job + render progress/status

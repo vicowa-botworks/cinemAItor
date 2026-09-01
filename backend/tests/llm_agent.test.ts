@@ -1353,6 +1353,10 @@ describe("copilot system prompt", () => {
     assertMatch(prompt, /write_model_file/);
     assertMatch(prompt, /install_model_deps/);
     assertMatch(prompt, /venv python path/);
+    // Runner contract: string seeds + the device status line the job card
+    // surfaces (a type=int --seed argparse used to break benchmarks).
+    assertMatch(prompt, /--seed arrives VERBATIM as a string/);
+    assertMatch(prompt, /RUNNER_STATUS/);
   });
 
   it("teaches the GGUF loading recipe (backbone-only from_single_file)", async () => {

@@ -20,6 +20,10 @@ export interface CandidateFile {
 export interface AdapterHooks {
   onProgress(progress: number, message: string | null): void;
   isCancelled(): boolean;
+  /** Structured status line from a CLI runner (RUNNER_STATUS <json>) —
+   * surfaced as a job event so the job card reports e.g. the device
+   * (gpu/cpu) a long generation is running on. */
+  onLog?(message: string): void;
 }
 
 export interface AdapterInputRef {
@@ -327,6 +331,27 @@ function settingNumber(
   return Math.min(Math.max(value, min), max);
 }
 
+const RUNNER_STATUS_PREFIX = "RUNNER_STATUS ";
+
+/** Format a RUNNER_STATUS JSON payload as `key=value, ...` (null when the
+ * line is not a flat object of scalar values). */
+function formatRunnerStatus(raw: string): string | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      parts.push(`${key}=${value}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
 async function runCli(
   command: string,
   args: string[],
@@ -347,12 +372,67 @@ async function runCli(
       `Failed to start CLI '${command}': ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  const outputPromise = child.output();
   const startedAt = Date.now();
+  // Stdout is streamed line by line so RUNNER_STATUS lines (e.g. the device
+  // a generation is running on) reach the job card while the CLI is still
+  // running; the full text is kept for the error tail.
+  let stdoutText = "";
+  let stderrText = "";
+  let lineCarry = "";
+  const handleLine = (line: string): void => {
+    if (line.startsWith(RUNNER_STATUS_PREFIX)) {
+      const formatted = formatRunnerStatus(line.slice(RUNNER_STATUS_PREFIX.length).trim());
+      if (formatted && hooks.onLog) hooks.onLog(formatted);
+    }
+  };
+  const readStdout = (async (): Promise<void> => {
+    const decoder = new TextDecoder();
+    const reader = child.stdout.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        stdoutText += text;
+        lineCarry += text;
+        let newline: number;
+        while ((newline = lineCarry.indexOf("\n")) >= 0) {
+          const line = lineCarry.slice(0, newline);
+          lineCarry = lineCarry.slice(newline + 1);
+          handleLine(line);
+        }
+      }
+      const tail = decoder.decode();
+      stdoutText += tail;
+      if (tail) lineCarry += tail;
+      if (lineCarry.length > 0) handleLine(lineCarry);
+    } catch {
+      // A kill or I/O error ends the stream; the status below still reports.
+    } finally {
+      reader.releaseLock();
+    }
+  })();
+  const errReader = child.stderr.getReader();
+  const readStderr = (async (): Promise<void> => {
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const { done, value } = await errReader.read();
+        if (done) break;
+        stderrText += decoder.decode(value, { stream: true });
+      }
+      stderrText += decoder.decode();
+    } catch {
+      // Same as stdout: a kill ends the stream.
+    } finally {
+      errReader.releaseLock();
+    }
+  })();
+  const streamsDone = Promise.all([readStdout, readStderr]);
   // Bounded drain after a kill: SIGKILL kills the direct child, but any
   // grandchild it spawned inherits the pipe fds and holds them open, so
-  // output() would otherwise wait for the grandchild to exit on its own.
-  // Wait a short grace period for the pipes to flush, then abandon them.
+  // the read loops would otherwise wait for the grandchild to exit on its
+  // own. Wait a short grace period for the pipes to flush, then abandon them.
   const killAndDrain = async (): Promise<void> => {
     try {
       child.kill("SIGKILL");
@@ -360,12 +440,12 @@ async function runCli(
       // Process may have already exited.
     }
     const grace = new Promise((resolve) => setTimeout(resolve, 2000));
-    const done = outputPromise.then(
+    const done = streamsDone.then(
       () => "done" as const,
       () => "done" as const,
     );
     // Attach a no-op handler so a late rejection can't go unhandled.
-    outputPromise.catch(() => {});
+    streamsDone.catch(() => {});
     await Promise.race([done, grace]);
   };
   for (;;) {
@@ -378,18 +458,17 @@ async function runCli(
       throw new Error(`CLI '${command}' timed out after ${timeoutSeconds}s`);
     }
     const tick = new Promise((resolve) => setTimeout(resolve, 100));
-    const done = outputPromise.then(
+    const done = streamsDone.then(
       () => "done" as const,
       () => "done" as const,
     );
     if (await Promise.race([done, tick]) === "done") break;
   }
-  const output = await outputPromise;
-  if (!output.success) {
-    const stderr = new TextDecoder().decode(output.stderr).trim();
-    const stdout = new TextDecoder().decode(output.stdout).trim();
-    const tail = (stderr || stdout || "(no output)").slice(-1500);
-    throw new Error(`CLI '${command}' exited with code ${output.code}: ${tail}`);
+  await streamsDone;
+  const status = await child.status;
+  if (!status.success) {
+    const tail = (stderrText.trim() || stdoutText.trim() || "(no output)").slice(-1500);
+    throw new Error(`CLI '${command}' exited with code ${status.code}: ${tail}`);
   }
 }
 
