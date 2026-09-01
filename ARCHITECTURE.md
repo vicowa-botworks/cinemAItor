@@ -145,10 +145,12 @@ app-root (main router)
 │   │              `busyLabel` on the confirm button; `progress` object ({percent, label})
  │   │              renders a progress bar (indeterminate while percent is null) + caption;
  │   │              first consumer: model-manager install/remove)
- ├── vram-choice-dialog (pre-generation VRAM guard for local_cli generation: shown when free
- │   │   VRAM is below the model's `vram_requirement_mb`; "start on CPU" sends device=cpu, or
- │   │   "free up VRAM" + a refresh button re-probes live via /hardware?refresh=1 and auto-starts
- │   │   on the GPU once enough VRAM is free; pure helpers in asset-generation.js)
+  ├── vram-choice-dialog (pre-generation VRAM guard for local_cli generation: shown when free
+  │   │   VRAM is below the model's `vram_requirement_mb`; "start on CPU" sends device=cpu, or
+  │   │   "free up VRAM" + a refresh button re-probes live via /hardware?refresh=1 and auto-starts
+  │   │   on the GPU once enough VRAM is free. Shared across every interactive generation path —
+  │   │   asset generate/edit, storyboard panel preview, scene/batch, audio, and timeline score —
+  │   │   via the vram-guard mixin + pure helpers in asset-generation.js)
  ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
 │   │            per-job detail + event log, cancel/retry)

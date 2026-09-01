@@ -23,7 +23,7 @@ Import, generation, versioning, non-destructive trim/gain and waveform access fo
 
 | Method | Endpoint                                                   | Description                                                                                                                                                                                       |
 | ------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, settings?}` → `202 {job_id, job_type, asset_id, model_id}`                                 |
+| POST   | `/api/v1/audio/generate`                                   | Generate from prompt: `{kind: music\|voiceover\|sfx, prompt, project_id?\|scene_id?, model_id?, seed?, device?, settings?}` → `202 {job_id, job_type, asset_id, model_id}`                        |
 | POST   | `/api/v1/audio/upload`                                     | Raw-bytes streaming upload (file as the body; `X-File-Name`, `X-Upload-Notes?`, `X-Asset-Type?`, `X-Display-Name?`, `X-Project-Id?` headers) → creates the audio asset + version 1                |
 | GET    | `/api/v1/audio/assets`                                     | List audio assets (filters: `asset_type`, `project_id`, `library_scope`)                                                                                                                          |
 | POST   | `/api/v1/audio/assets/:id/versions`                        | New version: raw-bytes streaming upload (`X-File-Name`, `X-Upload-Notes?`), or JSON `{content_hash, notes?}` for stored content                                                                   |
@@ -44,6 +44,13 @@ included).
   and candidates are compared/promoted through the review workflow.
 - Scoping: `scene_id` (scene write) implies the scene's project; otherwise `project_id` (project
   write) is required. The job records `project_id`/`scene_id` for provenance.
+- **Device / VRAM gate**: the endpoint accepts `device` (`cpu` | `cuda`). Without it a `local_cli`
+  runner decides for itself (GPU when enough VRAM is free, CPU otherwise). The UI runs the same
+  pre-generation VRAM check as asset generation (free VRAM vs the model's `vram_requirement_mb`) and
+  sends `cpu` when the user accepts the slow path; it re-checks — sending no `device` — once enough
+  VRAM is free. `device` and the model's `vram_requirement_mb` reach the runner as `RUNNER_DEVICE` /
+  `RUNNER_MIN_FREE_VRAM_MB` (see `docs/assets.md`). The same gate applies to the timeline **Generate
+  score** action (see `docs/timelines.md`), which funnels through this path.
 
 ## Cleanup (AUD-012)
 

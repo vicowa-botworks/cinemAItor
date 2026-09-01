@@ -24,28 +24,28 @@ shot prompts use the same prompt-versioning engine (scopes `scene` / `shot`).
 
 ## Endpoints
 
-| Method       | Endpoint                                                   | Description                                             |
-| ------------ | ---------------------------------------------------------- | ------------------------------------------------------- |
-| GET          | `/api/v1/storyboards`                                      | List (filter `project_id`)                              |
-| POST         | `/api/v1/storyboards`                                      | Create `{project_id, name}`                             |
-| GET          | `/api/v1/storyboards/:id`                                  | Board + panels (with prompts)                           |
-| PATCH        | `/api/v1/storyboards/:id`                                  | Update name/status                                      |
-| DELETE       | `/api/v1/storyboards/:id`                                  | Soft delete                                             |
-| GET          | `/api/v1/storyboards/:id/panels`                           | List panels (ordered, with prompts)                     |
-| POST         | `/api/v1/storyboards/:id/panels`                           | Create panel (`panel_order` unique)                     |
-| PATCH        | `/api/v1/storyboards/:id/panels/:panelId`                  | Update fields / prompt / links                          |
-| DELETE       | `/api/v1/storyboards/:id/panels/:panelId`                  | Delete panel                                            |
-| POST         | `/api/v1/storyboards/:id/panels/:panelId/generate-preview` | t2i job; body `{model_id?, seed?, settings?}`           |
-| GET          | `/api/v1/scenes`                                           | List (filters `project_id`, `storyboard_id`)            |
-| POST         | `/api/v1/scenes`                                           | Create scene                                            |
-| GET          | `/api/v1/scenes/:id`                                       | Scene (with prompt) + shots                             |
-| PATCH/DELETE | `/api/v1/scenes/:id`                                       | Update / delete                                         |
-| GET/POST     | `/api/v1/scenes/:id/shots`                                 | List/create shots (`shot_order` unique)                 |
-| PATCH/DELETE | `/api/v1/scenes/:id/shots/:shotId`                         | Update / delete shot                                    |
-| POST         | `/api/v1/scenes/:id/generate`                              | Scene generation job                                    |
-| POST         | `/api/v1/scenes/:id/batch-generate`                        | One generation job per shot of the scene                |
-| POST         | `/api/v1/projects/:id/scenes/from-script`                  | Bulk-create draft scenes from a parsed script (SCN-015) |
-| GET          | `/api/v1/projects/:id/continuity`                          | Deterministic continuity report for the project (MS-8)  |
+| Method       | Endpoint                                                   | Description                                                                 |
+| ------------ | ---------------------------------------------------------- | --------------------------------------------------------------------------- |
+| GET          | `/api/v1/storyboards`                                      | List (filter `project_id`)                                                  |
+| POST         | `/api/v1/storyboards`                                      | Create `{project_id, name}`                                                 |
+| GET          | `/api/v1/storyboards/:id`                                  | Board + panels (with prompts)                                               |
+| PATCH        | `/api/v1/storyboards/:id`                                  | Update name/status                                                          |
+| DELETE       | `/api/v1/storyboards/:id`                                  | Soft delete                                                                 |
+| GET          | `/api/v1/storyboards/:id/panels`                           | List panels (ordered, with prompts)                                         |
+| POST         | `/api/v1/storyboards/:id/panels`                           | Create panel (`panel_order` unique)                                         |
+| PATCH        | `/api/v1/storyboards/:id/panels/:panelId`                  | Update fields / prompt / links                                              |
+| DELETE       | `/api/v1/storyboards/:id/panels/:panelId`                  | Delete panel                                                                |
+| POST         | `/api/v1/storyboards/:id/panels/:panelId/generate-preview` | t2i job; body `{model_id?, seed?, device?, settings?}`                      |
+| GET          | `/api/v1/scenes`                                           | List (filters `project_id`, `storyboard_id`)                                |
+| POST         | `/api/v1/scenes`                                           | Create scene                                                                |
+| GET          | `/api/v1/scenes/:id`                                       | Scene (with prompt) + shots                                                 |
+| PATCH/DELETE | `/api/v1/scenes/:id`                                       | Update / delete                                                             |
+| GET/POST     | `/api/v1/scenes/:id/shots`                                 | List/create shots (`shot_order` unique)                                     |
+| PATCH/DELETE | `/api/v1/scenes/:id/shots/:shotId`                         | Update / delete shot                                                        |
+| POST         | `/api/v1/scenes/:id/generate`                              | Scene generation job (body `{model_id?, seed?, device?, settings?}`)        |
+| POST         | `/api/v1/scenes/:id/batch-generate`                        | One generation job per shot (body `{model_id?, seed?, device?, settings?}`) |
+| POST         | `/api/v1/projects/:id/scenes/from-script`                  | Bulk-create draft scenes from a parsed script (SCN-015)                     |
+| GET          | `/api/v1/projects/:id/continuity`                          | Deterministic continuity report for the project (MS-8)                      |
 
 All endpoints require authentication; the continuity report needs project **read** access and is
 read-only (it never mutates creative objects).
@@ -65,6 +65,13 @@ read-only (it never mutates creative objects).
   `{job_type, model_id, jobs: [{shot_id, job_id, asset_id}], skipped: [{shot_id, reason}]}`.
 - Model selection: explicit `model_id` must be enabled and support the task; otherwise the first
   enabled model for the task is used. A 202 response returns the job id for polling (jobs API).
+- **Device / VRAM gate**: the preview, scene, and batch endpoints accept `device` (`cpu` | `cuda`).
+  Without it a `local_cli` runner decides for itself (GPU when enough VRAM is free, CPU otherwise).
+  The UI runs the same pre-generation VRAM check as asset generation (free VRAM vs the model's
+  `vram_requirement_mb`) and sends `cpu` when the user accepts the slow path; it re-checks — sending
+  no `device` — once enough VRAM is free. `device` and the model's `vram_requirement_mb` reach the
+  runner as `RUNNER_DEVICE` / `RUNNER_MIN_FREE_VRAM_MB` so the runner's fallback threshold matches
+  the UI check (see `docs/assets.md`).
 
 ## Script import (SCN-015)
 

@@ -184,6 +184,47 @@ describe("audio generation api", () => {
     });
   });
 
+  it("threads the device choice and VRAM requirement into audio job settings", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const localMusicId = registerModel(ownerId, {
+          name: "local-cli-music",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["music"],
+          enabled: true,
+          vram_requirement_mb: 32768,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+        const { status, json } = await req(
+          "POST",
+          "/api/v1/audio/generate",
+          {
+            kind: "music",
+            prompt: "tense, low strings",
+            project_id: projectId,
+            model_id: localMusicId,
+            device: "cpu",
+          },
+          ownerToken,
+        );
+        assertEquals(status, 202);
+        const job = (await req(
+          "GET",
+          `/api/v1/jobs/${(json as { job_id: string }).job_id}`,
+          undefined,
+          ownerToken,
+        )).json as { settings: Record<string, unknown> };
+        assertEquals(job.settings.device, "cpu");
+        assertEquals(job.settings.min_free_vram_mb, 32768);
+      })();
+    });
+  });
+
   it("generates voiceover for a scene", async () => {
     await withServer((base) => {
       baseUrl = base;

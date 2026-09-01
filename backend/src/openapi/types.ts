@@ -18,6 +18,24 @@ export function ref(name: string): OpenApiSchema {
   return { $ref: `#/components/schemas/${name}` };
 }
 
+/**
+ * The standard optional `device` body property on generation endpoints
+ * (the local_cli VRAM-choice modal contract: the UI sends 'cpu' when the
+ * user accepts the slow path after the pre-generation VRAM check, and
+ * rechecks — no device — once enough VRAM is free).
+ */
+export function deviceProperty(): OpenApiSchema {
+  return {
+    type: "string",
+    enum: ["cpu", "cuda"],
+    description: "Run the generation on this device. Without it the runner " +
+      "decides by itself (GPU when enough VRAM is free, CPU otherwise). " +
+      "The UI sends 'cpu' when the user accepts the slow path after the " +
+      "pre-generation VRAM check, and rechecks (no device) once enough VRAM " +
+      "is free.",
+  };
+}
+
 export interface ResponseMeta {
   description: string;
   /** JSON response schema. Omit for empty (204) responses. */

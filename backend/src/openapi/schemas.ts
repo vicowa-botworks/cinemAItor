@@ -11,7 +11,7 @@
  * resolves to a schema defined here.
  */
 
-import { type OpenApiSchema, ref } from "./types.ts";
+import { deviceProperty, type OpenApiSchema, ref } from "./types.ts";
 
 const isoDate = { type: "string", format: "date-time" };
 
@@ -852,15 +852,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         maxItems: 8,
         items: ref("AssetReference"),
       },
-      device: {
-        type: "string",
-        enum: ["cpu", "cuda"],
-        description: "Run the generation on this device. Without it the runner " +
-          "decides by itself (GPU when enough VRAM is free, CPU otherwise). " +
-          "The UI sends 'cpu' when the user accepts the slow path after the " +
-          "pre-generation VRAM check, and rechecks (no device) once enough VRAM " +
-          "is free.",
-      },
+      device: deviceProperty(),
     },
   },
 
@@ -892,15 +884,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         maxItems: 8,
         items: ref("AssetReference"),
       },
-      device: {
-        type: "string",
-        enum: ["cpu", "cuda"],
-        description: "Run the generation on this device. Without it the runner " +
-          "decides by itself (GPU when enough VRAM is free, CPU otherwise). " +
-          "The UI sends 'cpu' when the user accepts the slow path after the " +
-          "pre-generation VRAM check, and rechecks (no device) once enough VRAM " +
-          "is free.",
-      },
+      device: deviceProperty(),
     },
   },
 
@@ -1141,6 +1125,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       scene_id: { type: "string" },
       model_id: { type: "string" },
       seed: { type: "string" },
+      device: deviceProperty(),
       settings: { type: "object", additionalProperties: true },
     },
   },
@@ -1261,6 +1246,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
     properties: {
       model_id: { type: "string" },
       seed: { type: "string" },
+      device: deviceProperty(),
       settings: { type: "object", additionalProperties: true },
     },
   },

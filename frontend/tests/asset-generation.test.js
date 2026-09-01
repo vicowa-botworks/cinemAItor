@@ -4,6 +4,7 @@ import {
   formatGb,
   generationKindForAsset,
   generationTaskType,
+  hardwareOf,
   isValidSlug,
   normalizeCandidates,
   normalizeSeed,
@@ -305,6 +306,38 @@ describe("vramSufficient", () => {
         gpu: null,
       }),
       true,
+    );
+  });
+});
+
+describe("hardwareOf", () => {
+  const gpu = { model: "RTX", vram_mb: 100 * 1024, vram_used_mb: 95 * 1024 };
+
+  it("unwraps the /models/hardware response envelope", () => {
+    assertEquals(hardwareOf({ hardware: { gpu }, warnings: [] }), { gpu });
+  });
+
+  it("returns null for a missing envelope or response", () => {
+    assertEquals(hardwareOf({ warnings: [] }), null);
+    assertEquals(hardwareOf(null), null);
+    assertEquals(hardwareOf(undefined), null);
+  });
+
+  it("keeps the pre-check gate armed on the unwrapped shape (regression: reading the envelope fails open)", () => {
+    const response = { hardware: { gpu }, warnings: [] };
+    assertEquals(
+      vramPreCheck(
+        { backend: "local_cli", vram_requirement_mb: 51200 },
+        hardwareOf(response),
+      ).needed,
+      true,
+    );
+    assertEquals(
+      vramPreCheck(
+        { backend: "local_cli", vram_requirement_mb: 51200 },
+        response,
+      ).needed,
+      false,
     );
   });
 });

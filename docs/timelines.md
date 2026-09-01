@@ -158,9 +158,12 @@ placement (the timeline's existing `music` track kind is where it goes). This co
 - **`sources`** — which inputs actually contributed to the prompt.
 
 `POST /timelines/:id/score` (write permission, 400 if the timeline has no video items) accepts
-`{prompt?, model_id?}` — the prompt defaults to the freshly computed suggestion — and returns `202`
-with the same `suggestion` plus the generation job (`job_id`, `job_type`, `asset_id`, `model_id`),
-identical in shape to the audio-generation endpoint (AUD-009).
+`{prompt?, model_id?, device?}` — the prompt defaults to the freshly computed suggestion — and
+returns `202` with the same `suggestion` plus the generation job (`job_id`, `job_type`, `asset_id`,
+`model_id`), identical in shape to the audio-generation endpoint (AUD-009). `device` (`cpu` |
+`cuda`) runs the same pre-generation VRAM gate as the other generation paths (see `docs/audio.md`);
+the **Generate score** UI action shows the VRAM-choice dialog when free VRAM is below the picked
+model's `vram_requirement_mb`.
 
 Timeline editor UI: the **Suggest score** header button opens the Score suggestion card — chips for
 the cut duration / time of day / lighting / mood and the collected music cues, the `sources` list,
@@ -169,26 +172,26 @@ links to the score asset (where candidates land for review) and the job monitor.
 
 ## Endpoints
 
-| Method | Endpoint                                              | Description                                                                                                                             |
-| ------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/timelines`                                   | List (filter `project_id`)                                                                                                              |
-| POST   | `/api/v1/timelines`                                   | Create `{project_id, name, settings?}`                                                                                                  |
-| GET    | `/api/v1/timelines/:id`                               | Timeline + tracks (with items) + markers                                                                                                |
-| PATCH  | `/api/v1/timelines/:id`                               | Update name/duration/settings                                                                                                           |
-| DELETE | `/api/v1/timelines/:id`                               | Delete (cascades)                                                                                                                       |
-| POST   | `/api/v1/timelines/:id/tracks`                        | Create track (auto or explicit order)                                                                                                   |
-| PATCH  | `/api/v1/timelines/:id/tracks/:trackId`               | Update name/order (swap semantics)/locked/muted/gain_db (mixer gain, dB, −60..24)/duck_db (ducking depth, dB, 0..60)                    |
-| DELETE | `/api/v1/timelines/:id/tracks/:trackId`               | Delete track + its items                                                                                                                |
-| POST   | `/api/v1/timelines/:id/items`                         | Place an item (required: track_id, start_time, end_time; `asset_version_id` required on media tracks, optional on text/subtitle tracks) |
-| PATCH  | `/api/v1/timelines/:id/items/:itemId`                 | Move/trim/detune an item                                                                                                                |
-| POST   | `/api/v1/timelines/:id/items/:itemId/duplicate`       | Copy an item (`{at_time?}`; default: right after)                                                                                       |
-| DELETE | `/api/v1/timelines/:id/items/:itemId`                 | Delete item                                                                                                                             |
-| POST   | `/api/v1/timelines/:id/markers`                       | Create marker `{time, label?, notes?}`                                                                                                  |
-| GET    | `/api/v1/timelines/:id/markers`                       | List markers                                                                                                                            |
-| DELETE | `/api/v1/timelines/:id/markers/:markerId`             | Delete marker                                                                                                                           |
-| POST   | `/api/v1/timelines/:id/state`                         | Restore full state atomically (undo/redo; duration/settings/tracks/items/markers)                                                       |
-| POST   | `/api/v1/timelines/:id/snapshots`                     | Create snapshot `{name, notes?}`                                                                                                        |
-| GET    | `/api/v1/timelines/:id/snapshots`                     | List snapshots (newest first)                                                                                                           |
-| POST   | `/api/v1/timelines/:id/snapshots/:snapshotId/restore` | Restore snapshot (returns full detail)                                                                                                  |
-| GET    | `/api/v1/timelines/:id/score-suggestion`              | Deterministic cut + storyboard analysis → suggested music prompt (read permission)                                                      |
-| POST   | `/api/v1/timelines/:id/score`                         | Generate a score from the cut: `{prompt?, model_id?}` → `202` with the suggestion + `music` generation job (400 if no video items)      |
+| Method | Endpoint                                              | Description                                                                                                                                 |
+| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/timelines`                                   | List (filter `project_id`)                                                                                                                  |
+| POST   | `/api/v1/timelines`                                   | Create `{project_id, name, settings?}`                                                                                                      |
+| GET    | `/api/v1/timelines/:id`                               | Timeline + tracks (with items) + markers                                                                                                    |
+| PATCH  | `/api/v1/timelines/:id`                               | Update name/duration/settings                                                                                                               |
+| DELETE | `/api/v1/timelines/:id`                               | Delete (cascades)                                                                                                                           |
+| POST   | `/api/v1/timelines/:id/tracks`                        | Create track (auto or explicit order)                                                                                                       |
+| PATCH  | `/api/v1/timelines/:id/tracks/:trackId`               | Update name/order (swap semantics)/locked/muted/gain_db (mixer gain, dB, −60..24)/duck_db (ducking depth, dB, 0..60)                        |
+| DELETE | `/api/v1/timelines/:id/tracks/:trackId`               | Delete track + its items                                                                                                                    |
+| POST   | `/api/v1/timelines/:id/items`                         | Place an item (required: track_id, start_time, end_time; `asset_version_id` required on media tracks, optional on text/subtitle tracks)     |
+| PATCH  | `/api/v1/timelines/:id/items/:itemId`                 | Move/trim/detune an item                                                                                                                    |
+| POST   | `/api/v1/timelines/:id/items/:itemId/duplicate`       | Copy an item (`{at_time?}`; default: right after)                                                                                           |
+| DELETE | `/api/v1/timelines/:id/items/:itemId`                 | Delete item                                                                                                                                 |
+| POST   | `/api/v1/timelines/:id/markers`                       | Create marker `{time, label?, notes?}`                                                                                                      |
+| GET    | `/api/v1/timelines/:id/markers`                       | List markers                                                                                                                                |
+| DELETE | `/api/v1/timelines/:id/markers/:markerId`             | Delete marker                                                                                                                               |
+| POST   | `/api/v1/timelines/:id/state`                         | Restore full state atomically (undo/redo; duration/settings/tracks/items/markers)                                                           |
+| POST   | `/api/v1/timelines/:id/snapshots`                     | Create snapshot `{name, notes?}`                                                                                                            |
+| GET    | `/api/v1/timelines/:id/snapshots`                     | List snapshots (newest first)                                                                                                               |
+| POST   | `/api/v1/timelines/:id/snapshots/:snapshotId/restore` | Restore snapshot (returns full detail)                                                                                                      |
+| GET    | `/api/v1/timelines/:id/score-suggestion`              | Deterministic cut + storyboard analysis → suggested music prompt (read permission)                                                          |
+| POST   | `/api/v1/timelines/:id/score`                         | Generate a score from the cut: `{prompt?, model_id?, device?}` → `202` with the suggestion + `music` generation job (400 if no video items) |

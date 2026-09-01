@@ -1,5 +1,6 @@
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
+import { VramGuard } from "./vram-guard.js";
 
 const KINDS = [
   { value: "music", label: "Music" },
@@ -7,7 +8,7 @@ const KINDS = [
   { value: "sfx", label: "Sound effect" },
 ];
 
-export class AudioDialog extends LitElement {
+export class AudioDialog extends VramGuard(LitElement) {
   static styles = css`
     .card {
       background-color: var(--color-surface);
@@ -230,6 +231,7 @@ export class AudioDialog extends LitElement {
             : nothing}
         </div>
       </div>
+      ${this.vramDialog}
     `;
   }
 
@@ -240,12 +242,26 @@ export class AudioDialog extends LitElement {
       this.error = "No project or scene context available.";
       return;
     }
+    // No model picker here — the backend auto-picks the first enabled model
+    // for the kind's task type, so the gate checks that same model.
+    const taskType = { music: "music", voiceover: "voice", sfx: "audio" }[this.kind] ??
+      "music";
+    let model = null;
+    try {
+      const models = await api.listModels({ task_type: taskType, enabled: true });
+      model = models[0] ?? null;
+    } catch {
+      model = null;
+    }
+    const device = await this.resolveVramDevice(model);
+    if (device === "cancel") return;
     this.submitting = true;
     this.error = "";
     try {
       const result = await api.generateAudio({
         kind: this.kind,
         prompt,
+        ...(device ? { device } : {}),
         ...(this.sceneId ? { scene_id: this.sceneId } : { project_id: this.projectId }),
       });
       this.result = result;

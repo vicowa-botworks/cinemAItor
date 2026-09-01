@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
 import "./audio-dialog.js";
 import "./ai-assist-dialog.js";
+import { VramGuard } from "./vram-guard.js";
 
 const SCENE_STATUSES = [
   "draft",
@@ -12,7 +13,7 @@ const SCENE_STATUSES = [
   "archived",
 ];
 
-export class SceneDetail extends LitElement {
+export class SceneDetail extends VramGuard(LitElement) {
   static styles = css`
     .scene-detail {
       display: flex;
@@ -676,6 +677,7 @@ export class SceneDetail extends LitElement {
           `
           : null}
       </div>
+      ${this.vramDialog}
     `;
   }
 
@@ -939,7 +941,15 @@ export class SceneDetail extends LitElement {
   }
 
   async _generate(batch) {
+    // The backend picks i2v (linked panel preview) or t2v when no model is
+    // chosen, so gate on the whole candidate set — never silently fall to CPU.
+    const model = this._modelChoice
+      ? this.models.find((m) => m.id === this._modelChoice) ?? null
+      : this.models;
+    const device = await this.resolveVramDevice(model);
+    if (device === "cancel") return;
     const options = {};
+    if (device) options.device = device;
     if (this._modelChoice) options.model_id = this._modelChoice;
     if (String(this._seed ?? "").trim()) options.seed = String(this._seed).trim();
     this.busy = true;

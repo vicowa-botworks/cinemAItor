@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
+import { VramGuard } from "./vram-guard.js";
 
 const POLL_MS = 5000;
 const PANEL_FIELDS = [
@@ -18,7 +19,7 @@ const PANEL_FIELDS = [
   ["notes", "Notes", "textarea"],
 ];
 
-export class StoryboardDetail extends LitElement {
+export class StoryboardDetail extends VramGuard(LitElement) {
   static styles = css`
     .board-detail {
       display: flex;
@@ -641,6 +642,7 @@ export class StoryboardDetail extends LitElement {
                 `
                 : null}
             </div>
+      ${this.vramDialog}
     `;
   }
 
@@ -876,12 +878,19 @@ export class StoryboardDetail extends LitElement {
 
   async _generatePreview(panel) {
     const d = this.draft ?? {};
+    const modelId = d.model_id;
+    const model = modelId
+      ? this.models.find((m) => m.id === modelId) ?? null
+      : this.models[0] ?? null;
+    const device = await this.resolveVramDevice(model);
+    if (device === "cancel") return;
     this.busyPanelId = panel.id;
     this.error = "";
     this.notice = null;
     try {
       const options = {};
-      if (d.model_id) options.model_id = d.model_id;
+      if (device) options.device = device;
+      if (modelId) options.model_id = modelId;
       if (String(d.seed ?? "").trim()) options.seed = String(d.seed).trim();
       const result = await api.generatePanelPreview(
         this._boardId,
