@@ -94,9 +94,15 @@ def main():
     if args.image:
         print(f"note: --image given but this t2i reference runner ignores it ({args.image})", file=sys.stderr)
 
+    min_free_vram_gb = 50  # weights (~35 GiB) + activations at 1024px
     device = args.device
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        free, total = torch.cuda.mem_get_info()
+        if free < min_free_vram_gb * 1024 ** 3:
+            print(f"gpu free {free / 1024 ** 3:.1f} GiB < {min_free_vram_gb} GiB required — falling back to cpu", flush=True)
+            device = "cpu"
     torch.set_num_threads(min(16, os.cpu_count() or 1))
 
     gguf_path = find_gguf(args.weights_dir, args.transformer_gguf)
