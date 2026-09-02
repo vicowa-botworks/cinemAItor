@@ -15,7 +15,7 @@ import {
   retryJob,
   updateJobLease,
 } from "../src/db/jobs.ts";
-import { type JobRunner, startJobRunner } from "../src/services/job_runner.ts";
+import { type JobRunner, requeueJobOnDevice, startJobRunner } from "../src/services/job_runner.ts";
 import { resetContentStore } from "../src/storage/content_store.ts";
 import { MockAdapter } from "../src/services/adapters.ts";
 
@@ -514,5 +514,131 @@ describe("job runner", () => {
     if (before !== null && before !== undefined) {
       assert(after >= before);
     }
+  });
+
+  it("re-queues a queued job on the requested device, preserving other settings", async () => {
+    const model = registerModel(ownerId, {
+      name: "shift-cli",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+      enabled: true,
+      default_settings: { command: "sd-runner" },
+    });
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "shift me",
+      seed: "11",
+      settings: { candidates: 2 },
+    });
+    // Still queued (no runner started) — shift to cuda.
+    const result = await requeueJobOnDevice(job.id, "cuda");
+    assertEquals(result.status, "queued");
+    const shifted = getJob(job.id);
+    assert(shifted);
+    assertEquals(shifted.settings.device, "cuda");
+    // Every other setting and input is preserved.
+    assertEquals(shifted.settings.candidates, 2);
+    assertEquals(shifted.prompt_text, "shift me");
+    assertEquals(shifted.seed, "11");
+  });
+
+  it("re-queues a terminal job on the requested device", async () => {
+    const model = registerModel(ownerId, {
+      name: "shift-cli-term",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+      enabled: true,
+      default_settings: { command: "sd-runner" },
+    });
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "terminal shift",
+    });
+    finishJob(job.id, "succeeded", { progress: 100 });
+    const result = await requeueJobOnDevice(job.id, "cuda");
+    assertEquals(result.status, "queued");
+    assertEquals(result.settings.device, "cuda");
+  });
+
+  it("refuses to shift a job that is already cancelling", async () => {
+    const model = registerModel(ownerId, {
+      name: "shift-cli-cancel",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+      enabled: true,
+      default_settings: {
+        command: "sh",
+        args: ["-c", "sleep 3; : > {output}"],
+        timeout_seconds: 30,
+      },
+    });
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "cancelling",
+    });
+    const runner = startJobRunner({ pollMs: 10 });
+    runners.push(runner);
+    await waitFor(() => getJob(job.id)?.status === "running");
+    // Put the job into the cancelling state, as a cancel request would. The
+    // requeue guard checks status synchronously, so this is not a race with
+    // the runner's cancel poll.
+    finishJob(job.id, "cancelling");
+    await assertRejects(
+      () => requeueJobOnDevice(job.id, "cuda"),
+      Error,
+      "already cancelling",
+    );
+  });
+
+  it("shifts a running job: cancels the in-flight run and re-queues on the new device", async () => {
+    // The main use case: a job mid-generation (e.g. running on CPU) is moved
+    // to the GPU. The in-flight run is cancelled and the job re-queued with the
+    // new device; all other settings are intact.
+    const model = registerModel(ownerId, {
+      name: "shift-running-cli",
+      version: "1.0",
+      backend: "local_cli",
+      task_types: ["text_to_image"],
+      enabled: true,
+      default_settings: {
+        command: "sh",
+        args: ["-c", "sleep 3; : > {output}"],
+        timeout_seconds: 30,
+      },
+    });
+    const asset = canvasAsset();
+    const job = createJob(ownerId, {
+      job_type: "text_to_image",
+      model_id: model.id,
+      asset_id: asset,
+      prompt_text: "running shift",
+      seed: "21",
+    });
+    const runner = startJobRunner({ pollMs: 10 });
+    runners.push(runner);
+    await waitFor(() => getJob(job.id)?.status === "running");
+
+    const result = await requeueJobOnDevice(job.id, "cuda");
+    assertEquals(result.status, "queued");
+    assertEquals(result.settings.device, "cuda");
+
+    // The re-queued job runs again (now tagged cuda) and completes.
+    await waitFor(() => getJob(job.id)?.status === "succeeded", 15000);
+    const final = getJob(job.id);
+    assert(final);
+    assertEquals(final.settings.device, "cuda");
+    assert(final.output_asset_version_id);
   });
 });

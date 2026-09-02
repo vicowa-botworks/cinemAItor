@@ -153,7 +153,8 @@ app-root (main router)
   │   │   via the vram-guard mixin + pure helpers in asset-generation.js)
  ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
-│   │            per-job detail + event log, cancel/retry)
+ │   │            per-job detail + event log, cancel/retry + cpu↔cuda device
+ │   │            shift (re-queues a local_cli job on the other device, mid-run))
 ├── job-events (shared WebSocket client: one socket multiplexed across consumers, token
 │   │           handshake auth, reconnect with backoff, polling kept as fallback)
 ├── script-list (versioned Fountain-lite screenplays per project: create + project filter,
@@ -313,7 +314,9 @@ server.ts (entry point)
     │   │   normalizes to canonical before storage (HF tags the Model Copilot sees use dashes)
     │   └── (see docs/models.md)
   ├── Job routes (/api/v1/jobs/*, auth middleware)
-  │   ├── Queue + events, cancel/retry; in-process runner with leases + recovery
+  │   ├── Queue + events, cancel/retry + device shift (POST /:id/device moves a
+  │   │   local_cli job cpu↔cuda: cancels an in-flight run, re-queues on the new
+  │   │   device, all other settings intact); in-process runner with leases + recovery
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
    │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
     │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges

@@ -11,6 +11,8 @@ import {
   listJobs,
   PROXY_JOB_TYPE,
   recoverStaleJobs,
+  retryJob,
+  setJobSettings,
   updateJobLease,
   updateJobProgress,
 } from "../db/jobs.ts";
@@ -38,6 +40,7 @@ import { setShotGenerated } from "../db/scenes.ts";
 import { getContentStore } from "../storage/content_store.ts";
 import { type AdapterInputRef, CancelledError, getAdapter, randomSeed } from "./adapters.ts";
 import { generateProxyMedia, PROXY_OUTPUT, proxyKindFor } from "./media_proxy.ts";
+import { badRequest, notFound } from "../errors.ts";
 
 export interface JobRunnerOptions {
   pollMs?: number;
@@ -548,6 +551,56 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
       await Promise.allSettled([...executing]);
     },
   };
+}
+
+/**
+ * Re-queue a job on a different device (e.g. shift a CPU generation to the
+ * GPU once it frees up). The old run is cancelled (or is already terminal) and
+ * the job is re-queued with only `settings.device` changed — every other
+ * setting (prompt, seed, candidates, model, references, …) is preserved.
+ * `cpu`/`cuda` are the only devices a runner can honor; other backends
+ * (comfyui, mock) ignore `device`, so their jobs are rejected. A running job
+ * settles to `cancelled` before the re-queue so the target lane can start it.
+ */
+export async function requeueJobOnDevice(
+  id: string,
+  device: string,
+): Promise<GenerationJob> {
+  const job = getJob(id);
+  if (!job) throw notFound("Job not found");
+  if (device !== "cpu" && device !== "cuda") {
+    throw badRequest("device must be 'cpu' or 'cuda'");
+  }
+  const model = job.model_id ? getModel(job.model_id) : undefined;
+  if (!model || model.backend !== "local_cli") {
+    throw badRequest("Only local_cli model jobs can be shifted between devices");
+  }
+  if (job.status === "cancelling") {
+    throw badRequest("Job is already cancelling; wait for it to settle");
+  }
+  if (job.status === "running") {
+    finishJob(id, "cancelling");
+    // Wait for the runner's cancel poll to settle the job before re-queueing.
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      const current = getJob(id);
+      if (
+        current && (current.status === "cancelled" ||
+          current.status === "failed" || current.status === "succeeded")
+      ) break;
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } else if (job.status === "queued") {
+    finishJob(id, "cancelled", { progress: 0 });
+  }
+  // Terminal (succeeded/failed/cancelled) jobs need no settling.
+  const retried = retryJob(id);
+  if (!retried) throw notFound("Job not found");
+  setJobSettings(retried.id, { ...job.settings, device });
+  const updated = getJob(id);
+  if (!updated) throw notFound("Job not found");
+  return updated;
 }
 
 /**

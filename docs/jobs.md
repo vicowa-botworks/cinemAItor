@@ -32,6 +32,7 @@ leases, and model runtimes behind a common adapter interface.
 | GET      | `/api/v1/jobs/:id`        | Job detail                                                 |
 | POST     | `/api/v1/jobs/:id/cancel` | Cancel queued (immediate) or running (graceful)            |
 | POST     | `/api/v1/jobs/:id/retry`  | Re-queue a finished job (input state preserved)            |
+| POST     | `/api/v1/jobs/:id/device` | Shift a local_cli job between `cpu`/`cuda` (see below)     |
 | GET      | `/api/v1/jobs/:id/events` | Event log for the job                                      |
 | GET (WS) | `/ws/v1/jobs`             | Live job/render updates (WebSocket, see below)             |
 
@@ -58,6 +59,13 @@ except for image-input tasks.
   `RUNNER_MIN_FREE_VRAM_MB` when the model declares a `vram_requirement_mb` — so a runner's auto
   CPU/GPU fallback threshold matches the UI's check. An explicit `settings.env` entry always wins
   over both.
+- **Device shift** (`POST /api/v1/jobs/:id/device`): move a `local_cli` job between `cpu` and `cuda`
+  without losing any other setting. Any in-flight run is cancelled first (running jobs are flipped
+  to `cancelling` and awaited so the runner settles them), then the job is re-queued with
+  `settings.device` set to the new device — so a CPU generation that is taking hours can be moved to
+  the GPU the moment it frees up, mid-run. Only `local_cli` jobs are shiftable (comfyui/mock ignore
+  the device); a job already `cancelling` is refused. All other settings, inputs, and prompt are
+  preserved verbatim.
 - **Seeds are strings**: the `{seed}` placeholder is rendered verbatim — benchmark jobs pass
   `bench-<model-id>` and per-candidate seeds derive as `<seed>:<index>` for non-numeric seeds.
   Runner scripts must accept arbitrary seed strings (numeric ones pass through unchanged; runtimes

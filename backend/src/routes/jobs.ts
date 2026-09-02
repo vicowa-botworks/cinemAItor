@@ -26,6 +26,7 @@ import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
 import { verifyToken } from "@cinemaItor/services/jwt.ts";
 import { isSessionValid } from "@cinemaItor/services/sessions.ts";
 import { subscribeJobEvents } from "@cinemaItor/services/job_events.ts";
+import { requeueJobOnDevice } from "@cinemaItor/services/job_runner.ts";
 
 function requireUserId(ctx: Context): number {
   const userId = (ctx as AuthedContext).userId;
@@ -270,6 +271,14 @@ export const jobRouter = new Router()
     if (!retried) throw notFound("Job not found");
     ctx.response.body = retried;
   })
+  .post("/api/v1/jobs/:id/device", authMiddleware, async (ctx, _next) => {
+    requireUserId(ctx);
+    const id = requireIdParam(ctx);
+    const body = await readJsonBody(ctx);
+    const device = optionalString(body, "device");
+    if (!device) throw badRequest("device is required ('cpu' or 'cuda')");
+    ctx.response.body = await requeueJobOnDevice(id, device);
+  })
   .get("/api/v1/jobs/:id/events", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
     const id = requireIdParam(ctx);
@@ -389,6 +398,25 @@ export const openApiOps: Record<string, OperationMeta> = {
         schema: ref("Job"),
       },
       ...errorResponses(401, 404),
+    },
+  },
+  "POST /api/v1/jobs/{id}/device": {
+    summary: "Shift a job's device (CPU to GPU) and re-queue it",
+    description: "Cancels the current run (if any) and re-queues the job with only " +
+      "settings.device changed, preserving every other setting. Local_cli " +
+      "model jobs only; device is 'cpu' or 'cuda'.",
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["device"],
+        properties: {
+          device: { type: "string", enum: ["cpu", "cuda"] },
+        },
+      },
+    },
+    responses: {
+      200: { description: "The re-queued job", schema: ref("Job") },
+      ...errorResponses(400, 401, 404),
     },
   },
   "GET /api/v1/jobs/{id}/events": {

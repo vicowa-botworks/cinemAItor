@@ -600,6 +600,18 @@ export class JobMonitor extends LitElement {
                 </button>
               `
               : null}
+            ${this.modelBackends.get(job.model_id) === "local_cli" &&
+                job.status !== "cancelling"
+              ? html`
+                <button
+                  class="btn-small"
+                  ?disabled=${busy}
+                  @click=${() =>
+                    this._shiftDevice(job.id, job.settings?.device === "cuda" ? "cpu" : "cuda")}>
+                  ${job.settings?.device === "cuda" ? "Move to CPU" : "Move to GPU"}
+                </button>
+              `
+              : null}
           </div>
         </div>
 
@@ -710,6 +722,7 @@ export class JobMonitor extends LitElement {
       ]);
       this.projects = projects;
       this.modelNames = new Map(models.map((m) => [m.id, m.name]));
+      this.modelBackends = new Map(models.map((m) => [m.id, m.backend]));
     } catch {
       // Reference data is best-effort; the job list is the critical path.
     }
@@ -777,6 +790,26 @@ export class JobMonitor extends LitElement {
       await this._refresh();
     } catch (err) {
       this.error = err.message || "Failed to retry job.";
+    } finally {
+      this.busyId = null;
+    }
+  }
+
+  async _shiftDevice(id, device) {
+    const label = device === "cuda" ? "GPU" : "CPU";
+    const msg = device === "cuda"
+      ? "Move this job to the GPU? Any in-flight run is cancelled and the job restarts there with all other settings intact."
+      : "Move this job to the CPU? Any in-flight run is cancelled and the job restarts there with all other settings intact.";
+    if (!window.confirm(msg)) return;
+    this.busyId = id;
+    this.notice = null;
+    this.error = "";
+    try {
+      await api.shiftJobDevice(id, device);
+      this.notice = { kind: "ok", text: `Job moved to ${label}.` };
+      await this._refresh();
+    } catch (err) {
+      this.error = err.message || "Failed to move job.";
     } finally {
       this.busyId = null;
     }
