@@ -799,10 +799,12 @@ export const openApiOps: Record<string, OperationMeta> = {
   "POST /api/v1/llm/agent": {
     summary: "Model copilot turn: bounded tool-calling loop",
     description:
-      "Runs the cinemaItor model copilot against the configured LLM with its tool set. " +
+      "Runs the cinemaItor model copilot against the configured LLM with its tool set, " +
+      "including connected MCP servers' tools (mcp__<server>__<tool>, see /api/v1/mcp). " +
       "Read-only tools auto-execute; mutating tools create proposals that await explicit " +
       "approval (POST /api/v1/llm/proposals/{id}/approve). Admin callers get the mutating " +
-      "tools; other callers only the read-only schema.",
+      "tools; other callers only the read-only schema (MCP: only tools the server marks " +
+      "read-only).",
     requestBody: {
       description: "Conversation history (user/assistant turns)",
       schema: {

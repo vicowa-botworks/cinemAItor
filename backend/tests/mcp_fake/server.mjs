@@ -2,6 +2,7 @@
 // Run under Deno: deno run --quiet --no-check server.mjs [flags]
 //   --fail: exit(1) before the handshake (tests MCP_UNREACHABLE)
 //   --hang: consume stdin forever without answering (tests MCP_TIMEOUT)
+//   --with-error-tool: also register `error`, a tool that always answers isError
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -68,5 +69,16 @@ server.registerTool(
     return { content: [{ type: "text", text: "slow" }] };
   },
 );
+
+if (args.includes("--with-error-tool")) {
+  server.registerTool(
+    "error",
+    {
+      description: "Always fails (isError) — for error-handling tests.",
+      inputSchema: {},
+    },
+    () => ({ content: [{ type: "text", text: "tool-level failure" }], isError: true }),
+  );
+}
 
 await server.connect(new StdioServerTransport());
