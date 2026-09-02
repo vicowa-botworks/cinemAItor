@@ -31,6 +31,7 @@ A skill has a stable user-facing slug id and a JSON definition:
   ],
   "assistant": {
     "model_task_types": ["text_to_video"],
+    "model_ids": ["minimax_h3"],
     "guidance": "How to write prompts for this model family…",
     "examples": [{ "prompt": "…", "notes": "why this works" }]
   }
@@ -51,9 +52,11 @@ Validation (400 with a precise message on any violation):
   generation steps).
 - `assistant` is optional and makes the skill a "prompt-creation skill" for the LLM assistant (see
   `docs/llm.md`): `model_task_types` (non-empty subset of the known model task types when present),
-  `guidance` (≤4000 chars) and `examples` (≤8, each `prompt` ≤2000, optional `notes` ≤500). At least
-  one of `guidance` / `examples` is required. `GET /api/v1/skills?assistant=1` lists only these
-  skills (the assist dialog's picker).
+  `model_ids` (optional list of model slugs, ≤32 of `a-z 0-9 . _ -`; when non-empty the skill is
+  scoped to exactly those models and the task-type check is bypassed, so a model-specific guide
+  matches its model even when the task types differ), `guidance` (≤32000 chars) and `examples` (≤8,
+  each `prompt` ≤2000, optional `notes` ≤500). At least one of `guidance` / `examples` is required.
+  `GET /api/v1/skills?assistant=1` lists only these skills (the assist dialog's picker).
 
 Skill ids are 1–64 chars of `a-z 0-9 - _` starting with a letter or digit; the `sys-` prefix is
 reserved for system skills.
@@ -101,6 +104,11 @@ definitions live in `src/db/skills.ts` (`SYSTEM_SKILLS`), not in the migration:
 - `sys-t2v-prompting` — assistant-only: no steps, a `text_to_video` assistant block with general
   prompting guidance and example prompts. Selecting it in the assist dialog's skill picker shapes
   `enhance_prompt` output (see `docs/llm.md`).
+- `sys-minimax-h3-video` + `sys-minimax-h3-reference` — assistant-only, seeded by
+  `seedModelGuideSkills()` from the vendored MiniMax-H3 prompt-writing guides
+  (`src/db/skill_guides/*.md`, read verbatim into `guidance` at seed time) and scoped to the
+  `minimax_h3` model via `assistant.model_ids`. Selecting one shapes `enhance_prompt` output for
+  that model (see `docs/llm.md`).
 
 System skills are visible to every user but cannot be deleted (admins included) and can only be
 updated or toggled by an admin.
@@ -113,7 +121,9 @@ updated or toggled by an admin.
   chips; per-card actions are toggle, Edit and Delete (hidden for system skills) and a "View jobs"
   link;
 - create/edit panel: for new skills an id field plus a JSON definition textarea pre-filled with a
-  sample; server validation errors are surfaced verbatim;
+  sample, and two markdown-aware fields — a `guidance` textarea and a comma-separated `model_ids`
+  input — that override the JSON's `assistant.guidance` / `assistant.model_ids` on save (the rest of
+  the assistant block stays in the JSON); server validation errors are surfaced verbatim;
 - run panel: project picker + one field per declared input (seeded from defaults; number and boolean
   values are coerced before submit);
 - run history panel: statuses, per-step job ids and error text; live job events (WebSocket) refetch

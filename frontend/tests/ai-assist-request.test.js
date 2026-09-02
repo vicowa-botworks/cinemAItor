@@ -98,6 +98,27 @@ describe("skillMatchesModel", () => {
     assertEquals(skillMatchesModel(skill, i2vModel), false);
   });
 
+  it("honors a skill's model_ids scope over task types", () => {
+    const scoped = {
+      definition: { assistant: { model_ids: ["minimax_h3"] } },
+    };
+    assertEquals(
+      skillMatchesModel(
+        scoped,
+        { id: "minimax_h3", task_types: ["text_to_video"] },
+      ),
+      true,
+    );
+    // A different model does not match even with overlapping task types.
+    assertEquals(
+      skillMatchesModel(
+        scoped,
+        { id: "flux2", task_types: ["text_to_video"] },
+      ),
+      false,
+    );
+  });
+
   it("is defensive against malformed shapes", () => {
     assertEquals(skillMatchesModel(null, null), true);
     assertEquals(

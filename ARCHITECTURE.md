@@ -179,7 +179,8 @@ app-root (main router)
 │   │            clip playback, embedded audio generation)
 ├── review-board (job candidate comparison with two-candidate A/B mode — synced play/seek +
 │   │             quick approve; approve / reject / shortlist + notes)
-├── skills-list (v1 skill system: list, create/edit JSON definitions, version history,
+├── skills-list (v1 skill system: list, create/edit JSON definitions + markdown-aware
+│    guidance/model-ids fields, version history,
 │    enable/disable, delete; run form (project + inputs) with live WebSocket job events +
 │    poll-to-terminal run history showing per-step job ids)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
@@ -517,9 +518,11 @@ server.ts (entry point)
 - `assets.ts`: Asset/alias/tag/version repository + asset permission checks
 - `templates.ts`: Global project templates — structure parsing/validation, list/get, and
   `applyTemplateStructure` (creates the starting timeline + tracks with compensation)
-- `skills.ts`: Skill system v1 repository — definition parse/validation, CRUD, version snapshots,
-  runs, and idempotent `seedSystemSkills`; `skill_engine.ts` (services) resolves typed inputs,
-  expands placeholders and enqueues one generation job per step (see `docs/skills.md`)
+- `skills.ts`: Skill system v1 repository — definition parse/validation (assistant block:
+  model_task_types / `model_ids` model-scoping / guidance ≤32k), CRUD, version snapshots, runs, and
+  idempotent `seedSystemSkills` + `seedModelGuideSkills` (vendors the MiniMax-H3 prompt guides into
+  model-scoped skills from `src/db/skill_guides/`); `skill_engine.ts` (services) resolves typed
+  inputs, expands placeholders and enqueues one generation job per step (see `docs/skills.md`)
 - `email_tokens.ts` + `invitations.ts`: single-use email tokens (SHA-256-stored, per-kind
   revocation) and admin invitation links (see `docs/email.md`)
 - `mcp.ts`: MCP tool server registry (Workstream 17) — create/patch/list/delete with per-transport
