@@ -12,6 +12,8 @@ import { timelineRouter } from "@cinemaItor/routes/timelines.ts";
 import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { router as llmRouter } from "@cinemaItor/routes/llm.ts";
 import { router as workflowRouter } from "@cinemaItor/routes/workflows.ts";
+import { router as mcpRouter } from "@cinemaItor/routes/mcp.ts";
+import { mcpCloseAll } from "@cinemaItor/services/mcp.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { scriptsRouter } from "@cinemaItor/routes/scripts.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
@@ -114,6 +116,7 @@ export function createApp(
   app.use(modelRouter.routes());
   app.use(llmRouter.routes());
   app.use(workflowRouter.routes());
+  app.use(mcpRouter.routes());
   app.use(jobRouter.routes());
   app.use(reviewRouter.routes());
   app.use(renderRouter.routes());
@@ -135,6 +138,7 @@ export function createApp(
   app.use(modelRouter.allowedMethods());
   app.use(llmRouter.allowedMethods());
   app.use(workflowRouter.allowedMethods());
+  app.use(mcpRouter.allowedMethods());
   app.use(jobRouter.allowedMethods());
   app.use(reviewRouter.allowedMethods());
   app.use(renderRouter.allowedMethods());
@@ -158,6 +162,23 @@ if (import.meta.main) {
     createDiagnosticLogSink(),
   );
   const app = createApp(config);
+  // Clean shutdown: close live MCP server connections (stdio children must
+  // not outlive the backend). Adding a signal listener disables Deno's
+  // default terminate-on-signal, so the handler exits explicitly — and it
+  // must be registered BEFORE app.listen, whose promise only resolves when
+  // the server closes.
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    serverLogger.info("shutting down", { signal });
+    void (async () => {
+      await mcpCloseAll();
+      Deno.exit(0);
+    })();
+  };
+  Deno.addSignalListener("SIGTERM", () => shutdown("SIGTERM"));
+  Deno.addSignalListener("SIGINT", () => shutdown("SIGINT"));
   serverLogger.info("server listening", { port: config.port });
   await app.listen({ port: config.port });
 }

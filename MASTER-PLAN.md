@@ -1291,6 +1291,22 @@ POST   /api/v1/models/from-huggingface                       (admin) register a 
                                            (source: url; install remains the consent-gated install flow)
 ```
 
+## 8.15 MCP Tool Servers (Workstream 17)
+
+```text
+GET    /api/v1/mcp/servers                (admin) list registered MCP servers + live status
+POST   /api/v1/mcp/servers                (admin) register an MCP server (stdio | http transport)
+PATCH  /api/v1/mcp/servers/:id            (admin) update (incl. enabled / auto_approve);
+                                            config changes close the live connection
+DELETE /api/v1/mcp/servers/:id            (admin) remove + close the connection
+POST   /api/v1/mcp/servers/:id/test       (admin) connection test -> discovered tools
+GET    /api/v1/mcp/servers/:id/tools      (admin) current tool catalog
+```
+
+The Model Copilot exposes MCP server tools alongside its built-ins (qualified names
+`mcp__<server>__<tool>`); non-read-only MCP tools go through the same approval-proposal flow as
+built-in mutating tools (see section 38).
+
 ---
 
 # 9. Core Workstreams
@@ -1530,6 +1546,36 @@ Non-goals (v1):
 - No public cloud LLM services — endpoints are local/user-controlled
 
 Detailed design: section 37.
+
+---
+
+## Workstream 17: MCP Tool Servers (Copilot Extension)
+
+Goal: extend the Model Copilot into an MCP (Model Context Protocol) client so external tool servers
+(file/repo helpers, ComfyUI add-ons, anything from the MCP ecosystem) can join the copilot's tool
+loop without app code changes — under the same approval semantics as the built-in tools.
+
+Scope:
+
+- Admin-managed registry of MCP servers (`mcp_servers` table): `stdio` (spawned command + args +
+  env, no shell) and `http` (MCP Streamable HTTP endpoint + optional headers) transports
+- Client service on the official MCP TypeScript SDK (`npm:@modelcontextprotocol/sdk`): lazy connect,
+  per-server reconnect, cached tool catalog, serialized calls, per-call timeouts, process cleanup on
+  shutdown (no orphaned stdio children)
+- Agent integration: MCP tools join the copilot tool set as `mcp__<server>__<tool>`; tools the
+  server declares `readOnlyHint` (or any tool on an `auto_approve` server) auto-execute, all others
+  become admin approval proposals; non-admins see only read-only MCP tools
+- UI: "MCP Servers" panel on the Models page (admin CRUD, connection test, per-server tool list,
+  status chips) + `MCP: <server>` badges on copilot steps/proposals
+
+Non-goals (v1):
+
+- MCP resources and prompts (tools only); no server-initiated sampling from the app's LLM
+- The deprecated legacy SSE transport (Streamable HTTP only)
+- Per-tool allowlisting (gating is read-only-hint / per-server `auto_approve` level)
+- Durable proposals or persistent MCP state (proposals stay in-memory, TTL 1 h)
+
+Detailed design: section 38.
 
 ---
 
@@ -2232,6 +2278,20 @@ Post-MVP, JSON/YAML first.
 | LMA-014 | Agent chat (Model Copilot)       | `POST /api/v1/llm/agent` runs a bounded tool-calling loop (max 8 iterations); mutating tool calls are recorded as in-memory proposals (1h TTL) and the model is told to ask the user to approve in the UI            |
 | LMA-015 | ComfyUI connection helper        | Copilot can probe a ComfyUI endpoint (`/system_stats`), report queue/GPU state, and propose registering a comfyui-backend model with endpoint + workflow                                                             |
 | LMA-016 | Model Copilot UI                 | Models page copilot section: chat panel, tool-call activity log, and proposal cards with Approve/Reject (admin) that show the exact tool + arguments                                                                 |
+
+---
+
+## 11.20 MCP Tool Servers (Workstream 17)
+
+| ID      | Feature             | Acceptance criteria                                                                                                                                                                                             |
+| ------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP-001 | Server registry     | Admin CRUD of MCP servers (stdio: command/args/env; http: url/headers) validates transport-specific fields, name slug uniqueness, and 5-3600 s timeouts; GET views mask stored header values                    |
+| MCP-002 | Connection test     | `POST /api/v1/mcp/servers/:id/test` connects, lists the server's tools, and returns them; failures map to 502 `MCP_UNREACHABLE` (spawn/HTTP/protocol) or 504 `MCP_TIMEOUT`                                      |
+| MCP-003 | Tool catalog        | Enabled servers' tools join the copilot tool set as `mcp__<server>__<tool>` with pass-through JSON schemas; a failing server is isolated (others still available, error surfaced in the UI)                     |
+| MCP-004 | Read-only execution | MCP tools with `readOnlyHint` (or on an `auto_approve` server) auto-execute inline in the agent loop like built-in read-only tools                                                                              |
+| MCP-005 | Approval gating     | Non-read-only MCP tools create admin approval proposals (dedupe, in-flight, auto-continue unchanged); non-admin callers do not receive them in the tool schema                                                  |
+| MCP-006 | Lifecycle           | Disable/delete closes the live connection; SIGTERM/SIGINT close all MCP connections (no orphaned stdio children); the next use reconnects transparently                                                         |
+| MCP-007 | MCP Servers UI      | Models page panel (admin): server rows with status chips, add/edit form, test button (save-then-test), tool list with read-only chips; copilot steps/proposals for `mcp__…` tools show an `MCP: <server>` badge |
 
 ---
 
@@ -3842,3 +3902,81 @@ copilot probes `/system_stats`, reports what it sees, and proposes a comfyui-bac
 - No persistent multi-session memory; proposals are in-memory (TTL 1 h, lost on restart).
 - No arbitrary code execution; no mutating tool without explicit approval.
 - No public cloud LLM endpoints by design (the user points the app at their runner).
+
+---
+
+# 38. MCP Tool Servers (Workstream 17)
+
+Contract doc: `docs/mcp.md`. This section is the design overview.
+
+## 38.1 Purpose
+
+The Model Copilot (section 37) is a bounded tool-calling loop over a closed set of built-in tools.
+MCP (Model Context Protocol) is the emerging open standard for giving LLMs tools from external
+servers. Making the copilot an MCP **client** lets the app consume any MCP tool server — spawned
+locally (stdio) or running elsewhere (Streamable HTTP) — with zero per-server code, while keeping
+the copilot's core safety property: nothing that mutates runs without explicit approval.
+
+## 38.2 Transports & dependencies
+
+- `stdio`: the backend spawns `command` + `args` (argv array, no shell) with `env` merged over the
+  app environment, and speaks newline-delimited JSON-RPC on its pipes. This is an explicit admin
+  action — arbitrary process spawn on the host — and is audit-logged.
+- `http`: MCP Streamable HTTP (JSON-RPC POST, optional static headers for auth). The deprecated
+  legacy SSE transport is out of scope.
+- Dependency: `npm:@modelcontextprotocol/sdk` (≥ 1.30) + peer `npm:zod` in `backend/deno.json`. The
+  SDK's stdio transport uses `node:child_process`, which Deno 2.9.5 supports (verified by spike:
+  connect, `listTools`, `callTool`).
+
+## 38.3 Registry (`mcp_servers`)
+
+Admin-managed rows (migration `0029`): id (slug), name, description, transport, command/args_json/
+env_json (stdio), url/headers_json (http), timeout_seconds (5–3600, default 120), enabled,
+auto_approve, created_by, timestamps. Header values (potential secrets) are masked in GET views
+(`header_names` + `headers_set`), matching the `llm_api_key` pattern.
+
+## 38.4 Client service (`services/mcp.ts`)
+
+Per-server in-memory connection manager: lazy connect, reconnect-on-next-use after failure, 60 s
+tool-catalog cache (forced refresh on test/config change), per-server call serialization (stdio is
+one session), per-call timeout from the row. One failing server is isolated: the catalog reports its
+`state: error` + `last_error` and the remaining servers still contribute tools.
+
+Qualified names `mcp__<server_id>__<tool_name>` keep the tool namespace collision-free (both MCP and
+OpenAI function names are `[a-zA-Z0-9_-]{1,64}`); over-long names are dropped with a warning. MCP
+`inputSchema` passes through as the function's `parameters`; `callTool` results convert
+`structuredContent` (preferred) or joined text blocks (non-text blocks → `[<type>]` placeholders),
+`isError` fails the step, and the agent's existing 8000-char result cap applies. `mcpCloseAll()`
+runs from new SIGTERM/SIGINT handlers in `server.ts`; delete/disable close immediately.
+
+## 38.5 Agent integration (`services/llm_agent.ts`)
+
+- `agentToolDefs(isAdmin)` = built-in tools + MCP catalog (skipping failed servers).
+- Classification mirrors the built-in split: **auto-execute** when the server has `auto_approve` or
+  the tool's annotations carry `readOnlyHint: true`; otherwise **mutating** → approval proposal
+  (dedupe, in-flight single-flight, auto-continue follow-ups: all unchanged). Non-admins only see
+  auto-executing MCP tools in the schema, like built-in mutating tools.
+- `AgentProposal.tool` generalizes from the closed `AgentToolName` union to `string` (`mcp__…` names
+  included); proposal storage, TTL, and the OpenAPI `LlmProposal.tool` enum (relaxed to an open
+  string) adjust accordingly.
+- System prompt gains a compact live MCP section (servers + qualified tools + one-line
+  descriptions + the approval rule); full schemas ride in the `tools` array.
+- MCP calls count against the existing 16-iteration cap; conversation logging records MCP steps and
+  approvals verbatim.
+
+## 38.6 UI
+
+Models page, below the LLM Assistant panel: admin-only "MCP Servers" panel — rows (name,
+transport/status chips, tool count, description), add/edit form (transport-conditional fields,
+`auto_approve` warning), Test connection (save-then-test pattern), enable toggle, delete
+(confirm-dialog), expandable per-server tool list (read-only chips). Copilot chat: steps and
+proposal cards for `mcp__…` tools show an `MCP: <server>` badge; the existing Approve/Reject and
+auto-continue flow is unchanged.
+
+## 38.7 Security & limits
+
+Management is admin-only + audit-logged. Gating defaults to safe (read-only hint or explicit
+per-server `auto_approve` for auto-execution; everything else costs an approval). The app never
+initiates MCP sampling and does not expose MCP resources/prompts — tools only. Limits: name ≤ 64
+chars, description ≤ 500 chars, timeout 5–3600 s, tool JSON schema ≤ 16 KB (larger tools are dropped
+with a warning), qualified tool name ≤ 64 chars.

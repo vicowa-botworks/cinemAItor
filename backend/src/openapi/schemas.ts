@@ -3028,6 +3028,183 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
     },
   },
+  /** Live connection status of one MCP server (never triggers I/O). */
+  McpServerStatus: {
+    type: "object",
+    required: ["state", "last_error", "tool_count", "tools_fetched_at"],
+    properties: {
+      state: {
+        type: "string",
+        enum: ["idle", "connecting", "connected", "error"],
+        description: "idle until first use; error carries last_error",
+      },
+      last_error: { type: ["string", "null"] },
+      tool_count: {
+        type: "integer",
+        description: "Number of tools in the cached catalog",
+      },
+      tools_fetched_at: { type: ["string", "null"], format: "date-time" },
+    },
+  },
+  /** A registered MCP tool server (header values masked — names + flags only). */
+  McpServer: {
+    type: "object",
+    required: [
+      "id",
+      "name",
+      "description",
+      "transport",
+      "command",
+      "args",
+      "env_set",
+      "url",
+      "header_names",
+      "headers_set",
+      "timeout_seconds",
+      "enabled",
+      "auto_approve",
+      "created_at",
+      "updated_at",
+      "status",
+    ],
+    properties: {
+      id: {
+        type: "string",
+        description: "Slug derived from the name; prefix of every qualified tool name",
+      },
+      name: { type: "string" },
+      description: { type: "string" },
+      transport: { type: "string", enum: ["stdio", "http"] },
+      command: {
+        type: ["string", "null"],
+        description: "stdio only: executable to spawn (argv, never a shell)",
+      },
+      args: {
+        type: "array",
+        items: { type: "string" },
+        description: "stdio only: argv passed to the command",
+      },
+      env_set: {
+        type: "boolean",
+        description: "stdio only: whether extra env vars are stored (values masked)",
+      },
+      url: {
+        type: ["string", "null"],
+        description: "http only: the Streamable HTTP endpoint",
+      },
+      header_names: {
+        type: "array",
+        items: { type: "string" },
+        description: "http only: header names (values masked)",
+      },
+      headers_set: {
+        type: "boolean",
+        description: "http only: whether headers are stored (values masked)",
+      },
+      timeout_seconds: {
+        type: "integer",
+        description: "Per-request timeout, 5-3600 s (default 120)",
+      },
+      enabled: { type: "boolean" },
+      auto_approve: {
+        type: "boolean",
+        description: "Copilot: auto-execute every tool of this server without an approval " +
+          "proposal (equivalent to per-model auto-approval)",
+      },
+      created_at: isoDate,
+      updated_at: isoDate,
+      status: { $ref: "#/components/schemas/McpServerStatus" },
+    },
+  },
+  /** One tool exposed by an MCP server. */
+  McpTool: {
+    type: "object",
+    required: ["name", "server", "tool", "description", "input_schema", "read_only_hint"],
+    properties: {
+      name: {
+        type: "string",
+        description: "Qualified name: mcp__<server>__<tool>",
+      },
+      server: { type: "string", description: "The server id" },
+      tool: { type: "string", description: "The tool name as declared by the server" },
+      description: { type: "string" },
+      input_schema: {
+        type: "object",
+        description: "The tool's JSON Schema input (passed to the LLM)",
+      },
+      read_only_hint: {
+        type: "boolean",
+        description: "The server's declared readOnlyHint annotation",
+      },
+    },
+  },
+  McpServerCreateRequest: {
+    type: "object",
+    required: ["name", "transport"],
+    properties: {
+      name: {
+        type: "string",
+        description: "1-64 chars; the id is its slug (lowercase, non-alphanumeric -> '-')",
+      },
+      description: { type: "string", description: "Max 500 chars" },
+      transport: { type: "string", enum: ["stdio", "http"] },
+      command: {
+        type: "string",
+        description: "Required for stdio: executable to spawn",
+      },
+      args: { type: "array", items: { type: "string" }, description: "stdio: argv" },
+      env: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        description: "stdio: extra env vars merged over the backend environment",
+      },
+      url: {
+        type: "string",
+        description: "Required for http: http(s) Streamable HTTP endpoint",
+      },
+      headers: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        description: "http: request headers (values stored masked in views)",
+      },
+      timeout_seconds: { type: "integer", description: "5-3600, default 120" },
+      enabled: { type: "boolean", description: "Default true" },
+      auto_approve: { type: "boolean", description: "Default false" },
+    },
+  },
+  McpServerPatchRequest: {
+    type: "object",
+    properties: {
+      description: { type: "string" },
+      transport: { type: "string", enum: ["stdio", "http"] },
+      command: { type: "string" },
+      args: { type: "array", items: { type: "string" } },
+      env: { type: "object", additionalProperties: { type: "string" } },
+      url: { type: "string" },
+      headers: { type: "object", additionalProperties: { type: "string" } },
+      timeout_seconds: { type: "integer" },
+      enabled: { type: "boolean" },
+      auto_approve: { type: "boolean" },
+    },
+    description: "All fields optional; omitted fields keep their stored value. name is not " +
+      "patchable (the id is derived from it). A transport-field change closes the " +
+      "live connection.",
+  },
+  McpTestResult: {
+    type: "object",
+    required: ["ok", "tools"],
+    properties: {
+      ok: { type: "boolean", description: "Always true — failures are HTTP errors" },
+      tools: { type: "array", items: { $ref: "#/components/schemas/McpTool" } },
+    },
+  },
+  McpToolsResult: {
+    type: "object",
+    required: ["tools"],
+    properties: {
+      tools: { type: "array", items: { $ref: "#/components/schemas/McpTool" } },
+    },
+  },
 };
 
 /** Tag descriptions shown in Swagger UI's tag list. */
@@ -3042,6 +3219,7 @@ export const TAG_DESCRIPTIONS: Record<string, string> = {
   audio: "Audio generation, upload, analysis, adjustments, cleanup",
   models: "Model registry, health, benchmarks, hardware",
   workflows: "Saved ComfyUI workflows referenced by model settings (workflow_ref)",
+  mcp: "MCP tool servers (Workstream 17): registry, connection test, tool catalog",
   jobs: "Generation job queue, events, WebSocket stream",
   review: "Job candidate review: approve, reject, shortlist",
   renders: "Render presets, render queue, exports",
