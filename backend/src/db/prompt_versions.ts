@@ -15,6 +15,7 @@ export const PROMPT_SCOPE_TYPES = [
   "scene",
   "shot",
   "storyboard_panel",
+  "movie_script",
 ] as const;
 export type PromptScopeType = (typeof PROMPT_SCOPE_TYPES)[number];
 

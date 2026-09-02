@@ -2,11 +2,16 @@ import type { Model } from "@cinemaItor/db/models.ts";
 import type { Skill } from "@cinemaItor/db/skills.ts";
 import type { LlmMessage } from "./llm_client.ts";
 
-export const ASSIST_PURPOSES = ["write_script", "design_scene", "enhance_prompt"] as const;
+export const ASSIST_PURPOSES = [
+  "write_script",
+  "extend_script",
+  "design_scene",
+  "enhance_prompt",
+] as const;
 export type AssistPurpose = (typeof ASSIST_PURPOSES)[number];
 
 /** Bumped whenever a system prompt changes, for testability and debugging. */
-export const ASSIST_PROMPT_VERSION = "1";
+export const ASSIST_PROMPT_VERSION = "2";
 
 const WRITE_SCRIPT_SYSTEM_PROMPT = [
   "You are the script department of an AI movie studio.",
@@ -18,6 +23,20 @@ const WRITE_SCRIPT_SYSTEM_PROMPT = [
   "- Character names are in UPPERCASE on their own line, followed by their dialogue on the next line.",
   "- No markdown, no code fences, no headings, no commentary, no explanations — screenplay text only.",
   "- Keep it tight: 3 to 10 scenes unless the user asks for more.",
+].join("\n");
+
+const EXTEND_SCRIPT_SYSTEM_PROMPT = [
+  "You are an experienced screenwriter in an AI movie studio.",
+  "The user gives you an existing Fountain-lite screenplay plus instructions — e.g. continue the",
+  "story, expand or tighten a scene, add characters or dialogue, or change the tone.",
+  "Answer with the FULL revised Fountain-lite screenplay text ONLY, not just the changed scenes.",
+  "Rules:",
+  "- Scene headings start with INT. or EXT. (or INT./EXT.) followed by the location and a time of day",
+  "  (MORNING, AFTERNOON, EVENING or NIGHT), e.g. `INT. COFFEE SHOP - MORNING`.",
+  "- Action lines are plain prose. Character names are UPPERCASE on their own line, dialogue on the",
+  "  next line.",
+  "- No markdown, no code fences, no headings, no commentary — screenplay text only.",
+  "- Preserve what already works; follow the instructions for the rest.",
 ].join("\n");
 
 const DESIGN_SCENE_SYSTEM_PROMPT = [
@@ -53,6 +72,7 @@ const ENHANCE_PROMPT_SYSTEM_PROMPT = [
 
 const SYSTEM_PROMPTS: Record<AssistPurpose, string> = {
   write_script: WRITE_SCRIPT_SYSTEM_PROMPT,
+  extend_script: EXTEND_SCRIPT_SYSTEM_PROMPT,
   design_scene: DESIGN_SCENE_SYSTEM_PROMPT,
   enhance_prompt: ENHANCE_PROMPT_SYSTEM_PROMPT,
 };

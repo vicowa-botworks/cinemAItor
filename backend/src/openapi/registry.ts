@@ -41,6 +41,8 @@ import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
 import { openApiOps as storyboardOps } from "@cinemaItor/routes/storyboards.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
 import { openApiOps as sceneOps } from "@cinemaItor/routes/scenes.ts";
+import { scriptsRouter } from "@cinemaItor/routes/scripts.ts";
+import { openApiOps as scriptOps } from "@cinemaItor/routes/scripts.ts";
 import { promptRouter } from "@cinemaItor/routes/prompts.ts";
 import { openApiOps as promptOps } from "@cinemaItor/routes/prompts.ts";
 import { referenceRouter } from "@cinemaItor/routes/references.ts";
@@ -79,6 +81,7 @@ export function apiRouters(): ApiRouterRef[] {
     { tag: "skills", router: skillRouter },
     { tag: "storyboards", router: storyboardRouter },
     { tag: "scenes", router: sceneRouter },
+    { tag: "scripts", router: scriptsRouter },
     { tag: "prompts", router: promptRouter },
     { tag: "references", router: referenceRouter },
     { tag: "timelines", router: timelineRouter },
@@ -111,6 +114,7 @@ export function allOps(): Record<string, OperationMeta> {
     ["skills", skillOps],
     ["storyboards", storyboardOps],
     ["scenes", sceneOps],
+    ["scripts", scriptOps],
     ["prompts", promptOps],
     ["references", referenceOps],
     ["timelines", timelineOps],

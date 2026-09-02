@@ -73,6 +73,10 @@ describe("buildAssistRequest", () => {
       buildAssistRequest({ purpose: "design_scene", ...base }),
       { purpose: "design_scene", context: "a @hero shot" },
     );
+    assertEquals(
+      buildAssistRequest({ purpose: "extend_script", ...base }),
+      { purpose: "extend_script", context: "a @hero shot" },
+    );
   });
 });
 
@@ -104,10 +108,11 @@ describe("skillMatchesModel", () => {
 });
 
 describe("ASSIST_PURPOSES", () => {
-  it("covers the three contract purposes with labels", () => {
+  it("covers the four contract purposes with labels", () => {
     assertEquals(Object.keys(ASSIST_PURPOSES).sort(), [
       "design_scene",
       "enhance_prompt",
+      "extend_script",
       "write_script",
     ]);
     for (const [key, spec] of Object.entries(ASSIST_PURPOSES)) {

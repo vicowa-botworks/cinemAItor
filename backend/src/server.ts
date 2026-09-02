@@ -13,6 +13,7 @@ import { modelRouter } from "@cinemaItor/routes/models.ts";
 import { router as llmRouter } from "@cinemaItor/routes/llm.ts";
 import { router as workflowRouter } from "@cinemaItor/routes/workflows.ts";
 import { sceneRouter } from "@cinemaItor/routes/scenes.ts";
+import { scriptsRouter } from "@cinemaItor/routes/scripts.ts";
 import { storyboardRouter } from "@cinemaItor/routes/storyboards.ts";
 import { projectRouter } from "@cinemaItor/routes/projects.ts";
 import { skillsRouter } from "@cinemaItor/routes/skills.ts";
@@ -120,6 +121,7 @@ export function createApp(
   app.use(timelineRouter.routes());
   app.use(storyboardRouter.routes());
   app.use(sceneRouter.routes());
+  app.use(scriptsRouter.routes());
   app.use(promptRouter.routes());
   app.use(referenceRouter.routes());
   app.use(openApiRouter.routes());
@@ -140,6 +142,7 @@ export function createApp(
   app.use(timelineRouter.allowedMethods());
   app.use(storyboardRouter.allowedMethods());
   app.use(sceneRouter.allowedMethods());
+  app.use(scriptsRouter.allowedMethods());
   app.use(promptRouter.allowedMethods());
   app.use(referenceRouter.allowedMethods());
   app.use(openApiRouter.allowedMethods());

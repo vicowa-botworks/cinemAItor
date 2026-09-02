@@ -156,6 +156,11 @@ app-root (main router)
 │   │            per-job detail + event log, cancel/retry)
 ├── job-events (shared WebSocket client: one socket multiplexed across consumers, token
 │   │           handshake auth, reconnect with backoff, polling kept as fallback)
+├── script-list (versioned Fountain-lite screenplays per project: create + project filter,
+│   │           #/scripts; the creative-pipeline source document)
+├── script-detail (script editor — paste/edit → Save version; Generate with AI via the shared
+│   │             ai-assist-dialog (write_script / extend_script → review in editor); version
+│   │             history + restore, name/status + delete, #/script/:id — see docs/scripts.md)
 ├── storyboard-list (board list + create; project filter via #/storyboards?project=)
 ├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
 │   │                 live preview polling)
@@ -326,7 +331,12 @@ server.ts (entry point)
   │   ├── WebSocket `/ws/v1/jobs` (?token= auth): pushes job + render progress/status
   │   │   frames from the store write paths (in-process broadcast, read-only clients)
   │   └── (see docs/jobs.md)
- ├── Storyboard/scene/shot routes (auth middleware, project-permission gated)
+  ├── Script routes (/api/v1/scripts/*, auth middleware, project-permission gated)
+  │   ├── CRUD (soft delete) + text versions: save / list / restore — the versioned
+  │   │   Fountain-lite screenplay (prompt_versions scope movie_script; @reference
+  │   │   resolution + duplicate detection, see docs/scripts.md)
+  │   └── Generation reuses POST /llm/assist (write_script / extend_script purposes)
+  ├── Storyboard/scene/shot routes (auth middleware, project-permission gated)
  │   ├── Storyboards + ordered panels; scenes + ordered shots
  │   ├── Prompt versioning + reference resolution on creative objects
  │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; runner
@@ -418,7 +428,7 @@ server.ts (entry point)
   ├── LLM routes (/api/v1/llm/*, auth middleware; settings mutations admin-only)
   │   ├── Settings (stored in the settings table, key masked in GET), status,
   │   │   test connection, one-shot chat
-  │   ├── Assist: purpose-driven content generation (script/scene/prompt) with
+  │   ├── Assist: purpose-driven content generation (script write/extend, scene, prompt) with
   │   │   optional skill guidance — see the `assistant` skill block
   │   ├── Model Copilot (agent): bounded tool-calling loop against the configured
   │   │   LLM (services/llm_agent.ts) — the system prompt carries live context

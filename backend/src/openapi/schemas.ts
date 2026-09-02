@@ -489,7 +489,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       id: { type: "string" },
       scope_type: {
         type: "string",
-        enum: ["generic", "prompt", "scene", "shot", "storyboard_panel"],
+        enum: ["generic", "prompt", "scene", "shot", "storyboard_panel", "movie_script"],
       },
       scope_id: { type: "string" },
       version_number: { type: "integer", minimum: 1 },
@@ -522,7 +522,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
     properties: {
       scope_type: {
         type: "string",
-        enum: ["generic", "prompt", "scene", "shot", "storyboard_panel"],
+        enum: ["generic", "prompt", "scene", "shot", "storyboard_panel", "movie_script"],
       },
       scope_id: { type: "string" },
       content: { type: "string", maxLength: 100000 },
@@ -1299,6 +1299,46 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       status: { type: "string" },
       created_at: isoDate,
       updated_at: isoDate,
+    },
+  },
+
+  /** A movie script (a versioned Fountain-lite screenplay per project). */
+  MovieScript: {
+    type: "object",
+    required: ["id", "project_id", "name", "status", "created_at", "updated_at"],
+    properties: {
+      id: { type: "string" },
+      project_id: { type: "string" },
+      name: { type: "string" },
+      prompt_version_id: { type: ["string", "null"] },
+      status: { type: "string" },
+      created_at: isoDate,
+      updated_at: isoDate,
+    },
+  },
+
+  /** A script with its current text (nullable) and full version history. */
+  MovieScriptDetail: {
+    type: "object",
+    required: ["script", "prompt", "versions"],
+    properties: {
+      script: { $ref: "#/components/schemas/MovieScript" },
+      prompt: {
+        anyOf: [
+          {
+            type: "object",
+            required: ["content", "version_number", "version_id", "warnings"],
+            properties: {
+              content: { type: "string" },
+              version_number: { type: "integer", minimum: 1 },
+              version_id: { type: "string" },
+              warnings: { type: "array", items: { type: "string" } },
+            },
+          },
+          { type: "null" },
+        ],
+      },
+      versions: { type: "array", items: { $ref: "#/components/schemas/PromptVersion" } },
     },
   },
 
@@ -3008,6 +3048,7 @@ export const TAG_DESCRIPTIONS: Record<string, string> = {
   skills: "Skill definitions, versions, runs",
   storyboards: "Storyboards and panels",
   scenes: "Scenes, shots, script import, continuity",
+  scripts: "Movie scripts: versioned Fountain-lite screenplays (edit + generation history)",
   prompts: "Versioned prompts per creative scope",
   references: "@reference parsing, audit and repair",
   timelines: "Timelines, tracks, items, markers, snapshots, scoring",
