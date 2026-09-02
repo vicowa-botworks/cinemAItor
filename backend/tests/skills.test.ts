@@ -93,6 +93,25 @@ describe("skills (db)", () => {
     assertEquals(listSkills().length, all.length);
   });
 
+  it("seeds the MiniMax-H3 model guide skills with model scope", () => {
+    for (const id of ["sys-minimax-h3-video", "sys-minimax-h3-reference"]) {
+      const guide = getSkill(id);
+      assert(guide, `${id} is seeded`);
+      assertEquals(guide.is_system, true);
+      assertEquals(guide.enabled, true);
+      assertEquals(guide.definition.assistant?.model_ids, ["minimax_h3"]);
+      const guidance = guide.definition.assistant?.guidance ?? "";
+      assert(
+        guidance.length > 1000,
+        `${id} carries the full guide (${guidance.length} chars)`,
+      );
+      assertEquals(guide.definition.steps, []);
+    }
+    // The base guide covers T2VA/I2VA/FL2VA/L2VA.
+    const baseGuidance = getSkill("sys-minimax-h3-video")?.definition.assistant?.guidance ?? "";
+    assert(baseGuidance.includes("T2VA"), "base guide covers T2VA");
+  });
+
   it("lists only prompt-creation skills with assistantOnly", () => {
     createSkill("plain-skill", TENSE_DEF, ownerId);
     createSkill(
@@ -105,7 +124,7 @@ describe("skills (db)", () => {
     );
     const all = listSkills();
     const filtered = listSkills(true);
-    assertEquals(filtered.length, 2); // sys-t2v-prompting + assistant-skill
+    assertEquals(filtered.length, 4); // t2v prompting + 2 model guides + assistant-skill
     assert(filtered.every((s) => s.definition.assistant !== null));
     assert(!filtered.some((s) => s.id === "plain-skill"));
     assertEquals(all.length, filtered.length + 3); // + the 3 step-carrying skills
@@ -184,12 +203,14 @@ describe("skills (db)", () => {
     const def = parseSkillDefinition(defOverrides({
       assistant: {
         model_task_types: ["text_to_video", "text_to_image"],
+        model_ids: ["minimax_h3", "flux2"],
         guidance: " Use motion verbs. ",
         examples: [{ prompt: " A crane shot. ", notes: " works " }],
       },
     }));
     assertEquals(def.assistant, {
       model_task_types: ["text_to_video", "text_to_image"],
+      model_ids: ["minimax_h3", "flux2"],
       guidance: "Use motion verbs.",
       examples: [{ prompt: "A crane shot.", notes: "works" }],
     });
@@ -214,8 +235,11 @@ describe("skills (db)", () => {
       defOverrides({ assistant: "nope" }),
       defOverrides({ assistant: {} }),
       defOverrides({ assistant: { guidance: 7 } }),
-      defOverrides({ assistant: { guidance: "x".repeat(4001) } }),
+      defOverrides({ assistant: { guidance: "x".repeat(32001) } }),
       defOverrides({ assistant: { model_task_types: [] } }),
+      defOverrides({ assistant: { model_ids: "not-an-array" } }),
+      defOverrides({ assistant: { model_ids: [123] } }),
+      defOverrides({ assistant: { model_ids: ["ok", 7] } }),
       defOverrides({ assistant: { model_task_types: ["dance"] } }),
       defOverrides({ assistant: { examples: "nope" } }),
       defOverrides({ assistant: { examples: [{ prompt: "" }] } }),
@@ -655,8 +679,11 @@ describe("skills api", () => {
       const filtered = await req("GET", "/api/v1/skills?assistant=1", undefined, adminToken);
       assertEquals(filtered.status, 200);
       const filteredBody = (await filtered.json()) as { id: string }[];
-      assertEquals(filteredBody.length, 1);
-      assertEquals(filteredBody[0].id, "sys-t2v-prompting");
+      assertEquals(filteredBody.length, 3);
+      const filteredIds = filteredBody.map((s) => s.id);
+      assert(filteredIds.includes("sys-t2v-prompting"));
+      assert(filteredIds.includes("sys-minimax-h3-video"));
+      assert(filteredIds.includes("sys-minimax-h3-reference"));
     }));
 
   it("creates, updates, toggles and deletes a skill through the API", () =>

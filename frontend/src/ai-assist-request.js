@@ -53,11 +53,16 @@ export function buildAssistRequest({ purpose, context, modelId, skillId }) {
 }
 
 /**
- * True when the skill's assistant block (if any task types are declared)
- * overlaps the model's task types. Skills without task types match any model.
+ * True when the skill matches the model. Model-scoped skills (assistant.model_ids
+ * non-empty) match only those models; otherwise task-type overlap applies (skills
+ * without task types match any model). Mirrors the backend enhance_prompt check.
  */
 export function skillMatchesModel(skill, model) {
   const assistant = skill?.definition?.assistant;
+  const modelIds = assistant?.model_ids;
+  if (Array.isArray(modelIds) && modelIds.length > 0) {
+    return modelIds.includes(model?.id);
+  }
   const types = assistant?.model_task_types;
   if (!Array.isArray(types) || types.length === 0) return true;
   const modelTypes = Array.isArray(model?.task_types) ? model.task_types : [];

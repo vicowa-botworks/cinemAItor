@@ -242,8 +242,8 @@ class AiAssistDialog extends LitElement {
         ${this._mismatch()
           ? html`
             <p class="warn">
-              The selected skill targets different task types than the
-              selected model.
+              The selected skill does not match the selected model (different
+              model scope or task types).
             </p>
           `
           : nothing}

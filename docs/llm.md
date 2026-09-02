@@ -95,8 +95,9 @@ the server composes `[system prompt, user: context]`.
   (name, task types, version, known limitations, default-settings keys) is injected; when `skill_id`
   is given the skill's `assistant` block (guidance + examples) is injected. `@reference` tokens in
   the input must survive verbatim — the server post-checks and re-appends any dropped ref (400
-  pre-check: the model must exist and be enabled; with both a model and a skill, the skill's task
-  types must overlap the model's).
+  pre-check: the model must exist and be enabled; with both a model and a skill, a model-scoped
+  skill (`assistant.model_ids`) must name the target model, otherwise the skill's task types must
+  overlap the model's).
 
 All three return `503 LLM_NOT_CONFIGURED` when the LLM is not configured.
 
@@ -108,16 +109,20 @@ definition; included in version snapshots):
 ```json
 "assistant": {
   "model_task_types": ["text_to_video"],
+  "model_ids": ["minimax_h3"],
   "guidance": "…how to write prompts for this model family…",
   "examples": [{ "prompt": "…", "notes": "why this works" }]
 }
 ```
 
-- `guidance` ≤ 4 000 chars; `examples` ≤ 8 (`prompt` ≤ 2 000, `notes` ≤ 500); `model_task_types`
-  (optional) must be a non-empty subset of known task types.
+- `guidance` ≤ 32 000 chars; `examples` ≤ 8 (`prompt` ≤ 2 000, `notes` ≤ 500); `model_task_types`
+  (optional) must be a non-empty subset of known task types; `model_ids` (optional) scopes the skill
+  to exactly those models, bypassing the task-type check.
 - `GET /api/v1/skills?assistant=1` lists only skills with an `assistant` block.
 - The seeded system skill `sys-t2v-prompting` carries general text-to-video prompting guidance so
-  `enhance_prompt` is useful before the user writes their own.
+  `enhance_prompt` is useful before the user writes their own; `sys-minimax-h3-video` and
+  `sys-minimax-h3-reference` are scoped to `minimax_h3` via `model_ids` and seed the model's own
+  prompt-writing guides verbatim into `guidance`.
 
 ## HuggingFace catalog
 

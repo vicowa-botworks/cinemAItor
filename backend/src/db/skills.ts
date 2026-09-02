@@ -34,6 +34,11 @@ export interface SkillAssistantExample {
 export interface SkillAssistantBlock {
   /** Task types this prompt guidance applies to (non-empty subset when present). */
   model_task_types: string[];
+  /** Model ids this guidance applies to. When non-empty the skill matches only
+   *  those models (takes precedence over task-type matching). Absent/empty means
+   *  "not model-scoped" — task-type matching applies. parseAssistant always
+   *  populates it ([] when unspecified). */
+  model_ids?: string[];
   guidance: string | null;
   examples: SkillAssistantExample[];
 }
@@ -265,14 +270,35 @@ function parseAssistant(raw: unknown): SkillAssistantBlock | null {
     }
   }
 
+  const modelIds: string[] = [];
+  const rawModelIds = obj.model_ids;
+  if (rawModelIds !== undefined) {
+    if (!Array.isArray(rawModelIds)) {
+      throw badRequest("assistant.model_ids must be an array");
+    }
+    // [] round-trips as "not model-scoped" (task-type matching still applies).
+    for (const id of rawModelIds) {
+      if (
+        typeof id !== "string" || id.trim().length === 0 || id.length > 64 ||
+        /[^\w.-]/.test(id)
+      ) {
+        throw badRequest(
+          `assistant.model_ids must be model id slugs (letters, digits, _ . -) of ` +
+            `at most 64 characters, got: ${String(id)}`,
+        );
+      }
+      if (!modelIds.includes(id)) modelIds.push(id);
+    }
+  }
+
   let guidance: string | null = null;
   if (obj.guidance !== undefined) {
     if (typeof obj.guidance !== "string") {
       throw badRequest("assistant.guidance must be a string");
     }
     const trimmed = obj.guidance.trim();
-    if (trimmed.length > 4000) {
-      throw badRequest("assistant.guidance exceeds 4000 characters");
+    if (trimmed.length > 32000) {
+      throw badRequest("assistant.guidance exceeds 32000 characters");
     }
     guidance = trimmed;
   }
@@ -314,7 +340,7 @@ function parseAssistant(raw: unknown): SkillAssistantBlock | null {
   if (guidance === null && examples.length === 0) {
     throw badRequest("assistant must contain guidance or at least one example");
   }
-  return { model_task_types: modelTaskTypes, guidance, examples };
+  return { model_task_types: modelTaskTypes, model_ids: modelIds, guidance, examples };
 }
 
 export function parseSkillDefinition(raw: unknown): SkillDefinition {
@@ -486,6 +512,78 @@ export function seedSystemSkills(): void {
       definition.description ?? null,
       definition.author ?? null,
       definition.version,
+      JSON.stringify(definition),
+      now,
+      now,
+    );
+  }
+  seedModelGuideSkills();
+}
+
+/**
+ * Model-specific prompt guides seeded from vendored markdown files. Each entry
+ * becomes a system skill scoped to one model (`assistant.model_ids`) so the
+ * guide applies only to that model's generation rather than every model sharing
+ * its task types. The markdown stays in the repo (diffable against upstream) and
+ * is stored verbatim as the skill's guidance.
+ */
+const MODEL_GUIDE_SKILLS = [
+  {
+    id: "sys-minimax-h3-video",
+    file: "VIDEO_PROMPT_WRITING_GUIDE_base_en.md",
+    name: "MiniMax H3 — Video Prompting",
+    author: "MiniMax AI (cinemAItor)",
+    license: "MIT",
+    description:
+      "MiniMax H3 T2VA / I2VA / FL2VA / L2VA final-prompt format and prompt-writing guide.",
+    model_ids: ["minimax_h3"],
+    model_task_types: ["text_to_video", "image_to_video"],
+  },
+  {
+    id: "sys-minimax-h3-reference",
+    file: "VIDEO_PROMPT_WRITING_GUIDE_ref_en.md",
+    name: "MiniMax H3 — Reference Prompting",
+    author: "MiniMax AI (cinemAItor)",
+    license: "MIT",
+    description: "MiniMax H3 full-reference mode: six-section rewrite format and reference labels.",
+    model_ids: ["minimax_h3"],
+    model_task_types: ["image_to_video"],
+  },
+] as const;
+
+export function seedModelGuideSkills(): void {
+  const db = getDb();
+  const now = nowIso();
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO skills
+       (id, name, description, author, version, definition_json, enabled, is_system, created_by_user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, 1, NULL, ?, ?)`,
+  );
+  for (const guide of MODEL_GUIDE_SKILLS) {
+    const guidance = Deno.readTextFileSync(
+      new URL(`./skill_guides/${guide.file}`, import.meta.url),
+    );
+    const definition = {
+      name: guide.name,
+      version: "1.0.0",
+      author: guide.author,
+      license: guide.license,
+      description: guide.description,
+      inputs: {},
+      steps: [],
+      assistant: {
+        model_ids: [...guide.model_ids],
+        model_task_types: [...guide.model_task_types],
+        guidance,
+        examples: [],
+      },
+    };
+    insert.run(
+      guide.id,
+      guide.name,
+      guide.description,
+      guide.author,
+      "1.0.0",
       JSON.stringify(definition),
       now,
       now,

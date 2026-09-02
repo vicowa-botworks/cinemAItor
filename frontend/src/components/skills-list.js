@@ -349,6 +349,8 @@ export class SkillsList extends LitElement {
     editing: { state: true },
     draftId: { state: true },
     draftJson: { state: true },
+    assistantGuidance: { state: true },
+    assistantModelIds: { state: true },
     runInputs: { state: true },
     runProjectId: { state: true },
   };
@@ -367,6 +369,8 @@ export class SkillsList extends LitElement {
     this.editing = null;
     this.draftId = "";
     this.draftJson = SAMPLE_DEFINITION;
+    this.assistantGuidance = "";
+    this.assistantModelIds = "";
     this.runInputs = {};
     this.runProjectId = "";
     this._unsubscribeEvents = null;
@@ -480,6 +484,8 @@ export class SkillsList extends LitElement {
     this.editing = { mode: "create" };
     this.draftId = "";
     this.draftJson = SAMPLE_DEFINITION;
+    this.assistantGuidance = "";
+    this.assistantModelIds = "";
     this.error = "";
   }
 
@@ -487,6 +493,9 @@ export class SkillsList extends LitElement {
     this.editing = { mode: "edit", id: skill.id };
     this.draftId = skill.id;
     this.draftJson = JSON.stringify(skill.definition, null, 2);
+    const assistant = skill.definition?.assistant;
+    this.assistantGuidance = assistant?.guidance ?? "";
+    this.assistantModelIds = (assistant?.model_ids ?? []).join(", ");
     this.error = "";
   }
 
@@ -513,6 +522,25 @@ export class SkillsList extends LitElement {
     return raw;
   }
 
+  /**
+   * Merge the markdown guidance + model-ids fields into the assistant block.
+   * The fields win over the JSON for these two sub-fields; task types and
+   * examples stay in the JSON. No-op when both fields are empty.
+   */
+  _applyAssistantFields(definition) {
+    const modelIds = this.assistantModelIds
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const guidance = this.assistantGuidance;
+    if (modelIds.length === 0 && guidance === "") return;
+    definition.assistant = {
+      ...(definition.assistant ?? {}),
+      ...(modelIds.length > 0 ? { model_ids: modelIds } : {}),
+      ...(guidance !== "" ? { guidance: guidance.trim() } : {}),
+    };
+  }
+
   async _submitDraft(e) {
     e?.preventDefault?.();
     let definition;
@@ -522,6 +550,7 @@ export class SkillsList extends LitElement {
       this.error = err.message;
       return;
     }
+    this._applyAssistantFields(definition);
     this.busy = true;
     this.error = "";
     try {
@@ -822,6 +851,33 @@ export class SkillsList extends LitElement {
                 this.draftJson = e.target.value;
               }}
             ></textarea>
+          </div>
+          <div class="field">
+            <label for="skill-guidance">
+              Prompt guidance (markdown) — sets the assistant block, overrides the JSON
+            </label>
+            <textarea
+              id="skill-guidance"
+              spellcheck="false"
+              .value=${this.assistantGuidance}
+              @input=${(e) => {
+                this.assistantGuidance = e.target.value;
+              }}
+            ></textarea>
+          </div>
+          <div class="field">
+            <label for="skill-model-ids">
+              Model ids (comma-separated) — scope the skill to models; empty = any model
+            </label>
+            <input
+              id="skill-model-ids"
+              style="font-family: monospace"
+              .value=${this.assistantModelIds}
+              @input=${(e) => {
+                this.assistantModelIds = e.target.value;
+              }}
+              placeholder="minimax_h3"
+            />
           </div>
           ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
           <div class="form-actions">

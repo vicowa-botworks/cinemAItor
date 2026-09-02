@@ -589,6 +589,37 @@ describe("llm api", () => {
       });
     });
 
+    it("honors a skill's model_ids scope in enhance_prompt", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        const model = await registerTestModel();
+        const other = await registerTestModel({ name: "Other T2V", version: "2.0" });
+        const scoped = await registerAssistSkill({ model_ids: [other.id] });
+
+        // Rejected for a model the skill is not scoped to.
+        const rejected = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "a cat",
+          model_id: model.id,
+          skill_id: scoped.id,
+        }, adminToken);
+        assertEquals(rejected.status, 400);
+        const rejectedBody = (await rejected.json()) as { error: { message: string } };
+        assert(rejectedBody.error.message.includes("applies to model(s)"));
+
+        // Accepted for the model it names.
+        state.reply = "A crane shot over a rainy street at night.";
+        const allowed = await post("/api/v1/llm/assist", {
+          purpose: "enhance_prompt",
+          context: "a cat",
+          model_id: other.id,
+          skill_id: scoped.id,
+        }, adminToken);
+        assertEquals(allowed.status, 200);
+      });
+    });
+
     it("write_script: returns the purpose and content, composes the system prompt", async () => {
       await withServer(async (base) => {
         baseUrl = base;

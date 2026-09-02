@@ -337,13 +337,25 @@ async function handleAssist(ctx: Context): Promise<void> {
   }
 
   if (model && skill) {
-    const skillTypes = skill.definition.assistant!.model_task_types;
-    const overlap = model.task_types.filter((t) => skillTypes.includes(t));
-    if (overlap.length === 0) {
-      throw badRequest(
-        `Skill '${skill.id}' targets task types [${skillTypes.join(", ")}] which do not ` +
-          `overlap the task types of model '${model.id}' [${model.task_types.join(", ")}]`,
-      );
+    const assistant = skill.definition.assistant!;
+    const modelIds = assistant.model_ids ?? [];
+    if (modelIds.length > 0) {
+      // Model-scoped guide: it applies only to the listed models.
+      if (!modelIds.includes(model.id)) {
+        throw badRequest(
+          `Skill '${skill.id}' applies to model(s) [${modelIds.join(", ")}] but the ` +
+            `target model is '${model.id}'`,
+        );
+      }
+    } else {
+      const skillTypes = assistant.model_task_types;
+      const overlap = model.task_types.filter((t) => skillTypes.includes(t));
+      if (skillTypes.length > 0 && overlap.length === 0) {
+        throw badRequest(
+          `Skill '${skill.id}' targets task types [${skillTypes.join(", ")}] which do not ` +
+            `overlap the task types of model '${model.id}' [${model.task_types.join(", ")}]`,
+        );
+      }
     }
   }
 

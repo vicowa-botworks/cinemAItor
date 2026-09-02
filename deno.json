@@ -24,7 +24,7 @@
     "indentWidth": 2,
     "semiColons": true,
     "singleQuote": false,
-    "exclude": ["e2e"]
+    "exclude": ["e2e", "backend/src/db/skill_guides"]
   },
   "linter": {
     "enabled": false
