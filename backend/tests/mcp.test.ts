@@ -428,8 +428,11 @@ describe("mcp api connections and tools", () => {
       assertEquals(failing.status, 201);
       const test2 = await post("/api/v1/mcp/servers/failing/test", {}, adminToken);
       assertEquals(test2.status, 502);
-      const err2 = (await test2.json()) as { error: { code: string } };
+      const err2 = (await test2.json()) as { error: { code: string; details?: string } };
       assertEquals(err2.error.code, ERROR_CODES.MCP_UNREACHABLE);
+      // The child's stderr tail is captured for diagnostics instead of
+      // being inherited into the backend log.
+      assert(err2.error.details?.includes("exiting before handshake"));
 
       const status = mcpServerStatus("failing");
       assertEquals(status.state, "error");

@@ -1,3 +1,4 @@
+import { Writable } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -57,6 +58,9 @@ export interface McpCallResult {
   is_error: boolean;
 }
 
+const STDERR_TAIL_MAX = 4096;
+const STDERR_DECODER = new TextDecoder();
+
 interface McpConnection {
   client: Client | null;
   state: McpConnectionState;
@@ -64,6 +68,8 @@ interface McpConnection {
   tools: McpToolInfo[];
   toolsFetchedAt: number | null;
   chain: Promise<unknown>;
+  /** Last 4 KiB of the current stdio child's stderr (diagnostics only). */
+  stderrTail: string;
 }
 
 const connections = new Map<string, McpConnection>();
@@ -78,10 +84,23 @@ function getConn(serverId: string): McpConnection {
       tools: [],
       toolsFetchedAt: null,
       chain: Promise.resolve(),
+      stderrTail: "",
     };
     connections.set(serverId, conn);
   }
   return conn;
+}
+
+/** Consumes a stdio child's stderr (so the pipe never backpressures the
+ *  child) without forwarding it to the backend log; only the last
+ *  STDERR_TAIL_MAX bytes are kept for connect-failure diagnostics. */
+function makeStderrSink(conn: McpConnection): Writable {
+  return new Writable({
+    write(chunk: Uint8Array, _encoding: BufferEncoding, callback: () => void) {
+      conn.stderrTail = (conn.stderrTail + STDERR_DECODER.decode(chunk)).slice(-STDERR_TAIL_MAX);
+      callback();
+    },
+  });
 }
 
 export function qualifiedToolName(serverId: string, tool: string): string {
@@ -115,19 +134,23 @@ function shortMessage(err: unknown): string {
 }
 
 /** Map a transport/protocol failure to the API error contract: 504 when the
- *  server did not answer in time, 502 when it is unreachable or misbehaving. */
-export function mapMcpError(err: unknown, context: string): AppError {
+ *  server did not answer in time, 502 when it is unreachable or misbehaving.
+ *  `stderrTail` (stdio children) is included so a dead-on-arrival server is
+ *  debuggable without console access. */
+export function mapMcpError(err: unknown, context: string, stderrTail?: string): AppError {
   if (err instanceof AppError) return err;
+  const errorText = shortMessage(err);
+  const details = stderrTail ? `${errorText} | stderr: ${stderrTail}` : errorText;
   if (isMcpTimeoutError(err) || /timed? ?out/i.test(shortMessage(err))) {
     return new AppError(ERROR_CODES.MCP_TIMEOUT, `${context}: timed out`, {
       status: 504,
-      details: shortMessage(err),
+      details,
     });
   }
   return new AppError(
     ERROR_CODES.MCP_UNREACHABLE,
-    `${context}: ${shortMessage(err)}`,
-    { status: 502, details: shortMessage(err) },
+    `${context}: ${errorText}`,
+    { status: 502, details },
   );
 }
 
@@ -156,13 +179,15 @@ async function connectToServer(row: McpServerRow): Promise<Client> {
       }
     }
     if (!row.command) throw notFound(`MCP server '${row.id}' has no command`);
+    const conn = getConn(row.id);
+    conn.stderrTail = "";
     transport = new StdioClientTransport({
       command: row.command,
       args,
       env: { ...Deno.env.toObject(), ...env },
-      // The child's stderr flows into the backend log (no backpressure);
-      // 'pipe' would buffer it and eventually block a chatty server.
-      stderr: "inherit",
+      // Consumed (not inherited) so a chatty child can never flood the
+      // backend log; the last 4 KiB is kept for connect-failure diagnostics.
+      stderr: makeStderrSink(conn),
     });
   } else {
     if (!row.url) throw notFound(`MCP server '${row.id}' has no url`);
@@ -215,7 +240,7 @@ function withClient(
       } catch (err) {
         conn.state = "error";
         conn.last_error = shortMessage(err);
-        throw mapMcpError(err, `connect to MCP server '${row.id}'`);
+        throw mapMcpError(err, `connect to MCP server '${row.id}'`, conn.stderrTail);
       }
     }
     try {
@@ -370,15 +395,16 @@ export async function mcpCallTool(
   return convertCallResult(result);
 }
 
-/** Close one server's connection (config changed / server deleted). */
-export function mcpCloseConnection(serverId: string): void {
+/** Close one server's connection (config changed / server deleted), waiting
+ *  for the transport close so no in-flight request outlives the response. */
+export async function mcpCloseConnection(serverId: string): Promise<void> {
   const conn = connections.get(serverId);
   if (!conn) return;
-  void resetConn(conn);
   conn.state = "idle";
   conn.last_error = null;
   conn.tools = [];
   conn.toolsFetchedAt = null;
+  await resetConn(conn);
 }
 
 /** Close every connection (process shutdown) with a bounded wait. */

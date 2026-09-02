@@ -78,16 +78,16 @@ async function handlePatch(ctx: Context): Promise<void> {
   const id = requireIdParam(ctx);
   const body = await readJsonBody(ctx);
   const { view, transportChanged } = patchMcpServer(id, body as McpServerPatchRequest);
-  if (transportChanged) mcpCloseConnection(view.id);
+  if (transportChanged) await mcpCloseConnection(view.id);
   logAudit(userId, "mcp.server_update", "mcp_server", view.id);
   ctx.response.body = { ...view, status: mcpServerStatus(view.id) };
 }
 
-function handleDelete(ctx: Context): void {
+async function handleDelete(ctx: Context): Promise<void> {
   const userId = requireAdmin(ctx);
   const id = requireIdParam(ctx);
   if (!deleteMcpServer(id)) throw notFound(`Unknown MCP server '${id}'`);
-  mcpCloseConnection(id);
+  await mcpCloseConnection(id);
   logAudit(userId, "mcp.server_delete", "mcp_server", id);
   ctx.response.status = 204;
 }
