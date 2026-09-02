@@ -609,6 +609,29 @@ describe("llm api", () => {
       });
     });
 
+    it("extend_script: revises an existing screenplay, composing the extend prompt", async () => {
+      await withServer(async (base) => {
+        baseUrl = base;
+        await setLlmEndpoint();
+        state.reply = "INT. DOCKS - DAWN\n\nThe crew revises the plan.";
+        const context =
+          "INT. DOCKS - NIGHT\n\nA crew plans a heist.\n\nPlease continue this with a dawn scene.";
+        const res = await post("/api/v1/llm/assist", {
+          purpose: "extend_script",
+          context,
+        }, adminToken);
+        assertEquals(res.status, 200);
+        const body = (await res.json()) as { purpose: string; content: string };
+        assertEquals(body.purpose, "extend_script");
+        assertEquals(body.content, "INT. DOCKS - DAWN\n\nThe crew revises the plan.");
+        const system = lastSystemPrompt();
+        assert(system.includes("Fountain-lite"));
+        assert(system.includes("existing"));
+        const messages = state.lastBody?.messages as Array<{ content: string }>;
+        assertEquals(messages[1].content, context);
+      });
+    });
+
     it("design_scene: fixed answer shape in the system prompt", async () => {
       await withServer(async (base) => {
         baseUrl = base;

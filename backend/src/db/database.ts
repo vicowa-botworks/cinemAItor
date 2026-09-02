@@ -65,6 +65,7 @@ const ALL_TABLES = [
   "skill_versions",
   "skill_runs",
   "workflows",
+  "movie_scripts",
 ];
 
 export function resetDb(): void {

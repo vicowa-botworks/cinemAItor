@@ -8,6 +8,11 @@ export const ASSIST_PURPOSES = {
     contextLabel: "Movie idea",
     placeholder: "Describe your movie idea: logline, tone, setting, characters…",
   },
+  extend_script: {
+    label: "Extend script",
+    contextLabel: "Current script + instruction",
+    placeholder: "Paste your current screenplay, then say what to add or change…",
+  },
   design_scene: {
     label: "Design scene",
     contextLabel: "Scene brief",

@@ -18,6 +18,8 @@ import "./components/job-monitor.js";
 import "./components/skills-list.js";
 import "./components/storyboard-list.js";
 import "./components/storyboard-detail.js";
+import "./components/script-list.js";
+import "./components/script-detail.js";
 import "./components/scene-list.js";
 import "./components/scene-detail.js";
 import "./components/review-board.js";
@@ -284,6 +286,22 @@ export class AppRoot extends LitElement {
         return;
       }
       this.currentView = "storyboards";
+    } else if (hash.startsWith("#/script/")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "script-detail";
+      const match = hash.match(/^#\/script\/([^/?]+)/);
+      if (match) {
+        this.viewParams.id = decodeURIComponent(match[1]);
+      }
+    } else if (hash.startsWith("#/scripts")) {
+      if (!this.loggedIn) {
+        window.location.hash = "#/login";
+        return;
+      }
+      this.currentView = "scripts";
     } else if (hash.startsWith("#/scene/")) {
       if (!this.loggedIn) {
         window.location.hash = "#/login";
@@ -436,6 +454,10 @@ export class AppRoot extends LitElement {
         return html`
           <storyboard-detail .boardId=${this.viewParams.id}></storyboard-detail>
         `;
+      case "scripts":
+        return html`<script-list></script-list>`;
+      case "script-detail":
+        return html`<script-detail></script-detail>`;
       case "scenes":
         return html`<scene-list></scene-list>`;
       case "scene-detail":

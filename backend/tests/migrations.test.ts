@@ -55,6 +55,7 @@ describe("migrations", () => {
         "diagnostics",
         "backups",
         "workflows",
+        "movie_scripts",
       ]
     ) {
       assert(tables.includes(expected), `expected table ${expected} to exist`);
@@ -93,6 +94,7 @@ describe("migrations", () => {
         "0025_llm_conversations.sql",
         "0026_model_agent_auto_approve.sql",
         "0027_workflows.sql",
+        "0028_movie_scripts.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -125,12 +127,13 @@ describe("migrations", () => {
         "0025_llm_conversations.sql",
         "0026_model_agent_auto_approve.sql",
         "0027_workflows.sql",
+        "0028_movie_scripts.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        27,
+        28,
       );
     } finally {
       db.close();
@@ -169,6 +172,7 @@ describe("migrations", () => {
       "0025_llm_conversations.sql",
       "0026_model_agent_auto_approve.sql",
       "0027_workflows.sql",
+      "0028_movie_scripts.sql",
     ]);
   });
 

@@ -3,6 +3,7 @@ import { css, html, LitElement } from "lit";
 const NAV_ROUTES = {
   "/projects": ["/projects", "/project/"],
   "/assets": ["/assets", "/asset/"],
+  "/scripts": ["/scripts", "/script/"],
   "/storyboards": ["/storyboards", "/storyboard/"],
   "/scenes": ["/scenes", "/scene/", "/review/"],
   "/prompts": ["/prompts"],
@@ -218,6 +219,7 @@ export class AppSidebar extends LitElement {
             ? html`
               <a href="#/projects" class="${this._isActive("/projects")}">Projects</a>
               <a href="#/assets" class="${this._isActive("/assets")}">Assets</a>
+              <a href="#/scripts" class="${this._isActive("/scripts")}">Scripts</a>
               <a href="#/storyboards" class="${this._isActive("/storyboards")}">Storyboards</a>
               <a href="#/scenes" class="${this._isActive("/scenes")}">Scenes</a>
               <a href="#/prompts" class="${this._isActive("/prompts")}">Prompts</a>

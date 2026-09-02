@@ -966,6 +966,54 @@ class ApiClient {
     );
   }
 
+  // --- v1 movie scripts (versioned Fountain-lite screenplays) ---
+
+  listScripts(filter = {}) {
+    return this.request(`/scripts${this._query(filter)}`);
+  }
+
+  createScript(data) {
+    return this.request("/scripts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  getScript(id) {
+    return this.request(`/scripts/${encodeURIComponent(id)}`);
+  }
+
+  updateScript(id, data) {
+    return this.request(`/scripts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteScript(id) {
+    return this.request(`/scripts/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  saveScriptVersion(id, content) {
+    return this.request(`/scripts/${encodeURIComponent(id)}/versions`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  listScriptVersions(id) {
+    return this.request(`/scripts/${encodeURIComponent(id)}/versions`);
+  }
+
+  restoreScriptVersion(id, versionId) {
+    return this.request(
+      `/scripts/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/restore`,
+      { method: "POST" },
+    );
+  }
+
   listScenes(filter = {}) {
     return this.request(`/scenes${this._query(filter)}`);
   }
