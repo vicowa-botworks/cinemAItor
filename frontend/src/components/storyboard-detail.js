@@ -2,6 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
 import { VramGuard } from "./vram-guard.js";
+import { reconcilePreviews } from "./preview-reconcile.js";
 
 const POLL_MS = 5000;
 const PANEL_FIELDS = [
@@ -685,9 +686,14 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     this.error = "";
     try {
       const { storyboard, panels } = await api.getStoryboard(this._boardId);
-      this._replacePreviews();
+      // Assign the fresh panels BEFORE _replacePreviews: it reads this.panels to
+      // decide which panels want a preview. Doing it afterwards made the decision
+      // one fetch stale, so the poll that first carries preview_asset_version_id
+      // (and flips the panel to preview_ready, stopping the poll loop) never
+      // fetched the image — the panel stayed "no preview yet".
       this.board = storyboard;
       this.panels = panels;
+      this._replacePreviews();
     } catch (err) {
       this.error = err.message || "Failed to load storyboard.";
     } finally {
@@ -697,20 +703,12 @@ export class StoryboardDetail extends VramGuard(LitElement) {
   }
 
   _replacePreviews() {
-    const wanted = new Set();
-    for (const panel of this.panels) {
-      if (panel.preview_asset_version_id) {
-        wanted.add(panel.id);
-      }
-    }
-    const old = this.previewUrls;
-    this.previewUrls = new Map();
-    for (const [panelId, entry] of old.entries()) {
-      if (!wanted.has(panelId) && entry.url) URL.revokeObjectURL(entry.url);
-    }
-    for (const panelId of wanted) {
-      this._fetchPreview(panelId);
-    }
+    // Plan the reconciliation from the (fresh) panels; keep/fetch/revoke is
+    // pure + unit-tested in preview-reconcile.js.
+    const { keep, fetch, revoke } = reconcilePreviews(this.panels, this.previewUrls);
+    for (const url of revoke) URL.revokeObjectURL(url);
+    this.previewUrls = keep;
+    for (const panelId of fetch) this._fetchPreview(panelId);
   }
 
   async _fetchPreview(panelId) {
@@ -742,6 +740,7 @@ export class StoryboardDetail extends VramGuard(LitElement) {
       url: media.url,
       type: media.type,
       assetId,
+      versionId: panel.preview_asset_version_id,
     }));
   }
 
