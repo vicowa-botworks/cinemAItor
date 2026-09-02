@@ -129,8 +129,12 @@ app-root (main router)
 │   │              admin-gated registration form + install/enable/remove + inline task-type
 │   │              editor (PATCH task_types on an existing model) + per-model
 │   │              default_settings JSON editor (PATCH default_settings),
-│   │              LLM assistant settings panel + connection test (docs/llm.md),
-│   │              HuggingFace browse/search → register panel (recursive file listing incl.
+ │   │              LLM assistant settings panel + connection test (docs/llm.md),
+ │   │              MCP Servers panel (admin: rows + status chips, add/edit form per
+ │   │              transport, test connection, enable toggle, delete via confirm-dialog,
+ │   │              expandable tool list; docs/mcp.md) + `MCP: <server>` badges on
+ │   │              copilot steps/proposals for qualified mcp__ tools,
+ │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
  │   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
   │   │              with approve/reject proposal cards; approving a mutating proposal refreshes
@@ -472,9 +476,17 @@ server.ts (entry point)
   │   │   python path), update_model (fix settings/task types on an existing row) —
   │   │   the system prompt carries a setup playbook (script → venv → settings with
   │   │   venv python + absolute script path + hardware-matched device); everything
-  │   │   written lives in the model's own storage dir and dies with it
-  │   │   (services/model_runtime.ts)
-  │   └── (see docs/llm.md)
+   │   │   written lives in the model's own storage dir and dies with it
+   │   │   (services/model_runtime.ts)
+   │   └── (see docs/llm.md)
+  ├── MCP routes (/api/v1/mcp/*, auth middleware, admin-only)
+  │   ├── Registry CRUD (mcp_servers: stdio = spawned command/args/env, no shell;
+  │   │   http = Streamable HTTP endpoint + optional headers) — header/env secrets are
+  │   │   never returned by views (names + set flags only)
+  │   ├── POST /:id/test (connection test → discovered tools), GET /:id/tools
+  │   │   (current catalog; 502 MCP_UNREACHABLE / 504 MCP_TIMEOUT when the server
+  │   │   is down or silent)
+  │   └── (see docs/mcp.md)
   ├── OpenAPI routes (public; generated API documentation — see docs/openapi.md)
   │   ├── GET /api/v1/openapi.json (the generated OpenAPI 3.1 document)
   │   └── GET /api/v1/docs (Swagger UI)
@@ -510,6 +522,8 @@ server.ts (entry point)
   expands placeholders and enqueues one generation job per step (see `docs/skills.md`)
 - `email_tokens.ts` + `invitations.ts`: single-use email tokens (SHA-256-stored, per-kind
   revocation) and admin invitation links (see `docs/email.md`)
+- `mcp.ts`: MCP tool server registry (Workstream 17) — create/patch/list/delete with per-transport
+  field validation + secret masking (see `docs/mcp.md`)
 
 ### Storage layer:
 
