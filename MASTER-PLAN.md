@@ -1563,8 +1563,9 @@ Scope:
   per-server reconnect, cached tool catalog, serialized calls, per-call timeouts, process cleanup on
   shutdown (no orphaned stdio children)
 - Agent integration: MCP tools join the copilot tool set as `mcp__<server>__<tool>`; tools the
-  server declares `readOnlyHint` (or any tool on an `auto_approve` server) auto-execute, all others
-  become admin approval proposals; non-admins see only read-only MCP tools
+  server declares `readOnlyHint` execute inline, tools on an `auto_approve` server are proposed and
+  executed in-loop (the model-scoped auto-approval path), all others become admin approval
+  proposals; non-admins see only read-only MCP tools
 - UI: "MCP Servers" panel on the Models page (admin CRUD, connection test, per-server tool list,
   status chips) + `MCP: <server>` badges on copilot steps/proposals
 
@@ -2283,15 +2284,15 @@ Post-MVP, JSON/YAML first.
 
 ## 11.20 MCP Tool Servers (Workstream 17)
 
-| ID      | Feature             | Acceptance criteria                                                                                                                                                                                             |
-| ------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MCP-001 | Server registry     | Admin CRUD of MCP servers (stdio: command/args/env; http: url/headers) validates transport-specific fields, name slug uniqueness, and 5-3600 s timeouts; GET views mask stored header values                    |
-| MCP-002 | Connection test     | `POST /api/v1/mcp/servers/:id/test` connects, lists the server's tools, and returns them; failures map to 502 `MCP_UNREACHABLE` (spawn/HTTP/protocol) or 504 `MCP_TIMEOUT`                                      |
-| MCP-003 | Tool catalog        | Enabled servers' tools join the copilot tool set as `mcp__<server>__<tool>` with pass-through JSON schemas; a failing server is isolated (others still available, error surfaced in the UI)                     |
-| MCP-004 | Read-only execution | MCP tools with `readOnlyHint` (or on an `auto_approve` server) auto-execute inline in the agent loop like built-in read-only tools                                                                              |
-| MCP-005 | Approval gating     | Non-read-only MCP tools create admin approval proposals (dedupe, in-flight, auto-continue unchanged); non-admin callers do not receive them in the tool schema                                                  |
-| MCP-006 | Lifecycle           | Disable/delete closes the live connection; SIGTERM/SIGINT close all MCP connections (no orphaned stdio children); the next use reconnects transparently                                                         |
-| MCP-007 | MCP Servers UI      | Models page panel (admin): server rows with status chips, add/edit form, test button (save-then-test), tool list with read-only chips; copilot steps/proposals for `mcp__…` tools show an `MCP: <server>` badge |
+| ID      | Feature             | Acceptance criteria                                                                                                                                                                                                                     |
+| ------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP-001 | Server registry     | Admin CRUD of MCP servers (stdio: command/args/env; http: url/headers) validates transport-specific fields, name slug uniqueness, and 5-3600 s timeouts; GET views mask stored header values                                            |
+| MCP-002 | Connection test     | `POST /api/v1/mcp/servers/:id/test` connects, lists the server's tools, and returns them; failures map to 502 `MCP_UNREACHABLE` (spawn/HTTP/protocol) or 504 `MCP_TIMEOUT`                                                              |
+| MCP-003 | Tool catalog        | Enabled servers' tools join the copilot tool set as `mcp__<server>__<tool>` with pass-through JSON schemas; a failing server is isolated (others still available, error surfaced in the UI)                                             |
+| MCP-004 | Read-only execution | MCP tools with `readOnlyHint` execute inline in the agent loop like built-in read-only tools; tools on an `auto_approve` server are proposed and executed in-loop (step `auto-approved (mcp:<server>) — …`, approved proposal reported) |
+| MCP-005 | Approval gating     | MCP tools without `readOnlyHint` create admin approval proposals (dedupe, in-flight, auto-continue unchanged); non-admin callers do not receive any non-read-only MCP tool in the tool schema                                           |
+| MCP-006 | Lifecycle           | Disable/delete closes the live connection; SIGTERM/SIGINT close all MCP connections (no orphaned stdio children); the next use reconnects transparently                                                                                 |
+| MCP-007 | MCP Servers UI      | Models page panel (admin): server rows with status chips, add/edit form, test button (save-then-test), tool list with read-only chips; copilot steps/proposals for `mcp__…` tools show an `MCP: <server>` badge                         |
 
 ---
 
@@ -3951,11 +3952,15 @@ runs from new SIGTERM/SIGINT handlers in `server.ts`; delete/disable close immed
 
 ## 38.5 Agent integration (`services/llm_agent.ts`)
 
-- `agentToolDefs(isAdmin)` = built-in tools + MCP catalog (skipping failed servers).
-- Classification mirrors the built-in split: **auto-execute** when the server has `auto_approve` or
-  the tool's annotations carry `readOnlyHint: true`; otherwise **mutating** → approval proposal
-  (dedupe, in-flight single-flight, auto-continue follow-ups: all unchanged). Non-admins only see
-  auto-executing MCP tools in the schema, like built-in mutating tools.
+- `runAgent` builds the tool set as `agentToolDefs(isAdmin)` + `mcpToolDefs(mcpAgentTools(isAdmin))`
+  (qualified names, pass-through schemas; one catalog fetch per turn shared with the system prompt
+  via the 60 s TTL cache; failed servers contribute no tools).
+- Classification is three-state: **read-only** (the tool's annotations carry `readOnlyHint: true`) →
+  executes inline; **auto-approval** (the server has `auto_approve`) → proposal created and executed
+  in-loop through the single-flight approval path (`auto_approved` conversation event, failed calls
+  leave the proposal pending); **mutating** → approval proposal (dedupe, in-flight single-flight,
+  auto-continue follow-ups: all unchanged). Non-admins only see read-only MCP tools in the schema,
+  like built-in mutating tools.
 - `AgentProposal.tool` generalizes from the closed `AgentToolName` union to `string` (`mcp__…` names
   included); proposal storage, TTL, and the OpenAPI `LlmProposal.tool` enum (relaxed to an open
   string) adjust accordingly.

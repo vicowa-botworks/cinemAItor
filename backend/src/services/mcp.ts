@@ -47,7 +47,7 @@ export interface McpServerStatus {
 }
 
 export interface McpCatalogEntry {
-  server: { id: string; name: string };
+  server: { id: string; name: string; auto_approve: boolean };
   state: McpConnectionState;
   last_error: string | null;
   tools: McpToolInfo[];
@@ -355,7 +355,7 @@ export async function mcpCatalog(): Promise<McpCatalogEntry[]> {
       }
     }
     return {
-      server: { id: view.id, name: view.name },
+      server: { id: view.id, name: view.name, auto_approve: view.auto_approve },
       state,
       last_error: lastError,
       tools,

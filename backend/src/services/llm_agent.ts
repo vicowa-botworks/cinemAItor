@@ -32,6 +32,7 @@ import {
 } from "./model_smoke.ts";
 import { listModelFiles, setupModelVenv, writeModelFile } from "./model_runtime.ts";
 import { chatLlm, type LlmMessage, type LlmToolCall, type LlmToolDef } from "./llm_client.ts";
+import { mcpCallTool, mcpCatalog, parseQualifiedToolName } from "./mcp.ts";
 
 /** Max mutating/read tool round-trips per agent turn. Each iteration is one
  * LLM call, so this bounds both the cost and the wall time of a turn. The
@@ -370,12 +371,75 @@ export function isMutatingAgentTool(name: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// MCP tool integration (Workstream 17): external MCP servers' tools join the
+// copilot tool set as mcp__<server>__<tool>, with the server's JSON Schema
+// passed through unchanged.
+// ---------------------------------------------------------------------------
+
+/** How an MCP tool is gated in the agent loop: read_only auto-executes;
+ * auto_approve (a tool on an auto-approve server) executes in-loop after a
+ * proposal is created; mutating awaits manual approval. */
+export type McpToolGating = "read_only" | "auto_approve" | "mutating";
+
+export interface McpToolEntry {
+  /** Qualified tool name exposed to the LLM: mcp__<server>__<tool>. */
+  name: string;
+  serverId: string;
+  /** The raw tool name as declared by the MCP server. */
+  tool: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  gating: McpToolGating;
+}
+
+/**
+ * Live MCP tool entries for the agent, filtered by role: non-admins only get
+ * read-only tools (side effects need the admin role, mirroring the built-in
+ * tool split). A server that is unreachable or exposes no tools simply
+ * contributes none — the copilot keeps working with what is reachable.
+ */
+export async function mcpAgentTools(isAdmin: boolean): Promise<McpToolEntry[]> {
+  const catalog = await mcpCatalog();
+  const entries: McpToolEntry[] = [];
+  for (const entry of catalog) {
+    for (const tool of entry.tools) {
+      entries.push({
+        name: tool.name,
+        serverId: entry.server.id,
+        tool: tool.tool,
+        description: tool.description,
+        inputSchema: tool.input_schema,
+        gating: tool.read_only_hint
+          ? "read_only"
+          : entry.server.auto_approve
+          ? "auto_approve"
+          : "mutating",
+      });
+    }
+  }
+  return isAdmin ? entries : entries.filter((entry) => entry.gating === "read_only");
+}
+
+/** MCP tool entries in OpenAI function-calling form (schema passthrough). */
+export function mcpToolDefs(entries: McpToolEntry[]): LlmToolDef[] {
+  return entries.map((entry) => ({
+    type: "function",
+    function: {
+      name: entry.name,
+      description: entry.description,
+      parameters: entry.inputSchema,
+    },
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Proposals (in-memory, 1 h TTL, never persisted)
 // ---------------------------------------------------------------------------
 
 export interface AgentProposal {
   id: string;
-  tool: AgentToolName;
+  /** Built-in tool name or a qualified MCP tool name (mcp__<server>__<tool>). */
+  tool: string;
   args: Record<string, unknown>;
   status: "pending" | "approved" | "rejected";
   created_at: string;
@@ -431,12 +495,12 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function proposalArgsKey(tool: AgentToolName, args: Record<string, unknown>): string {
+function proposalArgsKey(tool: string, args: Record<string, unknown>): string {
   return `${tool}\u0000${JSON.stringify(canonicalize(args))}`;
 }
 
 export function createProposal(
-  tool: AgentToolName,
+  tool: string,
   args: Record<string, unknown>,
   userId: number,
   conversationId?: string,
@@ -696,6 +760,19 @@ export async function runTool(
   args: Record<string, unknown>,
   ctx: ToolContext,
 ): Promise<unknown> {
+  if (parseQualifiedToolName(name)) {
+    // MCP tool: transport failures throw (MCP_UNREACHABLE/MCP_TIMEOUT) and a
+    // tool-level isError is treated as an execution failure, so an approved
+    // proposal whose tool call errored stays pending for a manual retry.
+    const result = await mcpCallTool(name, args);
+    if (result.is_error) {
+      const text = typeof result.result === "string"
+        ? result.result
+        : JSON.stringify(result.result);
+      throw badRequest(`MCP tool '${name}' reported an error: ${text}`, name);
+    }
+    return result.result;
+  }
   switch (name) {
     case "list_models": {
       const taskType = argString(args, "task_type");
@@ -981,6 +1058,22 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
     "model to a working state end-to-end: make the change, run_smoke_test it, read the " +
     "error, fix the ROOT CAUSE, and repeat. Non-scoped tools (register_model, install_model, " +
     "remove_model) still need manual approval.";
+  const mcpEntries = await mcpAgentTools(isAdmin);
+  const mcpSection = mcpEntries.length === 0
+    ? ""
+    : "External MCP tool servers are connected; their tools are callable by their qualified names: " +
+      mcpEntries.map((t) =>
+        `${t.name} — ${
+          t.gating === "read_only"
+            ? "read-only, auto-executes"
+            : t.gating === "auto_approve"
+            ? "auto-approved in-loop (its server has auto-approval on)"
+            : "side-effecting, requires the user's approval"
+        }`
+      ).join("; ") +
+      ". Call them exactly like the built-in tools: side-effecting MCP tools create proposals " +
+      "through the same approval flow. Tools of a server that is unreachable or exposes nothing " +
+      "are simply absent from your tool set.";
   return [
     "You are the model copilot of cinemaItor, a local-first AI movie studio.",
     "You help the user choose, register, and install local generation models, and connect runtimes such as ComfyUI.",
@@ -1004,6 +1097,7 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
     "The user approves each proposal AFTER your turn ends — the outcome reaches you as a new message. When it does, continue the plan and propose the next steps; never assume an approval already happened within the current turn. Do not re-propose a pending step with identical arguments — it already awaits the user's decision. But if a pending step is wrong (the user reports an error, or it failed or was rejected), propose the CORRECTED version as a new proposal: a replacement for a broken pending step is expected, not a duplicate. When the user explicitly asks you to create an approval request, call the mutating tool — the pending list below tells you what is already open.",
     pendingSection,
     autoApproveSection,
+    mcpSection,
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
   ].filter((part) => part !== "").join("\n");
 }
@@ -1108,11 +1202,15 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
     // (logAgentTurn only creates it after the turn completes).
     touchConversation(opts.conversationId, opts.userId, opts.isAdmin, historyTitle(history));
   }
+  // Fetch the MCP catalog before the system prompt is built: both use the
+  // same 60 s TTL cache, so exactly one live refresh happens per turn.
+  const mcpEntries = await mcpAgentTools(opts.isAdmin);
+  const mcpByName = new Map(mcpEntries.map((entry) => [entry.name, entry]));
   const messages: LlmMessage[] = [
     { role: "system", content: await copilotSystemPrompt(opts.userId, opts.isAdmin) },
     ...history,
   ];
-  const tools = agentToolDefs(opts.isAdmin);
+  const tools = [...agentToolDefs(opts.isAdmin), ...mcpToolDefs(mcpEntries)];
   const steps: AgentStep[] = [];
   const created: AgentProposal[] = [];
   let reply = "";
@@ -1121,6 +1219,111 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   let lastHadToolCalls = false;
   let budget = AGENT_MAX_TOOL_ITERATIONS;
   let claimNudged = false;
+
+  /** Execute a tool inline (read-only built-ins + read-only MCP tools). */
+  const runToolInline = async (
+    step: AgentStep,
+    call: LlmToolCall,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<void> => {
+    try {
+      const result = await runTool(name, args, { userId: opts.userId, isAdmin: opts.isAdmin });
+      step.status = "ok";
+      step.summary = summarizeStep(name, result);
+      messages.push(toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      step.summary = `Error: ${message}`;
+      messages.push(toolMessage(call, JSON.stringify({ error: message })));
+    }
+  };
+
+  /** Create a proposal for a mutating tool call; when autoReason is set the
+   * proposal executes immediately through the same single-flight path as a
+   * manual approval, so an auto-approving fix loop runs inside this turn.
+   * On failure the proposal stays pending for a manual retry. */
+  const createToolProposal = async (
+    step: AgentStep,
+    call: LlmToolCall,
+    name: string,
+    args: Record<string, unknown>,
+    autoReason: string | undefined,
+  ): Promise<void> => {
+    const { proposal, duplicate } = createProposal(name, args, opts.userId, opts.conversationId);
+    if (duplicate) {
+      // The identical step already awaits the user's decision — do not
+      // stack duplicate cards, and tell the model to stop re-proposing.
+      step.status = "proposal";
+      step.proposal_id = proposal.id;
+      step.summary = `Duplicate — an identical ${name} proposal is already pending`;
+      messages.push(
+        toolMessage(
+          call,
+          JSON.stringify({
+            status: "already_pending",
+            proposal_id: proposal.id,
+            tool: proposal.tool,
+            note:
+              "An identical proposal is already awaiting approval. Do not re-propose it — the user will approve or reject the existing one.",
+          }),
+        ),
+      );
+      return;
+    }
+    created.push(proposal);
+    step.proposal_id = proposal.id;
+    if (!autoReason) {
+      step.status = "proposal";
+      step.summary = "Proposal created — awaiting user approval";
+      messages.push(
+        toolMessage(
+          call,
+          JSON.stringify({
+            status: "pending_approval",
+            proposal_id: proposal.id,
+            tool: proposal.tool,
+          }),
+        ),
+      );
+      return;
+    }
+    try {
+      const { result } = await approveProposal(proposal.id, opts.userId, opts.isAdmin);
+      step.status = "ok";
+      step.summary = `auto-approved (${autoReason}) — ${summarizeStep(name, result)}`;
+      if (opts.conversationId) {
+        // Best-effort: a storage failure must not fail the turn.
+        try {
+          logProposalEvent(
+            opts.conversationId,
+            opts.userId,
+            opts.isAdmin,
+            proposal.id,
+            "auto_approved",
+          );
+        } catch (err) {
+          console.warn("[llm_agent] failed to log auto-approval event:", err);
+        }
+      }
+      messages.push(toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      step.status = "error";
+      step.summary = `auto-approval failed: ${message}`;
+      messages.push(
+        toolMessage(
+          call,
+          JSON.stringify({
+            error: message,
+            proposal_id: proposal.id,
+            status: "auto_approval_failed",
+            note: "The proposal is still pending; the user can approve it manually.",
+          }),
+        ),
+      );
+    }
+  };
 
   for (let i = 0; i < budget; i++) {
     iterations++;
@@ -1167,117 +1370,38 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         args = {};
       }
       const step: AgentStep = { tool: name, args, status: "error", summary: "" };
-
-      if (!AGENT_TOOL_DEFS.some((t) => t.function.name === name)) {
+      const mcpEntry = mcpByName.get(name);
+      if (mcpEntry && mcpEntry.gating === "read_only") {
+        await runToolInline(step, call, name, args);
+      } else if (mcpEntry && !opts.isAdmin) {
+        // The non-admin tool set excludes these, but a tool name from an
+        // earlier turn can still arrive via the replayed history.
+        step.summary = "MCP tools with side effects require the admin role";
+        messages.push(toolMessage(call, JSON.stringify({ error: step.summary })));
+      } else if (mcpEntry) {
+        await createToolProposal(
+          step,
+          call,
+          name,
+          args,
+          mcpEntry.gating === "auto_approve" ? `mcp:${mcpEntry.serverId}` : undefined,
+        );
+      } else if (!AGENT_TOOL_DEFS.some((t) => t.function.name === name)) {
         step.summary = `Unknown tool '${name}'`;
         messages.push(toolMessage(call, JSON.stringify({ error: step.summary })));
       } else if (isMutatingAgentTool(name) && !opts.isAdmin) {
         step.summary = "Mutating tools require the admin role";
         messages.push(toolMessage(call, JSON.stringify({ error: step.summary })));
       } else if (isMutatingAgentTool(name)) {
-        const { proposal, duplicate } = createProposal(
-          name as AgentToolName,
+        await createToolProposal(
+          step,
+          call,
+          name,
           args,
-          opts.userId,
-          opts.conversationId,
+          autoApproveModelFor(name, args)?.id,
         );
-        if (duplicate) {
-          // The identical step already awaits the user's decision — do not
-          // stack duplicate cards, and tell the model to stop re-proposing.
-          step.status = "proposal";
-          step.proposal_id = proposal.id;
-          step.summary = `Duplicate — an identical ${name} proposal is already pending`;
-          messages.push(
-            toolMessage(
-              call,
-              JSON.stringify({
-                status: "already_pending",
-                proposal_id: proposal.id,
-                tool: proposal.tool,
-                note:
-                  "An identical proposal is already awaiting approval. Do not re-propose it — the user will approve or reject the existing one.",
-              }),
-            ),
-          );
-        } else {
-          created.push(proposal);
-          step.proposal_id = proposal.id;
-          // Model-scoped proposals under a model's agent_auto_approve flag
-          // execute immediately through the same single-flight path as a
-          // manual approval, so the fix loop (change -> smoke test -> fix ->
-          // ...) runs inside this turn. On failure the proposal stays pending
-          // for a manual retry.
-          const autoModel = autoApproveModelFor(name, args);
-          if (autoModel) {
-            try {
-              const { result } = await approveProposal(
-                proposal.id,
-                opts.userId,
-                opts.isAdmin,
-              );
-              step.status = "ok";
-              step.summary = `auto-approved (${autoModel.id}) — ${summarizeStep(name, result)}`;
-              if (opts.conversationId) {
-                // Best-effort: a storage failure must not fail the turn.
-                try {
-                  logProposalEvent(
-                    opts.conversationId,
-                    opts.userId,
-                    opts.isAdmin,
-                    proposal.id,
-                    "auto_approved",
-                  );
-                } catch (err) {
-                  console.warn("[llm_agent] failed to log auto-approval event:", err);
-                }
-              }
-              messages.push(
-                toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)),
-              );
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              step.status = "error";
-              step.summary = `auto-approval failed: ${message}`;
-              messages.push(
-                toolMessage(
-                  call,
-                  JSON.stringify({
-                    error: message,
-                    proposal_id: proposal.id,
-                    status: "auto_approval_failed",
-                    note: "The proposal is still pending; the user can approve it manually.",
-                  }),
-                ),
-              );
-            }
-          } else {
-            step.status = "proposal";
-            step.summary = "Proposal created — awaiting user approval";
-            messages.push(
-              toolMessage(
-                call,
-                JSON.stringify({
-                  status: "pending_approval",
-                  proposal_id: proposal.id,
-                  tool: proposal.tool,
-                }),
-              ),
-            );
-          }
-        }
       } else {
-        try {
-          const result = await runTool(name, args, { userId: opts.userId, isAdmin: opts.isAdmin });
-          step.status = "ok";
-          step.summary = summarizeStep(name, result);
-          messages.push(
-            toolMessage(call, JSON.stringify(result).slice(0, TOOL_RESULT_MAX_CHARS)),
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          step.summary = `Error: ${message}`;
-          messages.push(toolMessage(call, JSON.stringify({ error: message })));
-        }
+        await runToolInline(step, call, name, args);
       }
       steps.push(step);
     }

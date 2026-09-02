@@ -228,6 +228,22 @@ button on such replies as a second safety net.
   immediately — the run is asynchronous in the job queue (hours on CPU); 400 when a benchmark for
   the model is already queued/running.
 
+**MCP tools (external servers):** Connected MCP servers' tools (see `docs/mcp.md`) join the tool set
+under their qualified names `mcp__<server>__<tool>`, with the server-declared JSON Schema passed
+through unchanged. Gating per tool:
+
+- the server marks `readOnlyHint` → **read-only**, auto-executes like the built-in read-only tools
+- the server has `auto_approve` on (registry toggle) → a proposal is created and **executed
+  in-loop** through the same single-flight path as model-scoped auto-approval (step summary:
+  `auto-approved (mcp:<server>) — …`)
+- otherwise → a regular **proposal** awaiting manual approval
+
+Non-admins only receive MCP tools the server marks read-only — exactly the built-in split. The
+system prompt lists the connected MCP tools with their gating. A server that is unreachable or
+exposes no tools simply contributes none (the copilot keeps working with the rest); a timed-out or
+failed **call** surfaces as an `error` step. Approval of a proposal whose MCP tool answers `isError`
+fails like any failed tool execution: the proposal stays `pending` for a manual retry.
+
 When the model calls a mutating tool, the harness creates a **proposal**
 (`{id, tool, args, status, created_at, expires_at, user_id, in_flight?, started_at?}` — in-memory, 1
 h TTL, never persisted) and appends a tool message telling the model the action awaits user

@@ -30,6 +30,7 @@ import {
   resetProposals,
   validateAgentHistory,
 } from "../src/services/llm_agent.ts";
+import { mcpCloseAll } from "../src/services/mcp.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
 // Scripted fake LLM: each call pops the next response (tool call or final
@@ -1679,6 +1680,230 @@ describe("llm agent claim-verification nudge", () => {
       assertMatch(body.reply, /not installed/);
       // Two LLM calls: the claimed turn + one nudge pass. No loop.
       assertEquals(llm.requests.length, 2);
+    });
+  });
+});
+
+describe("llm agent mcp tools", () => {
+  const FAKE_MCP_SERVER = new URL("./mcp_fake/server.mjs", import.meta.url).pathname;
+
+  /** Registers the fake MCP stdio server (admin); returns its id slug. */
+  async function registerMcpServer(
+    name: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<string> {
+    const res = await post("/api/v1/mcp/servers", {
+      name,
+      transport: "stdio",
+      command: Deno.execPath(),
+      args: ["run", "--quiet", "--no-check", FAKE_MCP_SERVER],
+      ...extra,
+    }, adminToken);
+    assertEquals(res.status, 201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  async function runTurn(
+    history: Array<{ role: "user" | "assistant"; content: string }>,
+    token = adminToken,
+  ): Promise<{
+    reply: string;
+    steps: Array<{ tool: string; status: string; summary: string; proposal_id?: string }>;
+    proposals: Array<{ id: string; tool: string; status: string }>;
+  }> {
+    const res = await post("/api/v1/llm/agent", { history }, token);
+    assertEquals(res.status, 200);
+    return (await res.json()) as {
+      reply: string;
+      steps: Array<{ tool: string; status: string; summary: string; proposal_id?: string }>;
+      proposals: Array<{ id: string; tool: string; status: string }>;
+    };
+  }
+
+  function systemPromptOf(index: number): string {
+    const messages = llm.requests[index].messages as Array<{ role: string; content: string }>;
+    return messages.find((m) => m.role === "system")?.content ?? "";
+  }
+
+  beforeEach(async () => {
+    script = [];
+    llm = startScriptedLlm();
+    freshMemoryDb();
+    resetProposals();
+    await withServer(async (base) => {
+      baseUrl = base;
+      const health = await fetchWithRetry(`${base}/api/v1/health`);
+      assertEquals(health.status, 200);
+      const res = await post("/api/v1/auth/bootstrap", {
+        email: `admin.${Math.random().toString(36).slice(2)}@example.com`,
+        password: "password123",
+        display_name: "Studio Admin",
+      });
+      assertEquals(res.status, 201);
+      adminToken = ((await res.json()) as { token: string }).token;
+      await setLlmEndpoint(llm.url);
+    });
+  });
+
+  afterEach(async () => {
+    await mcpCloseAll();
+    llm.shutdown();
+    closeDb();
+  });
+
+  it("read-only MCP tools auto-execute in-loop", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerMcpServer("Mcp Reader");
+      script = [
+        { toolCalls: [{ id: "call_echo", name: `mcp__${id}__echo`, args: { text: "hi" } }] },
+        { content: "Echoed hi." },
+      ];
+      const body = await runTurn([{ role: "user", content: "echo hi" }]);
+      assertEquals(body.steps.length, 1);
+      assertEquals(body.steps[0].status, "ok");
+      assertEquals(body.steps[0].summary, `mcp__${id}__echo: ok`);
+      assertEquals(body.proposals.length, 0);
+      // The tool set carries the server's schema; the system prompt explains
+      // the gating.
+      const names = toolNamesInRequest(0);
+      assertEquals(names.includes(`mcp__${id}__echo`), true);
+      assertEquals(names.includes(`mcp__${id}__boom`), true);
+      assertMatch(systemPromptOf(0), new RegExp(`mcp__${id}__echo — read-only, auto-executes`));
+      // The tool result feeds back into the loop.
+      const secondMessages = llm.requests[1].messages as Array<Record<string, unknown>>;
+      const toolMsg = secondMessages.find((m) => m.role === "tool");
+      assertMatch(String(toolMsg?.content), /echo:hi/);
+    });
+  });
+
+  it("mutating MCP tools create a proposal; approval executes the tool", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerMcpServer("Mcp Writer");
+      script = [
+        { toolCalls: [{ id: "call_boom", name: `mcp__${id}__boom`, args: {} }] },
+        { content: "Ready." },
+      ];
+      const body = await runTurn([{ role: "user", content: "do the operation" }]);
+      assertEquals(body.steps[0].status, "proposal");
+      assertEquals(body.proposals.length, 1);
+      assertEquals(body.proposals[0].tool, `mcp__${id}__boom`);
+
+      const approveRes = await post(
+        `/api/v1/llm/proposals/${body.proposals[0].id}/approve`,
+        {},
+        adminToken,
+      );
+      assertEquals(approveRes.status, 200);
+      const approveBody = (await approveRes.json()) as {
+        proposal: { status: string };
+        result: Record<string, unknown>;
+      };
+      assertEquals(approveBody.proposal.status, "approved");
+      assertMatch(JSON.stringify(approveBody.result), /boom-done/);
+    });
+  });
+
+  it("executes side-effecting MCP tools in-loop on an auto-approve server", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerMcpServer("Mcp Auto", { auto_approve: true });
+      script = [
+        { toolCalls: [{ id: "call_boom", name: `mcp__${id}__boom`, args: {} }] },
+        { content: "done" },
+      ];
+      const body = await runTurn([{ role: "user", content: "run it" }]);
+      assertEquals(body.steps.length, 1);
+      assertEquals(body.steps[0].status, "ok");
+      assertMatch(body.steps[0].summary, new RegExp(`auto-approved \\(mcp:${id}\\)`));
+      // Like built-in auto-approval, the executed proposal is reported (approved).
+      assertEquals(body.proposals.length, 1);
+      assertEquals(body.proposals[0].status, "approved");
+      const secondMessages = llm.requests[1].messages as Array<Record<string, unknown>>;
+      const toolMsg = secondMessages.find((m) => m.role === "tool");
+      assertMatch(String(toolMsg?.content), /boom-done/);
+    });
+  });
+
+  it("non-admins only see read-only MCP tools", async () => {
+    const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
+    createUser(email, await hashPassword("password123"), "Regular User");
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerMcpServer("Mcp Shared");
+      const login = await post("/api/v1/auth/login", { email, password: "password123" });
+      const userToken = ((await login.json()) as { token: string }).token;
+      script = [
+        { toolCalls: [{ id: "call_echo", name: `mcp__${id}__echo`, args: { text: "yo" } }] },
+        { content: "Echoed." },
+      ];
+      const body = await runTurn([{ role: "user", content: "echo yo" }], userToken);
+      const names = toolNamesInRequest(0);
+      assertEquals(names.includes(`mcp__${id}__echo`), true);
+      assertEquals(names.includes(`mcp__${id}__boom`), false);
+      // And the read-only tool works for them.
+      assertEquals(body.steps[0].status, "ok");
+    });
+  });
+
+  it("an unreachable MCP server contributes no tools; the copilot keeps working", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const broken = await registerMcpServer("Mcp Broken", {
+        args: ["run", "--quiet", "--no-check", FAKE_MCP_SERVER, "--fail"],
+      });
+      const healthy = await registerMcpServer("Mcp Healthy");
+      script = [
+        { toolCalls: [{ id: "call_echo", name: `mcp__${healthy}__echo`, args: { text: "ok" } }] },
+        { content: "fine" },
+      ];
+      const body = await runTurn([{ role: "user", content: "echo ok" }]);
+      const names = toolNamesInRequest(0);
+      assertEquals(names.includes(`mcp__${healthy}__echo`), true);
+      assertEquals(names.includes(`mcp__${broken}__echo`), false);
+      assertEquals(body.steps[0].status, "ok");
+    });
+  });
+
+  it("a timed-out MCP call surfaces as an error step", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerMcpServer("Mcp Slow", { timeout_seconds: 5 });
+      script = [
+        { toolCalls: [{ id: "call_slow", name: `mcp__${id}__slowpoke`, args: {} }] },
+        { content: "it failed" },
+      ];
+      const body = await runTurn([{ role: "user", content: "call slowpoke" }]);
+      assertEquals(body.steps[0].status, "error");
+      assertMatch(body.steps[0].summary, /timed out/i);
+    });
+  });
+
+  it("a tool-level MCP error leaves the approved proposal pending", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const id = await registerMcpServer("Mcp Errors", {
+        args: ["run", "--quiet", "--no-check", FAKE_MCP_SERVER, "--with-error-tool"],
+      });
+      script = [
+        { toolCalls: [{ id: "call_err", name: `mcp__${id}__error`, args: {} }] },
+        { content: "proposed" },
+      ];
+      const body = await runTurn([{ role: "user", content: "call error" }]);
+      assertEquals(body.proposals.length, 1);
+      const approveRes = await post(
+        `/api/v1/llm/proposals/${body.proposals[0].id}/approve`,
+        {},
+        adminToken,
+      );
+      assertEquals(approveRes.status, 400);
+      const approveBody = (await approveRes.json()) as { error: { message: string } };
+      assertMatch(approveBody.error.message, /tool-level failure/);
+      const listRes = await get("/api/v1/llm/proposals", adminToken);
+      assertEquals(listRes.status, 200);
+      const list = (await listRes.json()) as { proposals: Array<{ status: string }> };
+      assertEquals(list.proposals[0].status, "pending");
     });
   });
 });

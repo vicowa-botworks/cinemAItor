@@ -97,14 +97,22 @@ enforced by `backend/tests/openapi.test.ts`).
 
 ## Agent integration (`services/llm_agent.ts`)
 
-- The copilot's tool set is **built-in + MCP**: `agentToolDefs(isAdmin)` appends the catalog's tools
-  (servers that fail to list are skipped, status already visible in the panel).
-- **Classification** mirrors the built-in read-only/mutating split: an MCP tool **auto-executes**
-  when its server has `auto_approve` on **or** the server declared `annotations.readOnlyHint: true`
-  for the tool; otherwise it is **mutating** — the call creates an approval proposal (dedupe,
-  in-flight single-flight, auto-continue follow-ups: all unchanged). Non-admin callers only see
-  auto-executing MCP tools in the schema, exactly like built-in mutating tools (a stray call still
-  fails the step, never executes).
+- The copilot's tool set is **built-in + MCP**: `runAgent` builds it from `agentToolDefs(isAdmin)` +
+  `mcpToolDefs(mcpAgentTools(isAdmin))` (qualified names, server schemas passed through; fetched
+  once per turn — the 60 s catalog TTL cache means the system prompt and the tool list share one
+  live refresh). A server that fails to list simply contributes no tools; its status is visible in
+  the panel.
+- **Classification** is three-state, mirroring the built-in split:
+  - the server declared `annotations.readOnlyHint: true` for the tool → **read-only**: executes
+    inline like the built-in read-only tools (no proposal)
+  - the server has `auto_approve` on → **auto-approval**: a proposal is created and executed in-loop
+    through the same single-flight approval path as model-scoped auto-approval (step summary
+    `auto-approved (mcp:<server>) — …`, `auto_approved` conversation event); a failed call leaves
+    the proposal pending for a manual retry
+  - otherwise → **mutating**: the call creates an approval proposal (dedupe, in-flight
+    single-flight, auto-continue follow-ups: all unchanged) Non-admin callers only see read-only MCP
+    tools in the schema — side effects (including auto-approved ones) require the admin role,
+    exactly like built-in mutating tools (a stray call still fails the step, never executes).
 - `AgentProposal.tool` is generalized from the closed `AgentToolName` union to `string` (built-in
   names or `mcp__…` names); proposal storage/TTL/dedupe are untouched.
 - The system prompt gains a live **MCP section**: connected servers with their qualified tool
@@ -146,17 +154,20 @@ enforced by `backend/tests/openapi.test.ts`).
 
 ## Tests
 
-- `backend/tests/mcp_fake/server.mjs` — a fake MCP stdio server (SDK `McpServer`): a read-only tool
-  (`readOnlyHint`), a mutating tool, and a slow tool; scripts live under the test tree, spawned per
-  test with unique temp dirs (`Deno.makeTempDirSync`, per-test prefix).
+- `backend/tests/mcp_fake/server.mjs` — a fake MCP stdio server (SDK `McpServer`): read-only tools
+  (`readOnlyHint`), a mutating tool, a slow tool, and (opt-in `--with-error-tool`) a tool that
+  always answers `isError`; spawned per test under the test tree.
 - `backend/tests/mcp.test.ts` — registry validation + CRUD (transport fields, slug uniqueness, 403
   non-admin, 404/409), test endpoint (ok with tool list / unreachable command / slow server
   timeout), tools endpoint, catalog isolation (one broken server, others intact), connection closed
   on delete.
 - `backend/tests/llm_agent.test.ts` (extended) — MCP tools present in the fake LLM's `tools` array;
   read-only MCP tool executes inline (step `ok`); non-read-only MCP tool → proposal → approve
-  executes it on the fake server; non-admin schema excludes non-read-only MCP tools; system prompt
-  carries the MCP section.
+  executes it on the fake server; `auto_approve` server executes in-loop (step
+  `auto-approved (mcp:<server>) — …`); non-admin schema excludes non-read-only MCP tools; an
+  unreachable server contributes no tools while a healthy one keeps working; a timed-out call
+  surfaces as an `error` step; approving a proposal whose tool answers `isError` fails (400) and
+  leaves the proposal pending; system prompt carries the MCP section.
 - `backend/tests/openapi.test.ts` — route↔ops parity for the new routes (automatic).
 
 ## Documentation

@@ -2757,15 +2757,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       id: { type: "string" },
       tool: {
         type: "string",
-        enum: [
-          "register_model",
-          "register_model_from_huggingface",
-          "install_model",
-          "remove_model",
-          "write_model_file",
-          "install_model_deps",
-          "update_model",
-        ],
+        description: "Built-in agent tool name, or a qualified MCP tool name " +
+          "(mcp__<server>__<tool>) for proposals created from a connected MCP server",
       },
       args: { type: "object" },
       status: { type: "string", enum: ["pending", "approved", "rejected"] },
