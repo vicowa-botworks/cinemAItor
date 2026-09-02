@@ -525,4 +525,127 @@ describe("jobs api", () => {
       })();
     });
   });
+
+  it("shifts a local_cli job to another device from the api", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        // A local_cli model that fails fast (nonexistent command) so the job
+        // reaches a terminal state quickly.
+        const cliId = registerModel(ownerId, {
+          name: "shift-api-cli",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["text_to_image"],
+          enabled: true,
+          default_settings: { command: "sd-runner" },
+        }).id;
+        const res = await post(
+          `/api/v1/jobs`,
+          {
+            job_type: "text_to_image",
+            model_id: cliId,
+            asset_id: assetId,
+            prompt_text: "shift via api",
+            settings: { candidates: 3 },
+          },
+          ownerToken,
+        );
+        assertEquals(res.status, 201);
+        const jobId = ((await res.json()) as { job: JobBody }).job.id;
+        const done = await waitForJob(
+          ownerToken,
+          jobId,
+          ["succeeded", "failed"],
+        );
+        assertEquals(done.status, "failed");
+
+        const shift = await post(
+          `/api/v1/jobs/${jobId}/device`,
+          { device: "cuda" },
+          ownerToken,
+        );
+        assertEquals(shift.status, 200);
+        const job = (await shift.json()) as JobBody;
+        assertEquals(job.status, "queued");
+        assertEquals(job.settings.device, "cuda");
+        // Other settings are preserved.
+        assertEquals(job.settings.candidates, 3);
+      })();
+    });
+  });
+
+  it("honors a device set on a local_cli job at creation", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const cliId = registerModel(ownerId, {
+          name: "shift-api-created",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["text_to_image"],
+          enabled: true,
+          default_settings: { command: "sd-runner" },
+        }).id;
+        const res = await post(
+          `/api/v1/jobs`,
+          {
+            job_type: "text_to_image",
+            model_id: cliId,
+            asset_id: assetId,
+            prompt_text: "created with a device",
+            settings: { candidates: 2, device: "cuda" },
+          },
+          ownerToken,
+        );
+        assertEquals(res.status, 201);
+        const created = ((await res.json()) as { job: JobBody }).job;
+        assertEquals(created.settings.device, "cuda");
+        assertEquals(created.settings.candidates, 2);
+      })();
+    });
+  });
+
+  it("validates the device shift endpoint", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        // A mock job: the endpoint only applies to local_cli models.
+        const mockRes = await post(
+          `/api/v1/jobs`,
+          {
+            job_type: "text_to_image",
+            model_id: modelId,
+            asset_id: assetId,
+            prompt_text: "mock job",
+          },
+          ownerToken,
+        );
+        const mockJobId = ((await mockRes.json()) as { job: JobBody }).job.id;
+        await waitForJob(ownerToken, mockJobId, ["succeeded", "failed"]);
+        const mockShift = await post(
+          `/api/v1/jobs/${mockJobId}/device`,
+          { device: "cuda" },
+          ownerToken,
+        );
+        assertEquals(mockShift.status, 400);
+
+        // An invalid device value is rejected before the job is even looked up.
+        const badDevice = await post(
+          `/api/v1/jobs/${mockJobId}/device`,
+          { device: "tpu" },
+          ownerToken,
+        );
+        assertEquals(badDevice.status, 400);
+
+        // A missing job is a 404.
+        const missing = await post(
+          `/api/v1/jobs/does-not-exist/device`,
+          { device: "cuda" },
+          ownerToken,
+        );
+        assertEquals(missing.status, 404);
+      })();
+    });
+  });
 });

@@ -894,6 +894,17 @@ class ApiClient {
     });
   }
 
+  /**
+   * Shift a local_cli job between cpu and cuda: cancels an in-flight run and
+   * re-queues the job on the new device, keeping every other setting intact.
+   */
+  shiftJobDevice(id, device) {
+    return this.request(`/jobs/${encodeURIComponent(id)}/device`, {
+      method: "POST",
+      body: JSON.stringify({ device }),
+    });
+  }
+
   listJobEvents(id) {
     return this.request(`/jobs/${encodeURIComponent(id)}/events`);
   }

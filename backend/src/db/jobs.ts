@@ -436,6 +436,19 @@ export function retryJob(id: string): GenerationJob | undefined {
   return updated;
 }
 
+/** Update a job's settings (e.g. a CPU→GPU device shift); returns the job. */
+export function setJobSettings(
+  id: string,
+  settings: Record<string, unknown>,
+): GenerationJob | undefined {
+  const db = getDb();
+  db.prepare(`UPDATE generation_jobs SET settings_json = ? WHERE id = ?`).run(
+    JSON.stringify(settings ?? {}),
+    id,
+  );
+  return getJob(id);
+}
+
 export function countRunningJobs(): { gpu: number; cpu: number } {
   const db = getDb();
   // Proxy jobs have no model; they run on the CPU lane (ffmpeg transcode).
