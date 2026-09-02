@@ -788,6 +788,43 @@ class ApiClient {
     });
   }
 
+  // --- v1 mcp ---
+
+  listMcpServers() {
+    return this.request("/mcp/servers");
+  }
+
+  createMcpServer(server) {
+    return this.request("/mcp/servers", {
+      method: "POST",
+      body: JSON.stringify(server),
+    });
+  }
+
+  updateMcpServer(id, update) {
+    return this.request(`/mcp/servers/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(update),
+    });
+  }
+
+  deleteMcpServer(id) {
+    return this.request(`/mcp/servers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  testMcpServer(id) {
+    return this.request(`/mcp/servers/${encodeURIComponent(id)}/test`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  getMcpServerTools(id) {
+    return this.request(`/mcp/servers/${encodeURIComponent(id)}/tools`);
+  }
+
   listWorkflows() {
     return this.request("/workflows");
   }

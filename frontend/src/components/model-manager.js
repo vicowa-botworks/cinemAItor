@@ -53,6 +53,20 @@ const EMPTY_HF_FORM = {
   default_settings: "",
 };
 
+const EMPTY_MCP_FORM = {
+  name: "",
+  description: "",
+  transport: "stdio",
+  command: "",
+  args: "",
+  env: "",
+  url: "",
+  headers: "",
+  timeout_seconds: 60,
+  enabled: true,
+  auto_approve: false,
+};
+
 const SOURCES = ["local", "url", "mock"];
 
 const EMPTY_REG_FORM = {
@@ -461,6 +475,51 @@ export class ModelManager extends LitElement {
 
     .llm-check input {
       accent-color: var(--color-primary);
+    }
+
+    .mcp-row {
+      max-width: 720px;
+    }
+
+    .mcp-form {
+      border-top: 1px solid var(--color-border);
+      padding-top: 14px;
+    }
+
+    .mcp-form select {
+      padding: 8px 10px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text);
+      font-size: 13px;
+    }
+
+    .mcp-tools {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: 720px;
+    }
+
+    .mcp-tool {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .mcp-tool-desc {
+      color: var(--color-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mcp-badge {
+      background-color: rgba(59, 130, 246, 0.15);
+      color: #1d4ed8;
+      border-color: transparent;
     }
 
     .copilot-chat {
@@ -1256,6 +1315,16 @@ export class ModelManager extends LitElement {
     this.hfTokenInput = "";
     this.hfTokenBusy = false;
     this.hfTokenMsg = null;
+    this.mcpServers = [];
+    this.mcpBusy = null;
+    this.mcpTestBusyId = null;
+    this.mcpNotice = null;
+    this.mcpError = "";
+    this.mcpFormOpen = false;
+    this.mcpEditingId = null;
+    this.mcpForm = { ...EMPTY_MCP_FORM };
+    this.mcpToolsOpenId = null;
+    this.mcpTools = {};
     this.confirmState = null;
     this.confirmBusy = false;
     this.confirmProgress = null;
@@ -1489,6 +1558,8 @@ export class ModelManager extends LitElement {
             ? html`<p class="admin-note">Only admins can change the LLM settings.</p>`
             : null}
         </div>
+
+        ${this._renderMcpPanel()}
 
         ${this._renderCopilotPanel()}
 
@@ -1855,6 +1926,7 @@ export class ModelManager extends LitElement {
           html`
             <div class="copilot-step ${s.status}">
               <span class="chip">${s.status === "ok" ? s.tool : "error"}</span>
+              ${this._mcpBadge(s.tool)}
               <span>${s.summary}</span>
             </div>
           `,
@@ -1908,6 +1980,22 @@ export class ModelManager extends LitElement {
     return JSON.stringify(display);
   }
 
+  _mcpServerOf(tool) {
+    if (typeof tool !== "string" || !tool.startsWith("mcp__")) return null;
+    const rest = tool.slice("mcp__".length);
+    const idx = rest.indexOf("__");
+    return idx === -1 ? rest : rest.slice(0, idx);
+  }
+
+  _mcpBadge(tool) {
+    const serverId = this._mcpServerOf(tool);
+    if (!serverId) return null;
+    const name = this.mcpServers.find((s) => s.id === serverId)?.name ?? serverId;
+    return html`<span class="chip mcp-badge" title=${`MCP server: ${serverId}`}>
+      MCP: ${name}
+    </span>`;
+  }
+
   _renderProposal(p) {
     const isPending = p.status === "pending";
     // Busy = a local approve/reject call is in flight, or the server reports
@@ -1919,6 +2007,7 @@ export class ModelManager extends LitElement {
     return html`
       <div class="copilot-proposal ${isPending ? "" : "done"}">
         <span class="tool">${p.tool}</span>
+        ${this._mcpBadge(p.tool)}
         <span class="args" title=${argsDisplay}>
           ${argsDisplay}
         </span>
@@ -2398,10 +2487,17 @@ export class ModelManager extends LitElement {
           ? html`
             <div class="copilot-history-steps">
               ${msg.steps.map(
-                (s) =>
-                  html`<span class="chip">${s.tool ?? "?"}${
-                    s.summary ? ` — ${s.summary}` : ""
-                  }</span>`,
+                (s) => {
+                  const mcpServer = this._mcpServerOf(s.tool);
+                  const toolLabel = mcpServer
+                    ? `MCP: ${
+                      this.mcpServers.find((x) => x.id === mcpServer)?.name ?? mcpServer
+                    } · ${s.tool}`
+                    : (s.tool ?? "?");
+                  return html`<span class="chip">
+                    ${toolLabel}${s.summary ? ` — ${s.summary}` : ""}
+                  </span>`;
+                },
               )}
             </div>
           `
@@ -2458,6 +2554,323 @@ export class ModelManager extends LitElement {
               </ul>
             `}
         `}
+    `;
+  }
+
+  _renderMcpPanel() {
+    const enabledCount = this.mcpServers.filter((s) => s.enabled).length;
+    return html`
+      <div class="panel">
+        <div class="llm-head">
+          <h3>MCP Servers</h3>
+          <span class="chip ${this.mcpServers.length > 0 ? "enabled" : "disabled"}">
+            ${enabledCount} enabled / ${this.mcpServers.length}
+          </span>
+          ${this.isAdmin && this.mcpFormOpen && this.mcpEditingId === null
+            ? html`
+              <button
+                class="btn btn-secondary btn-small"
+                @click=${() => this._mcpCloseForm()}>
+                            Close form
+                          </button>
+            `
+            : html`
+              <button
+                class="btn btn-secondary btn-small"
+                @click=${() => this._mcpOpenForm()}>
+                            ${this.mcpFormOpen && this.mcpEditingId === null
+                              ? "Close form"
+                              : "Add server"}
+                          </button>
+            `}
+        </div>
+        <p class="admin-note">
+          External Model Context Protocol (MCP) tool servers for the Model Copilot.
+          The copilot calls their tools by qualified name (mcp__server__tool) —
+          tools the server declares read-only run directly, everything else needs
+          your approval unless the server has auto-approve on. stdio servers run
+          as a spawned process on this host.
+          ${!this.isAdmin ? "Only admins can manage MCP servers." : ""}
+        </p>
+        ${this.isAdmin && this.mcpServers.length === 0 && !this.mcpFormOpen
+          ? html`<div class="empty">No MCP servers registered.</div>`
+          : null}
+        ${this.mcpServers.map((s) => this._renderMcpServer(s))}
+        ${this.isAdmin && this.mcpFormOpen ? this._renderMcpForm() : null}
+        ${this.mcpNotice
+          ? html`<div class="notice ${this.mcpNotice.kind}">${this.mcpNotice.text}</div>`
+          : null}
+        ${this.mcpError ? html`<div class="error">${this.mcpError}</div>` : null}
+      </div>
+    `;
+  }
+
+  _renderMcpServer(s) {
+    const st = s.status ?? {};
+    const stateChip = !s.enabled
+      ? html`
+        <span
+          class="chip disabled"
+          title="disabled — not exposed to the copilot">
+                disabled
+              </span>
+      `
+      : st.state === "connected"
+      ? html`<span class="chip health-ok">connected</span>`
+      : st.state === "error"
+      ? html`<span class="chip health-error" title=${st.last_error ?? ""}>error</span>`
+      : html`<span class="chip">idle</span>`;
+    const formOpenHere = this.mcpFormOpen && this.mcpEditingId === s.id;
+    return html`
+      <div class="model-row mcp-row">
+        <div class="model-top">
+          <span class="model-name">${s.name}</span>
+          <span class="chip">${s.transport}</span>
+          ${stateChip}
+          ${s.enabled ? html`<span class="chip">${st.tool_count ?? 0} tool(s)</span>` : null}
+          ${s.auto_approve
+            ? html`
+              <span
+                class="chip health-error"
+                title="all tools of this server execute without approval">
+                            auto-approve
+                          </span>
+            `
+            : null}
+        </div>
+        ${s.description ? html`<div class="model-meta"><span>${s.description}</span></div>` : null}
+        <div class="model-meta">
+          ${s.transport === "stdio"
+            ? html`<span class="model-settings">
+              ${s.command ?? ""} ${(s.args ?? []).join(" ")}
+            </span>`
+            : html`<span class="model-settings">${s.url ?? ""}</span>`}
+          <span>timeout ${s.timeout_seconds}s</span>
+          ${s.env_set || s.headers_set
+            ? html`<span>${s.env_set ? "env set" : ""}${s.env_set && s.headers_set ? " · " : ""}${
+              s.headers_set ? `headers set (${(s.header_names ?? []).join(", ")})` : ""
+            }</span>`
+            : null}
+        </div>
+        ${st.state === "error" && st.last_error
+          ? html`<div class="error">${st.last_error}</div>`
+          : null}
+        <div class="model-actions">
+          <button
+            class="btn-small"
+            ?disabled=${this.mcpTestBusyId !== null || this.mcpBusy !== null}
+            @click=${() => this._mcpTest(s)}>
+            ${this.mcpTestBusyId === s.id ? "Testing…" : "Test connection"}
+          </button>
+          <button
+            class="btn-small"
+            ?disabled=${this.mcpBusy !== null}
+            @click=${() => this._mcpOpenForm(s)}>
+            ${formOpenHere ? "Close form" : "Edit"}
+          </button>
+          <button
+            class="btn-small"
+            ?disabled=${this.mcpBusy !== null}
+            @click=${() => this._mcpToggleEnabled(s)}>
+            ${s.enabled ? "Disable" : "Enable"}
+          </button>
+          <button
+            class="btn-small"
+            ?disabled=${this.mcpBusy !== null}
+            @click=${() => this._mcpDelete(s)}>
+            Delete
+          </button>
+          <button
+            class="btn-small"
+            @click=${() => this._mcpToggleTools(s)}>
+            ${this.mcpToolsOpenId === s.id ? "Hide tools" : "Tools"}
+          </button>
+        </div>
+        ${this.mcpToolsOpenId === s.id ? this._renderMcpTools(s) : null}
+      </div>
+    `;
+  }
+
+  _renderMcpTools(s) {
+    const tools = this.mcpTools[s.id];
+    if (tools === undefined) {
+      return html`<div class="mcp-tools"><span class="admin-note">Loading tools…</span></div>`;
+    }
+    if (tools.length === 0) {
+      return html`
+        <div class="mcp-tools">
+          <span class="admin-note">No tools (the server may be unreachable).</span>
+        </div>
+      `;
+    }
+    return html`
+      <div class="mcp-tools">
+        ${tools.map(
+          (t) =>
+            html`
+              <div class="mcp-tool">
+                <span class="chip">${t.tool}</span>
+                ${t.read_only_hint
+                  ? html`<span class="chip enabled">read-only</span>`
+                  : html`<span class="chip">needs approval</span>`}
+                <span class="mcp-tool-desc" title=${t.description ?? ""}>
+                  ${t.description ?? ""}
+                </span>
+              </div>
+            `,
+        )}
+      </div>
+    `;
+  }
+
+  _renderMcpForm() {
+    const f = this.mcpForm;
+    const editing = this.mcpEditingId !== null;
+    const server = editing ? this.mcpServers.find((s) => s.id === this.mcpEditingId) : null;
+    const set = (key) => (e) => {
+      const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+      this.mcpForm = { ...this.mcpForm, [key]: value };
+    };
+    return html`
+      <form
+        class="llm-form mcp-form"
+        @submit=${(e) => {
+          e.preventDefault();
+          this._mcpSubmit();
+        }}>
+        <div class="llm-grid">
+          <div class="llm-field">
+            <label for="mcp-name">Name</label>
+            <input
+              id="mcp-name"
+              type="text"
+              placeholder="github"
+              .value=${f.name}
+              @input=${set("name")}
+              required />
+          </div>
+          <div class="llm-field">
+            <label for="mcp-transport">Transport</label>
+            <select
+              id="mcp-transport"
+              .value=${f.transport}
+              @change=${set("transport")}>
+              <option value="stdio">stdio (spawned command)</option>
+              <option value="http">http (Streamable HTTP)</option>
+            </select>
+          </div>
+          <div class="llm-field wide">
+            <label for="mcp-description">Description</label>
+            <input
+              id="mcp-description"
+              type="text"
+              placeholder="what this server provides"
+              .value=${f.description}
+              @input=${set("description")} />
+          </div>
+          ${f.transport === "stdio"
+            ? html`
+              <div class="llm-field wide">
+                <label for="mcp-command">Command</label>
+                <input
+                  id="mcp-command"
+                  type="text"
+                  placeholder="npx"
+                  .value=${f.command}
+                  @input=${set("command")} />
+              </div>
+              <div class="llm-field wide">
+                <label for="mcp-args">Arguments (JSON array of strings)</label>
+                <input
+                  id="mcp-args"
+                  type="text"
+                  placeholder=${server?.args?.length
+                    ? "set — edit to change"
+                    : '["-y", "@modelcontextprotocol/server-github"]'}
+                  .value=${f.args}
+                  @input=${set("args")} />
+              </div>
+              <div class="llm-field wide">
+                <label for="mcp-env">Env (JSON object, string values)</label>
+                <input
+                  id="mcp-env"
+                  type="text"
+                  placeholder=${server?.env_set
+                    ? "set — leave empty to keep"
+                    : '{"GITHUB_TOKEN": "ghp_…"}'}
+                  .value=${f.env}
+                  @input=${set("env")} />
+              </div>
+            `
+            : html`
+              <div class="llm-field wide">
+                <label for="mcp-url">URL</label>
+                <input
+                  id="mcp-url"
+                  type="text"
+                  placeholder="https://mcp.example.com/mcp"
+                  .value=${f.url}
+                  @input=${set("url")} />
+              </div>
+              <div class="llm-field wide">
+                <label for="mcp-headers">Headers (JSON object, string values)</label>
+                <input
+                  id="mcp-headers"
+                  type="text"
+                  placeholder=${server?.headers_set
+                    ? `set (${(server.header_names ?? []).join(", ")}) — leave empty to keep`
+                    : '{"Authorization": "Bearer …"}'}
+                  .value=${f.headers}
+                  @input=${set("headers")} />
+              </div>
+            `}
+          <div class="llm-field">
+            <label for="mcp-timeout">Timeout (s)</label>
+            <input
+              id="mcp-timeout"
+              type="number"
+              min="5"
+              max="3600"
+              .value=${f.timeout_seconds}
+              @input=${set("timeout_seconds")} />
+          </div>
+        </div>
+        <label class="llm-check">
+          <input
+            type="checkbox"
+            .checked=${f.enabled}
+            @change=${set("enabled")} />
+          Enabled
+        </label>
+        <label class="llm-check">
+          <input
+            type="checkbox"
+            .checked=${f.auto_approve}
+            @change=${set("auto_approve")} />
+          Auto-approve
+        </label>
+        ${f.auto_approve
+          ? html`<div class="error">
+            Auto-approve: every tool of this server executes without approval —
+            only for trusted servers.
+          </div>`
+          : null}
+        <div class="model-actions">
+          <button
+            class="btn"
+            type="submit"
+            ?disabled=${this.mcpBusy !== null}>
+            ${this.mcpBusy === "save" ? "Saving…" : editing ? "Save changes" : "Add server"}
+          </button>
+          <button
+            class="btn btn-secondary"
+            type="button"
+            ?disabled=${this.mcpBusy !== null}
+            @click=${() => this._mcpCloseForm()}>
+            Cancel
+          </button>
+        </div>
+      </form>
     `;
   }
 
@@ -3232,6 +3645,7 @@ export class ModelManager extends LitElement {
       await this._loadBenchmarks();
       await this._loadLlm();
       await this._loadHfToken();
+      await this._loadMcp();
     } finally {
       this.loading = false;
     }
@@ -3372,6 +3786,245 @@ export class ModelManager extends LitElement {
     this.llm = await api.updateLlmSettings(update);
     this.llmConfigured = this.llm.configured;
     this.llmDraft = { ...this.llmDraft, api_key: "" };
+  }
+
+  async _loadMcp() {
+    if (!this.isAdmin) {
+      this.mcpServers = [];
+      return;
+    }
+    try {
+      this.mcpServers = await api.listMcpServers();
+    } catch {
+      this.mcpServers = [];
+    }
+  }
+
+  _mcpOpenForm(server = null) {
+    if (server) {
+      this.mcpEditingId = server.id;
+      this.mcpForm = {
+        name: server.name,
+        description: server.description ?? "",
+        transport: server.transport,
+        command: server.command ?? "",
+        args: server.args?.length ? JSON.stringify(server.args) : "",
+        env: "",
+        url: server.url ?? "",
+        headers: "",
+        timeout_seconds: server.timeout_seconds,
+        enabled: server.enabled,
+        auto_approve: server.auto_approve,
+      };
+    } else {
+      this.mcpEditingId = null;
+      this.mcpForm = { ...EMPTY_MCP_FORM };
+    }
+    this.mcpFormOpen = true;
+    this.mcpNotice = null;
+    this.mcpError = "";
+  }
+
+  _mcpCloseForm() {
+    this.mcpFormOpen = false;
+    this.mcpEditingId = null;
+    this.mcpForm = { ...EMPTY_MCP_FORM };
+  }
+
+  _mcpParseStringArray(text, label) {
+    const t = text.trim();
+    if (t === "") return { ok: true, value: null };
+    let parsed;
+    try {
+      parsed = JSON.parse(t);
+    } catch (err) {
+      return { ok: false, error: `${label} is not valid JSON: ${err.message}` };
+    }
+    if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string")) {
+      return { ok: false, error: `${label} must be a JSON array of strings.` };
+    }
+    return { ok: true, value: parsed };
+  }
+
+  _mcpParseStringMap(text, label) {
+    const t = text.trim();
+    if (t === "") return { ok: true, value: null };
+    let parsed;
+    try {
+      parsed = JSON.parse(t);
+    } catch (err) {
+      return { ok: false, error: `${label} is not valid JSON: ${err.message}` };
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { ok: false, error: `${label} must be a JSON object.` };
+    }
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== "string") {
+        return { ok: false, error: `${label} values must be strings (${key}).` };
+      }
+    }
+    return { ok: true, value: parsed };
+  }
+
+  async _mcpSubmit() {
+    const f = this.mcpForm;
+    this.mcpError = "";
+    this.mcpNotice = null;
+    const name = f.name.trim();
+    if (name === "") {
+      this.mcpError = "Name is required.";
+      return;
+    }
+    const timeout = Number(f.timeout_seconds);
+    if (!Number.isFinite(timeout) || timeout < 5 || timeout > 3600) {
+      this.mcpError = "Timeout must be between 5 and 3600 seconds.";
+      return;
+    }
+    const payload = {
+      name,
+      description: f.description.trim(),
+      transport: f.transport,
+      timeout_seconds: timeout,
+      enabled: f.enabled,
+      auto_approve: f.auto_approve,
+    };
+    if (f.transport === "stdio") {
+      if (f.command.trim() === "") {
+        this.mcpError = "Command is required for a stdio server.";
+        return;
+      }
+      payload.command = f.command.trim();
+      const args = this._mcpParseStringArray(f.args, "Arguments");
+      if (!args.ok) {
+        this.mcpError = args.error;
+        return;
+      }
+      if (args.value !== null) payload.args = args.value;
+      const env = this._mcpParseStringMap(f.env, "Env");
+      if (!env.ok) {
+        this.mcpError = env.error;
+        return;
+      }
+      if (env.value !== null) payload.env = env.value;
+    } else {
+      const url = f.url.trim();
+      if (url === "") {
+        this.mcpError = "URL is required for an http server.";
+        return;
+      }
+      if (!/^https?:\/\//.test(url)) {
+        this.mcpError = "URL must start with http:// or https://.";
+        return;
+      }
+      payload.url = url;
+      const headers = this._mcpParseStringMap(f.headers, "Headers");
+      if (!headers.ok) {
+        this.mcpError = headers.error;
+        return;
+      }
+      if (headers.value !== null) payload.headers = headers.value;
+    }
+    this.mcpBusy = "save";
+    try {
+      if (this.mcpEditingId === null) {
+        await api.createMcpServer(payload);
+        this.mcpNotice = { kind: "ok", text: `MCP server "${name}" registered.` };
+      } else {
+        await api.updateMcpServer(this.mcpEditingId, payload);
+        this.mcpNotice = { kind: "ok", text: `MCP server "${name}" saved.` };
+      }
+      this.mcpFormOpen = false;
+      this.mcpEditingId = null;
+      this.mcpForm = { ...EMPTY_MCP_FORM };
+      await this._loadMcp();
+    } catch (err) {
+      this.mcpError = err.message || "Failed to save the MCP server.";
+    } finally {
+      this.mcpBusy = null;
+    }
+  }
+
+  async _mcpTest(s) {
+    this.mcpNotice = null;
+    this.mcpError = "";
+    // The test endpoint probes the SAVED server, so if this row's form is
+    // open, persist the draft first — testing what you just edited is the
+    // point of the button (the established settings pattern).
+    if (this.mcpFormOpen && this.mcpEditingId === s.id) {
+      await this._mcpSubmit();
+      if (this.mcpError) return;
+    }
+    this.mcpTestBusyId = s.id;
+    try {
+      const result = await api.testMcpServer(s.id);
+      const count = (result.tools ?? []).length;
+      this.mcpNotice = {
+        kind: "ok",
+        text: `Connection OK — "${s.name}" exposes ${count} tool(s).`,
+      };
+      if (this.mcpToolsOpenId === s.id) {
+        this.mcpTools = { ...this.mcpTools, [s.id]: result.tools ?? [] };
+      }
+      await this._loadMcp();
+    } catch (err) {
+      this.mcpError = err.message || "Connection test failed.";
+    } finally {
+      this.mcpTestBusyId = null;
+    }
+  }
+
+  async _mcpToggleEnabled(s) {
+    this.mcpBusy = "save";
+    this.mcpError = "";
+    this.mcpNotice = null;
+    try {
+      await api.updateMcpServer(s.id, { enabled: !s.enabled });
+      await this._loadMcp();
+    } catch (err) {
+      this.mcpError = err.message || "Failed to update the MCP server.";
+    } finally {
+      this.mcpBusy = null;
+    }
+  }
+
+  _mcpDelete(s) {
+    this._runConfirm({ kind: "mcp-delete", server: s });
+  }
+
+  async _doMcpDelete(s) {
+    this.mcpNotice = null;
+    this.mcpError = "";
+    try {
+      await api.deleteMcpServer(s.id);
+      this.mcpNotice = { kind: "ok", text: `MCP server "${s.name}" deleted.` };
+      if (this.mcpToolsOpenId === s.id) {
+        const rest = { ...this.mcpTools };
+        delete rest[s.id];
+        this.mcpTools = rest;
+        this.mcpToolsOpenId = null;
+      }
+      if (this.mcpEditingId === s.id) this._mcpCloseForm();
+      await this._loadMcp();
+    } catch (err) {
+      this.mcpError = err.message || "Failed to delete the MCP server.";
+    }
+  }
+
+  async _mcpToggleTools(s) {
+    if (this.mcpToolsOpenId === s.id) {
+      this.mcpToolsOpenId = null;
+      return;
+    }
+    this.mcpToolsOpenId = s.id;
+    if (this.mcpTools[s.id] === undefined) {
+      try {
+        const result = await api.getMcpServerTools(s.id);
+        this.mcpTools = { ...this.mcpTools, [s.id]: result.tools ?? [] };
+      } catch (err) {
+        this.mcpError = err.message || "Failed to list the server's tools.";
+        this.mcpToolsOpenId = null;
+      }
+    }
   }
 
   _registerReset() {
@@ -3540,6 +4193,15 @@ export class ModelManager extends LitElement {
         busyLabel: "Installing…",
       };
     }
+    if (st.kind === "mcp-delete") {
+      return {
+        title: "Delete MCP server",
+        message: `Delete "${st.server.name}"? The copilot loses its tools immediately.`,
+        confirmLabel: "Delete",
+        tone: "danger",
+        busyLabel: "Deleting…",
+      };
+    }
     return {
       title: "Remove model",
       message: `Remove "${st.model.name}" and its installed files?`,
@@ -3564,6 +4226,8 @@ export class ModelManager extends LitElement {
     try {
       if (st.kind === "install") {
         await this._doInstall(st.model, st.needsConsent);
+      } else if (st.kind === "mcp-delete") {
+        await this._doMcpDelete(st.server);
       } else {
         await this._doRemove(st.model);
       }
