@@ -118,12 +118,19 @@ updated or toggled by an admin.
 `skills-list` (`frontend/src/components/skills-list.js`, route `#/skills`, "Skills" nav item):
 
 - skill cards: name/id/version/author, enable status chip, system marker, description and step-kind
-  chips; per-card actions are toggle, Edit and Delete (hidden for system skills) and a "View jobs"
-  link;
-- create/edit panel: for new skills an id field plus a JSON definition textarea pre-filled with a
-  sample, and two markdown-aware fields — a `guidance` textarea and a comma-separated `model_ids`
-  input — that override the JSON's `assistant.guidance` / `assistant.model_ids` on save (the rest of
-  the assistant block stays in the JSON); server validation errors are surfaced verbatim;
+  chips; per-card actions are toggle, Edit (selects the skill and opens its view/edit panel in edit
+  mode) and Delete (both hidden for system skills) and a "View jobs" link;
+- create panel: for new skills an id field plus a JSON definition textarea pre-filled with a sample,
+  and two markdown-aware fields — a `guidance` textarea and a comma-separated `model_ids` input —
+  that override the JSON's `assistant.guidance` / `assistant.model_ids` on save (the rest of the
+  assistant block stays in the JSON); server validation errors are surfaced verbatim;
+- view/edit panel: below the run form and run history for the selected skill — view-only by default,
+  showing the full definition and metadata (id/version/author/license/status, description, inputs
+  table, steps with model/seed pins, and the assistant block with task types, model ids, guidance
+  and examples); the "Edit" button at the bottom switches the panel to editable mode (JSON
+  definition textarea + the same guidance/model-ids fields, pre-filled from the current definition)
+  where "View only" discards the draft and "Save" submits the full definition via
+  `PUT /api/v1/skills/:id`; system skills render read-only with no Edit button;
 - run panel: project picker + one field per declared input (seeded from defaults; number and boolean
   values are coerced before submit);
 - run history panel: statuses, per-step job ids and error text; live job events (WebSocket) refetch

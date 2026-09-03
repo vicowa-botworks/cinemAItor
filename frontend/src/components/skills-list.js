@@ -334,6 +334,124 @@ export class SkillsList extends LitElement {
       color: var(--color-text-muted);
       font-size: 13px;
     }
+
+    .ve-section {
+      margin-top: 14px;
+    }
+
+    .ve-section h4 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+    }
+
+    .ve-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+    }
+
+    .ve-meta code {
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .ve-key {
+      display: inline-block;
+      min-width: 88px;
+      color: var(--color-text-muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .ve-desc {
+      margin: 10px 0 0;
+      font-size: 13px;
+      color: var(--color-text);
+      white-space: pre-wrap;
+    }
+
+    .ve-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .ve-table th,
+    .ve-table td {
+      text-align: left;
+      padding: 6px 8px;
+      border: 1px solid var(--color-border);
+    }
+
+    .ve-table th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+      font-weight: 600;
+    }
+
+    .ve-table td {
+      font-family: monospace;
+      font-size: 12px;
+      word-break: break-word;
+    }
+
+    .ve-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .ve-step {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+
+    .ve-step-prompt {
+      font-family: monospace;
+      font-size: 12px;
+      margin-top: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .ve-step-pins {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--color-text-muted);
+      font-family: monospace;
+    }
+
+    .ve-guidance {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+      background-color: var(--color-surface-hover);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+    }
+
+    .ve-example {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+
+    .ve-example-notes {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
   `;
 
   static properties = {
@@ -353,6 +471,7 @@ export class SkillsList extends LitElement {
     assistantModelIds: { state: true },
     runInputs: { state: true },
     runProjectId: { state: true },
+    viewMode: { state: true },
   };
 
   constructor() {
@@ -373,6 +492,7 @@ export class SkillsList extends LitElement {
     this.assistantModelIds = "";
     this.runInputs = {};
     this.runProjectId = "";
+    this.viewMode = "view";
     this._unsubscribeEvents = null;
     this._runTimer = null;
   }
@@ -415,6 +535,7 @@ export class SkillsList extends LitElement {
 
   async _select(skillId) {
     this.selectedId = skillId;
+    this.viewMode = "view";
     this.notice = null;
     this.error = "";
     const skill = this.skills.find((s) => s.id === skillId);
@@ -489,14 +610,49 @@ export class SkillsList extends LitElement {
     this.error = "";
   }
 
-  _openEdit(skill) {
-    this.editing = { mode: "edit", id: skill.id };
+  /** Prefill the draft fields from the selected skill and switch the
+   *  view/edit panel to edit mode. */
+  _enterEditMode() {
+    const skill = this.selected;
+    if (!skill) return;
     this.draftId = skill.id;
     this.draftJson = JSON.stringify(skill.definition, null, 2);
     const assistant = skill.definition?.assistant;
     this.assistantGuidance = assistant?.guidance ?? "";
     this.assistantModelIds = (assistant?.model_ids ?? []).join(", ");
     this.error = "";
+    this.viewMode = "edit";
+  }
+
+  _exitEditMode() {
+    this.viewMode = "view";
+    this.error = "";
+  }
+
+  async _saveVeEdit() {
+    const skill = this.selected;
+    if (!skill) return;
+    let definition;
+    try {
+      definition = this._parseDraft();
+    } catch (err) {
+      this.error = err.message;
+      return;
+    }
+    this._applyAssistantFields(definition);
+    this.busy = true;
+    this.error = "";
+    try {
+      await api.updateSkill(skill.id, definition);
+      this.viewMode = "view";
+      this.notice = `Skill '${skill.id}' updated`;
+      await this._refreshSkills();
+      await this._refreshVersions();
+    } catch (err) {
+      this.error = err.message;
+    } finally {
+      this.busy = false;
+    }
   }
 
   _closeEdit() {
@@ -554,22 +710,14 @@ export class SkillsList extends LitElement {
     this.busy = true;
     this.error = "";
     try {
-      if (this.editing.mode === "create") {
-        const id = this.draftId.trim();
-        if (!id) {
-          throw new Error("Skill id is required");
-        }
-        await api.createSkill(id, definition);
-        this.notice = `Skill '${id}' created`;
-      } else {
-        await api.updateSkill(this.editing.id, definition);
-        this.notice = `Skill '${this.editing.id}' updated`;
+      const id = this.draftId.trim();
+      if (!id) {
+        throw new Error("Skill id is required");
       }
+      await api.createSkill(id, definition);
+      this.notice = `Skill '${id}' created`;
       this._closeEdit();
       await this._refreshSkills();
-      if (this.selectedId && this.versions.length) {
-        await this._refreshVersions();
-      }
     } catch (err) {
       this.error = err.message;
     } finally {
@@ -695,7 +843,8 @@ export class SkillsList extends LitElement {
               class="btn-small"
               @click=${(ev) => {
                 ev.stopPropagation();
-                this._openEdit(skill);
+                this._select(skill.id);
+                this._enterEditMode();
               }}
             >
               Edit
@@ -819,11 +968,212 @@ export class SkillsList extends LitElement {
     `;
   }
 
-  _editPanel() {
-    if (!this.editing) return nothing;
+  _veValue(value) {
+    if (value === undefined || value === null || value === "") return "—";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  _viewEditPanel() {
+    const skill = this.selected;
+    if (!skill) return nothing;
+    if (this.viewMode === "edit") {
+      return html`
+        <section class="panel">
+          <h3>View/Edit · ${skill.name}</h3>
+          <div class="field">
+            <label for="ve-def">Definition (JSON)</label>
+            <textarea
+              id="ve-def"
+              spellcheck="false"
+              .value=${this.draftJson}
+              @input=${(e) => {
+                this.draftJson = e.target.value;
+              }}
+            ></textarea>
+          </div>
+          <div class="field">
+            <label for="ve-guidance">
+              Prompt guidance (markdown) — sets the assistant block, overrides the JSON
+            </label>
+            <textarea
+              id="ve-guidance"
+              spellcheck="false"
+              .value=${this.assistantGuidance}
+              @input=${(e) => {
+                this.assistantGuidance = e.target.value;
+              }}
+            ></textarea>
+          </div>
+          <div class="field">
+            <label for="ve-model-ids">
+              Model ids (comma-separated) — scope the skill to models; empty = any model
+            </label>
+            <input
+              id="ve-model-ids"
+              style="font-family: monospace"
+              .value=${this.assistantModelIds}
+              @input=${(e) => {
+                this.assistantModelIds = e.target.value;
+              }}
+              placeholder="minimax_h3"
+            />
+          </div>
+          ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
+          <div class="form-actions">
+            <button class="btn" type="button" @click=${() => this._saveVeEdit()}
+              ?disabled=${this.busy}
+              >${this.busy ? "Saving…" : "Save"}</button
+            >
+            <button
+              class="btn btn-secondary"
+              type="button"
+              @click=${() => this._exitEditMode()}
+              ?disabled=${this.busy}
+            >
+              View only
+            </button>
+          </div>
+        </section>
+      `;
+    }
+    const d = skill.definition;
+    const inputs = Object.entries(d.inputs ?? {});
+    const steps = d.steps ?? [];
+    const assistant = d.assistant;
     return html`
       <section class="panel">
-        <h3>${this.editing.mode === "create" ? "New skill" : "Edit skill"}</h3>
+        <h3>View/Edit · ${skill.name}</h3>
+        <div class="ve-meta">
+          <div><span class="ve-key">id</span> <code>${skill.id}</code></div>
+          <div><span class="ve-key">version</span> v${d.version}</div>
+          <div><span class="ve-key">author</span> ${d.author ?? "—"}</div>
+          <div><span class="ve-key">license</span> ${d.license ?? "—"}</div>
+          <div>
+            <span class="ve-key">status</span>
+            ${skill.enabled ? "enabled" : "disabled"}
+            ${skill.is_system ? " · system" : ""}
+          </div>
+          <div>
+            <span class="ve-key">updated</span> ${skill.updated_at}
+          </div>
+        </div>
+        ${d.description ? html`<p class="ve-desc">${d.description}</p>` : nothing}
+        <div class="ve-section">
+          <h4>Inputs</h4>
+          ${inputs.length
+            ? html`
+              <table class="ve-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Required</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${inputs.map(
+                    ([name, spec]) =>
+                      html`
+                        <tr>
+                          <td>${name}</td>
+                          <td>${spec.type}</td>
+                          <td>${this._veValue(spec.default)}</td>
+                          <td>${spec.required ? "yes" : "no"}</td>
+                        </tr>
+                      `,
+                  )}
+                </tbody>
+              </table>
+            `
+            : html`<div class="muted">This skill takes no inputs.</div>`}
+        </div>
+        <div class="ve-section">
+          <h4>Steps</h4>
+          ${steps.length
+            ? html`
+              <div class="ve-steps">
+                ${steps.map(
+                  (step) =>
+                    html`
+                      <div class="ve-step">
+                        <span class="chip">${step.type}</span>
+                        <div class="ve-step-prompt">${step.prompt}</div>
+                        ${step.model_id || step.seed
+                          ? html`
+                            <div class="ve-step-pins">
+                              ${step.model_id
+                                ? html`
+                                  model: ${step.model_id}
+                                `
+                                : nothing}
+                              ${step.seed ? html`seed: ${step.seed}` : nothing}
+                            </div>
+                          `
+                          : nothing}
+                      </div>
+                    `,
+                )}
+              </div>
+            `
+            : html`<div class="muted">No steps (assistant-only skill).</div>`}
+        </div>
+        ${assistant
+          ? html`
+            <div class="ve-section">
+              <h4>Assistant</h4>
+              <div class="ve-meta">
+                <div>
+                  <span class="ve-key">task types</span>
+                  ${(assistant.model_task_types ?? []).join(", ") || "—"}
+                </div>
+                <div>
+                  <span class="ve-key">model ids</span>
+                  ${(assistant.model_ids ?? []).join(", ") || "— (any model)"}
+                </div>
+              </div>
+              ${assistant.guidance
+                ? html`<div class="ve-guidance" style="margin-top:8px">${assistant.guidance}</div>`
+                : nothing}
+              ${(assistant.examples ?? []).length
+                ? html`
+                  <div class="ve-steps" style="margin-top:8px">
+                    ${assistant.examples.map(
+                      (ex) =>
+                        html`
+                          <div class="ve-example">
+                            <div class="ve-step-prompt">${ex.prompt}</div>
+                            ${ex.notes
+                              ? html`<div class="ve-example-notes">${ex.notes}</div>`
+                              : nothing}
+                          </div>
+                        `,
+                    )}
+                  </div>
+                `
+                : nothing}
+            </div>
+          `
+          : nothing}
+        <div class="form-actions" style="margin-top:14px">
+          ${skill.is_system
+            ? html`<div class="muted">System skills are read-only (admin-managed via API).</div>`
+            : html`
+              <button class="btn" type="button" @click=${() => this._enterEditMode()}>
+                Edit
+              </button>
+            `}
+        </div>
+      </section>
+    `;
+  }
+
+  _editPanel() {
+    if (!this.editing || this.editing.mode !== "create") return nothing;
+    return html`
+      <section class="panel">
+        <h3>New skill</h3>
         <form @submit=${(e) => this._submitDraft(e)}>
           ${this.editing.mode === "create"
             ? html`
@@ -881,9 +1231,7 @@ export class SkillsList extends LitElement {
           </div>
           ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
           <div class="form-actions">
-            <button class="btn" type="submit" ?disabled=${this.busy}>
-              ${this.editing.mode === "create" ? "Create" : "Save"}
-            </button>
+            <button class="btn" type="submit" ?disabled=${this.busy}>Create</button>
             <button
               class="btn btn-secondary"
               type="button"
@@ -921,6 +1269,7 @@ export class SkillsList extends LitElement {
             ${this._editPanel()}
             ${this._runPanel()}
             ${this._runsPanel()}
+            ${this._viewEditPanel()}
           </div>
         </div>
       </div>
