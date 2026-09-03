@@ -637,12 +637,10 @@ export class ReviewBoard extends LitElement {
     const assetId = candidate.asset.id;
     let media;
     try {
-      media = await api.fetchMediaUrl(
-        api.getAssetProxyUrl(assetId, versionId),
-      );
+      media = await api.getAssetProxyUrl(assetId, versionId);
     } catch {
       try {
-        media = await api.fetchMediaUrl(api.getAssetPreviewUrl(assetId));
+        media = await api.getAssetVersionPreviewUrl(assetId, versionId);
       } catch {
         media = null;
       }
