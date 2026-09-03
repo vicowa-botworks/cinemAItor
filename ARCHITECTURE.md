@@ -130,10 +130,11 @@ app-root (main router)
 │   │              editor (PATCH task_types on an existing model) + per-model
 │   │              default_settings JSON editor (PATCH default_settings),
  │   │              LLM assistant settings panel + connection test (docs/llm.md),
- │   │              MCP Servers panel (admin: rows + status chips, add/edit form per
- │   │              transport, test connection, enable toggle, delete via confirm-dialog,
- │   │              expandable tool list; docs/mcp.md) + `MCP: <server>` badges on
- │   │              copilot steps/proposals for qualified mcp__ tools,
+  │   │              MCP Servers panel (admin: rows + status chips, add/edit form per
+  │   │              transport, test connection, enable toggle, delete via confirm-dialog,
+  │   │              "Ask Model Copilot" button (prefills a registration request for the
+  │   │              add_mcp_server tool), expandable tool list; docs/mcp.md) + `MCP: <server>`
+  │   │              badges on copilot steps/proposals for qualified mcp__ tools,
  │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
  │   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
@@ -453,9 +454,12 @@ server.ts (entry point)
    │   │   tools (update_model, write_model_file, install_model_deps, run_smoke_test,
    │   │   run_benchmark) auto-execute in-loop so the copilot can drive a broken model to a
    │   │   working state (register/install/remove always stay manual). New tools:
-   │   │   run_smoke_test (local_cli command once, bounded 60–180 s, returns exit code +
-   │   │   stderr tail — services/model_smoke.ts), run_benchmark (enqueues the async
-   │   │   deterministic benchmark job), benchmark_results (read its rows + job status)
+    │   │   run_smoke_test (local_cli command once, bounded 60–180 s, returns exit code +
+    │   │   stderr tail — services/model_smoke.ts), run_benchmark (enqueues the async
+    │   │   deterministic benchmark job), benchmark_results (read its rows + job status),
+    │   │   add_mcp_server (registers a new MCP tool server — the copilot's way to "install"
+    │   │   a server installed purely by registration; same createMcpServer path as the REST
+    │   │   route, docs/mcp.md)
    │   │   proposal is in_flight while the tool executes (duplicate approve/reject
    │   │   409s), and GET /api/v1/llm/proposals lists live status (in_flight +
    │   │   started_at) so the UI re-syncs cards after a dropped long-running approval.

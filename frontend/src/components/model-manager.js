@@ -2593,6 +2593,16 @@ export class ModelManager extends LitElement {
                               : "Add server"}
                           </button>
             `}
+          ${this.isAdmin
+            ? html`
+              <button
+                class="btn btn-secondary btn-small"
+                ?disabled=${this.copilotBusy}
+                @click=${() => this._mcpAskCopilot()}>
+                Ask Model Copilot
+              </button>
+            `
+            : null}
         </div>
         <p class="admin-note">
           External Model Context Protocol (MCP) tool servers for the Model Copilot.
@@ -3839,6 +3849,18 @@ export class ModelManager extends LitElement {
     this.mcpFormOpen = false;
     this.mcpEditingId = null;
     this.mcpForm = { ...EMPTY_MCP_FORM };
+  }
+
+  _mcpAskCopilot() {
+    const lines = [
+      "Help me register a new MCP server for the Model Copilot.",
+      "Tell me what details you need and I'll provide them — for a stdio server: the command (executable, e.g. 'npx' or 'uvx'), its args, and any env vars/tokens; for an http server: the url and any headers.",
+      "Most MCP servers are 'installed' purely by registering them here, so gather those details and propose the registration.",
+    ];
+    this.copilotInput = lines.join("\n");
+    this.updateComplete.then(() => {
+      this.shadowRoot?.querySelector(".copilot-input textarea")?.focus();
+    });
   }
 
   _mcpParseStringArray(text, label) {

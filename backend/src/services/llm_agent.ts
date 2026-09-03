@@ -14,6 +14,7 @@ import {
   type UpdateModelInput,
 } from "../db/models.ts";
 import { listSkills } from "../db/skills.ts";
+import { createMcpServer, type McpServerCreateRequest } from "../db/mcp.ts";
 import { getWorkflowDetail, listWorkflows, patchWorkflow } from "../db/workflows.ts";
 import { storageLayout } from "../storage/paths.ts";
 import { AppError, badRequest, conflict, ERROR_CODES, forbidden, notFound } from "../errors.ts";
@@ -74,7 +75,8 @@ export type AgentToolName =
   | "remove_model"
   | "run_smoke_test"
   | "run_benchmark"
-  | "benchmark_results";
+  | "benchmark_results"
+  | "add_mcp_server";
 
 const TASK_TYPES_HELP = `Task types the model covers. Allowed: ${MODEL_TASK_TYPES.join(", ")}`;
 
@@ -116,6 +118,7 @@ const MUTATING_AGENT_TOOLS: readonly AgentToolName[] = [
   "remove_model",
   "run_smoke_test",
   "run_benchmark",
+  "add_mcp_server",
 ] as const;
 
 function toolDef(
@@ -355,6 +358,56 @@ export const AGENT_TOOL_DEFS: LlmToolDef[] = [
       type: "object",
       required: ["model_id"],
       properties: { model_id: stringProperty("Registered model id") },
+    },
+  ),
+  toolDef(
+    "add_mcp_server",
+    "Register a new external MCP server so its tools join the copilot as mcp__<server>__<tool>. Use this when " +
+      "the user wants to add/install an MCP server (most MCP servers are 'installed' by registering their " +
+      "stdio command or HTTP endpoint here — no separate install step). stdio servers need 'command' (the " +
+      "executable, e.g. 'npx' or 'uvx') + optional 'args' (string[]) and optional 'env' (string map, e.g. API " +
+      "tokens); http servers need 'url' + optional 'headers' (string map). The name becomes the slug used in " +
+      "qualified tool names. Mutating — requires admin approval. A connection test after approval is the " +
+      "reliable way to confirm the command/endpoint actually serves tools.",
+    {
+      type: "object",
+      required: ["name", "transport"],
+      properties: {
+        name: stringProperty("Display name; slugified to the server id (no underscores)"),
+        description: stringProperty("What this server provides"),
+        transport: { type: "string", enum: ["stdio", "http"], description: "Transport type" },
+        command: stringProperty("Executable for a stdio server (e.g. 'npx', 'uvx', a venv python)"),
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Arguments for a stdio server (JSON array of strings)",
+        },
+        env: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description:
+            "Environment variables for a stdio server (string map; secrets are stored, never returned)",
+        },
+        url: stringProperty("Endpoint for an http (Streamable HTTP) server (http:// or https://)"),
+        headers: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description:
+            "HTTP headers for an http server (string map; secrets are stored, never returned)",
+        },
+        timeout_seconds: {
+          type: "integer",
+          minimum: 5,
+          maximum: 3600,
+          description: "Per-call timeout in seconds (default 120)",
+        },
+        enabled: { type: "boolean", description: "Enabled on creation (default true)" },
+        auto_approve: {
+          type: "boolean",
+          description:
+            "Auto-approve every tool of this server without approval — trusted servers only (default false)",
+        },
+      },
     },
   ),
 ];
@@ -953,6 +1006,36 @@ export async function runTool(
       );
       return { results: listBenchmarkResults(id), recent_jobs: recent };
     }
+    case "add_mcp_server": {
+      // createMcpServer validates the transport fields and throws badRequest /
+      // conflict (AppError) on invalid input or a duplicate name, so a bad
+      // proposal fails with a clear message instead of registering garbage.
+      const req: McpServerCreateRequest = {
+        name: args.name,
+        description: args.description,
+        transport: args.transport,
+        command: args.command,
+        args: args.args,
+        env: args.env,
+        url: args.url,
+        headers: args.headers,
+        timeout_seconds: args.timeout_seconds,
+        enabled: args.enabled,
+        auto_approve: args.auto_approve,
+      };
+      const view = createMcpServer(ctx.userId, req);
+      return {
+        id: view.id,
+        name: view.name,
+        transport: view.transport,
+        enabled: view.enabled,
+        auto_approve: view.auto_approve,
+        note:
+          `Registered MCP server '${view.id}'. Its tools appear as mcp__${view.id}__<tool> on ` +
+          "the next agent turn — run a connection test to confirm the command/endpoint " +
+          "actually serves tools before relying on it.",
+      };
+    }
     default:
       throw badRequest(`Unknown tool '${name}'`, "tool");
   }
@@ -1074,6 +1157,16 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
       ". Call them exactly like the built-in tools: side-effecting MCP tools create proposals " +
       "through the same approval flow. Tools of a server that is unreachable or exposes nothing " +
       "are simply absent from your tool set.";
+  const mcpAddSection = isAdmin
+    ? "Adding MCP servers: when the user wants to add, install, or connect an external MCP server, " +
+      "use add_mcp_server. Most MCP servers are 'installed' purely by registering them here — a " +
+      "stdio server needs its 'command' (the executable, e.g. 'npx' or 'uvx') plus its 'args' " +
+      "(and any 'env' tokens it needs), an http server its 'url' (and optional 'headers'). Work " +
+      "out the exact command/package/endpoint and credentials from what the user tells you (or " +
+      "from its docs) and propose the registration; it is mutating (approval-gated). After " +
+      "approval the server's tools appear as mcp__<server>__<tool> on the next turn — tell the " +
+      "user to run a connection test to confirm it actually serves tools."
+    : "";
   return [
     "You are the model copilot of cinemaItor, a local-first AI movie studio.",
     "You help the user choose, register, and install local generation models, and connect runtimes such as ComfyUI.",
@@ -1098,6 +1191,7 @@ export async function copilotSystemPrompt(userId: number, isAdmin: boolean): Pro
     pendingSection,
     autoApproveSection,
     mcpSection,
+    mcpAddSection,
     "Be concise and practical; explain trade-offs (VRAM, backend) in one or two lines.",
   ].filter((part) => part !== "").join("\n");
 }
@@ -1139,6 +1233,9 @@ function summarizeStep(name: string, result: unknown): string {
       return q
         ? `ComfyUI reachable (queue: ${q.running} running, ${q.pending} pending)`
         : "ComfyUI reachable";
+    }
+    if (r.id && r.transport) {
+      return `MCP server '${String(r.id)}' registered (${String(r.transport)})`;
     }
     if (r.model) return `model '${(r.model as Record<string, unknown>).name}'`;
     if (r.repo) return `repo ${(r.repo as Record<string, unknown>).id}`;

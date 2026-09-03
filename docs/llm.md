@@ -232,6 +232,15 @@ button on such replies as a second safety net.
   candidates per benchmarkable task type; `services/model_benchmark.ts`). It returns the job id
   immediately — the run is asynchronous in the job queue (hours on CPU); 400 when a benchmark for
   the model is already queued/running.
+- `add_mcp_server`
+  `{name, transport, description?, command?, args?, env?, url?, headers?,
+  timeout_seconds?, auto_approve?}`
+  — registers a new MCP tool server (see `docs/mcp.md`), the copilot's way to "install" a server
+  that is installed purely by registration. It calls the same `createMcpServer` path as the REST
+  route, so transport validation (400) and duplicate-name rejection (409) behave identically; the
+  tool returns the registered server id. The system prompt (admin-only section) guides the copilot
+  to gather the stdio command/args/env or http url/headers and propose the registration, then follow
+  up with a connection test.
 
 **MCP tools (external servers):** Connected MCP servers' tools (see `docs/mcp.md`) join the tool set
 under their qualified names `mcp__<server>__<tool>`, with the server-declared JSON Schema passed
