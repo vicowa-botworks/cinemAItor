@@ -724,10 +724,14 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     }
     let media;
     try {
-      media = await api.fetchMediaUrl(api.getAssetPreviewUrl(assetId));
+      media = await api.getAssetVersionPreviewUrl(
+        assetId,
+        panel.preview_asset_version_id,
+      );
     } catch {
-      media = await api.fetchMediaUrl(
-        api.getAssetProxyUrl(assetId, panel.preview_asset_version_id),
+      media = await api.getAssetProxyUrl(
+        assetId,
+        panel.preview_asset_version_id,
       );
     }
     if (!this.panels.some((p) => p.id === panelId)) {

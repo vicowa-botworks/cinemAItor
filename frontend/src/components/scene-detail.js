@@ -760,8 +760,9 @@ export class SceneDetail extends VramGuard(LitElement) {
     }
     let media;
     try {
-      media = await api.fetchMediaUrl(
-        api.getAssetProxyUrl(assetId, shot.generated_asset_version_id),
+      media = await api.getAssetProxyUrl(
+        assetId,
+        shot.generated_asset_version_id,
       );
     } catch {
       return;
@@ -790,9 +791,9 @@ export class SceneDetail extends VramGuard(LitElement) {
     const detailed = await api.getAsset(assetId).catch(() => null);
     const versionId = detailed?.active_version_id;
     if (!versionId) return;
-    const media = await api.fetchMediaUrl(
-      api.getAssetProxyUrl(assetId, versionId),
-    ).catch(() => null);
+    const media = await api.getAssetProxyUrl(assetId, versionId).catch(
+      () => null,
+    );
     if (!media) return;
     if (this.sceneClip?.url) URL.revokeObjectURL(this.sceneClip.url);
     this.sceneClip = { url: media.url, type: media.type, assetId };
