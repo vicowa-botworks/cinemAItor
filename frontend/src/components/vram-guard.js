@@ -65,7 +65,11 @@ export const VramGuard = (superClass) =>
       ) return null;
       let hw;
       try {
-        hw = await api.getModelsHardware();
+        // Probe live, never the 60s cache: the runner's own auto-fallback reads
+        // real free VRAM at run time, so a stale "enough" here would stay silent
+        // while the job quietly drops to CPU. A ~100ms nvidia-smi beat is cheap
+        // next to a GPU run the user could have had.
+        hw = await api.getModelsHardware({ refresh: true });
       } catch {
         return null; // VRAM indeterminate — let the runner decide.
       }

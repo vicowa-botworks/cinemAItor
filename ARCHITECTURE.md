@@ -150,9 +150,11 @@ app-root (main router)
  │   │              renders a progress bar (indeterminate while percent is null) + caption;
  │   │              first consumer: model-manager install/remove)
   ├── vram-choice-dialog (pre-generation VRAM guard for local_cli generation: shown when free
-  │   │   VRAM is below the model's `vram_requirement_mb`; "start on CPU" sends device=cpu, or
-  │   │   "free up VRAM" + a refresh button re-probes live via /hardware?refresh=1 and auto-starts
-  │   │   on the GPU once enough VRAM is free. Shared across every interactive generation path —
+   │   │   VRAM is below the model's `vram_requirement_mb` — the initial check probes live via
+   │   │   /hardware?refresh=1 (never the 60s cache) so it matches the runner's own live
+   │   │   auto-fallback and can't stay silent while the job drops to CPU; "start on CPU" sends
+   │   │   device=cpu, or "free up VRAM" + a refresh button re-probes live and auto-starts on the
+   │   │   GPU once enough VRAM is free. Shared across every interactive generation path —
   │   │   asset generate/edit, storyboard panel preview, scene/batch, audio, and timeline score —
   │   │   via the vram-guard mixin + pure helpers in asset-generation.js)
  ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
