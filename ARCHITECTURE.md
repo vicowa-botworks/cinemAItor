@@ -184,7 +184,9 @@ app-root (main router)
 ├── skills-list (v1 skill system: list, create/edit JSON definitions + markdown-aware
 │    guidance/model-ids fields, version history,
 │    enable/disable, delete; run form (project + inputs) with live WebSocket job events +
-│    poll-to-terminal run history showing per-step job ids)
+│    poll-to-terminal run history showing per-step job ids; per-skill View/Edit panel below the
+│    run history — read-only definition + metadata view (inputs, steps, assistant block) with an
+│    Edit ↔ View-only toggle that switches to the editable JSON/guidance/model-ids form)
 ├── timeline-list (timeline list + create; project filter via #/timelines?project=)
 ├── timeline-detail (tracks with lock/mute + mixer gain + ducking + swap reorder,
 │   │               clip/text placement via
