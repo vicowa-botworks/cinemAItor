@@ -212,7 +212,9 @@ export class AssetForm extends LitElement {
         project_id: this.scope === "project" ? this._effectiveProjectId() : undefined,
         description: this.description.trim() || null,
       });
-      this.dispatchEvent(new CustomEvent("saved", { detail: asset, bubbles: true }));
+      this.dispatchEvent(
+        new CustomEvent("saved", { detail: { asset }, bubbles: true }),
+      );
     } catch (err) {
       this.error = err.message || "Failed to create asset";
     } finally {
