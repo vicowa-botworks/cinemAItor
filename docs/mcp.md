@@ -119,6 +119,15 @@ enforced by `backend/tests/openapi.test.ts`).
   names + one-line descriptions, and the rule that MCP tools follow the same approval flow as
   built-in mutating tools (broadly bounded so many tools cannot blow up the prompt — tool schemas
   ride in the `tools` array, the prompt section is a compact index).
+- **Self-registration** — `add_mcp_server` is a built-in mutating (admin-only) agent tool: it is the
+  copilot's way to _add_ a server, closing the loop where most MCP servers are "installed" purely by
+  registering their stdio command or HTTP endpoint. Its parameters mirror the
+  `POST /api/v1/mcp/servers` body (name/transport plus the transport-specific fields); the tool
+  calls the same `createMcpServer` repository path, so validation (400) and duplicate-name rejection
+  (409) behave exactly as the REST route. A second, admin-only system-prompt section tells the
+  copilot when and how to propose a registration, and to follow up with a connection test once
+  approved. Non-admins never see the tool (it is in `MUTATING_AGENT_TOOLS`), and the "Ask Model
+  Copilot" button in the MCP panel pre-fills the chat with a registration request.
 - MCP calls count against the existing 16-iteration cap; per-call timeout is the server's
   `timeout_seconds`. Conversation logging records MCP steps and approve/reject events verbatim (the
   qualified name carries the server identity).
@@ -137,6 +146,9 @@ enforced by `backend/tests/openapi.test.ts`).
     keep"); timeout; `auto_approve` checkbox with an explicit warning that all of the server's tools
     will execute without approval
   - expandable per-server tool list: qualified name, read-only chip, description
+  - **Ask Model Copilot** button (admin-only, next to "Add server"): pre-fills the copilot chat with
+    a request to register a new MCP server, so the copilot's `add_mcp_server` tool can gather the
+    details and propose the registration
 - **Copilot chat** (unchanged request/response shape): step lines and proposal cards whose tool
   matches `mcp__<server>__…` show an `MCP: <server>` badge; Approve/Reject/auto-continue work as-is.
 

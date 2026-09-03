@@ -465,6 +465,55 @@ describe("llm agent", () => {
     }
   });
 
+  it("add_mcp_server creates a proposal and registers on approval", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint(llm.url);
+      script = [
+        {
+          toolCalls: [{
+            id: "call_mcp",
+            name: "add_mcp_server",
+            args: {
+              name: "Copilot MCP",
+              transport: "stdio",
+              command: "npx",
+              args: ["-y", "example-mcp-server"],
+            },
+          }],
+        },
+        { content: "Proposed registering the MCP server." },
+      ];
+      const res = await post("/api/v1/llm/agent", {
+        history: [{ role: "user", content: "add an mcp server" }],
+      }, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as { proposals: Array<{ id: string }> };
+      assertEquals(body.proposals.length, 1);
+      const id = body.proposals[0].id;
+
+      // Not executed yet — the registry is still empty.
+      const beforeRes = await get("/api/v1/mcp/servers", adminToken);
+      const before = (await beforeRes.json()) as Array<Record<string, unknown>>;
+      assertEquals(before.length, 0);
+
+      const approved = await post(`/api/v1/llm/proposals/${id}/approve`, {}, adminToken);
+      assertEquals(approved.status, 200);
+      const approvedBody = (await approved.json()) as {
+        proposal: { status: string };
+        result: { id: string; transport: string };
+      };
+      assertEquals(approvedBody.proposal.status, "approved");
+      assertEquals(approvedBody.result.transport, "stdio");
+
+      const afterRes = await get("/api/v1/mcp/servers", adminToken);
+      const after = (await afterRes.json()) as Array<Record<string, unknown>>;
+      assertEquals(after.length, 1);
+      assertEquals(after[0].id, approvedBody.result.id);
+      assertEquals(after[0].transport, "stdio");
+    });
+  });
+
   it("non-admins get the read-only tool schema and no proposals", async () => {
     const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
     createUser(email, await hashPassword("password123"), "Regular User");
@@ -497,6 +546,7 @@ describe("llm agent", () => {
           "install_model_deps",
           "install_model",
           "remove_model",
+          "add_mcp_server",
         ]
       ) {
         assertEquals(names.includes(mutating), false, mutating);
