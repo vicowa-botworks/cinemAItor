@@ -97,8 +97,11 @@ app-root (main router)
 │   ├── asset-upload (create + raw-bytes streaming file upload → first version)
  │   ├── asset-generate (prompt-based generation: new image/video asset OR new versions of an
  │   │   │               existing asset; text→image/video or reference→image/video task upgrade,
- │   │   │               model/seed/candidates pickers, "use current version" toggle in edit mode,
- │   │   │               pre-generation VRAM check → vram-choice-dialog for local_cli models)
+ │   │   │               model/seed/candidates pickers, quality-profile picker (draft/production,
+ │   │   │               docs/generation_profiles.md), "use current version" toggle in edit mode +
+ │   │   │               one-click "produce final from current version" (production profile)
+ │   │   │               draft→production button, pre-generation VRAM check → vram-choice-dialog
+ │   │   │               for local_cli models)
  │   └── asset-reference-picker (pick existing image/video assets as generation references,
  │   │                           active version by default, max 8)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
@@ -128,7 +131,9 @@ app-root (main router)
 │   │              tooltip) when a model has no input-less task type to benchmark,
 │   │              admin-gated registration form + install/enable/remove + inline task-type
 │   │              editor (PATCH task_types on an existing model) + per-model
-│   │              default_settings JSON editor (PATCH default_settings),
+│   │              default_settings JSON editor (PATCH default_settings) + generation-profiles
+│   │              editor (draft_settings/production_settings JSON overrides merged over the
+│   │              defaults by the job's quality profile; docs/generation_profiles.md),
  │   │              LLM assistant settings panel + connection test (docs/llm.md),
  │   │              MCP Servers panel (admin: rows + status chips, add/edit form per
  │   │              transport, test connection, enable toggle, delete via confirm-dialog,
@@ -283,10 +288,12 @@ server.ts (entry point)
  │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
   │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
   │   │     pointers, prompt references, AST-015; feeds the UI "Used in" view)
-   │   │   + prompt-based generation: POST /generate (new image/video asset) and
-   │   │     POST /:id/generate (new versions; reference inputs, include_current, optional
-   │   │     device cpu|cuda → job settings → RUNNER_DEVICE env) — t2i/t2v or i2i/i2v by
-   │   │     presence of references (see docs/assets.md)
+    │   │   + prompt-based generation: POST /generate (new image/video asset) and
+    │   │     POST /:id/generate (new versions; reference inputs, include_current, optional
+    │   │     device cpu|cuda → job settings → RUNNER_DEVICE env, optional quality
+    │   │     profile draft|production → job settings.profile → the runner merges the
+    │   │     model's matching profile over default_settings; docs/generation_profiles.md) —
+    │   │     t2i/t2v or i2i/i2v by presence of references (see docs/assets.md)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
 │   └── (see docs/assets.md)
 ├── Prompt routes (/api/v1/prompts/*, auth middleware)
@@ -299,7 +306,9 @@ server.ts (entry point)
   │   ├── Registry (register/update validate per-backend default_settings — local_cli
   │   │   needs 'command', comfyui needs 'endpoint' + 'workflow' — so
   │   │   misconfigured models are
-   │   │   rejected at registration instead of failing at run time), install/verify
+    │   │   rejected at registration instead of failing at run time; optional draft_settings /
+    │   │   production_settings quality profiles — JSON overrides merged over the defaults by
+    │   │   the job's profile, docs/generation_profiles.md), install/verify
    │   │   (SHA-256; URL installs stream to a temp file, resumable via HTTP Range with
    │   │   backoff-retry; GET /:id/install-progress + /install-progress expose live
    │   │   received/total/speed of in-flight downloads for the UI progress bar +
@@ -329,7 +338,8 @@ server.ts (entry point)
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
    │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
     │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
-     │   │   model default_settings, passes per-job workDir; HF-origin models (repository_url on
+      │   │   model default_settings (then the job's quality profile over them,
+      │   │   docs/generation_profiles.md), passes per-job workDir; HF-origin models (repository_url on
       │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
       │   │   runners can fetch gated-repo files; a user-chosen device (job settings) is injected
       │   │   as RUNNER_DEVICE and the model's vram_requirement_mb as RUNNER_MIN_FREE_VRAM_MB so

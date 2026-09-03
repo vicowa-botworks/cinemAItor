@@ -97,6 +97,7 @@ describe("migrations", () => {
         "0027_workflows.sql",
         "0028_movie_scripts.sql",
         "0029_mcp_servers.sql",
+        "0030_generation_profiles.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -131,12 +132,13 @@ describe("migrations", () => {
         "0027_workflows.sql",
         "0028_movie_scripts.sql",
         "0029_mcp_servers.sql",
+        "0030_generation_profiles.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        29,
+        30,
       );
     } finally {
       db.close();
@@ -177,6 +179,7 @@ describe("migrations", () => {
       "0027_workflows.sql",
       "0028_movie_scripts.sql",
       "0029_mcp_servers.sql",
+      "0030_generation_profiles.sql",
     ]);
   });
 

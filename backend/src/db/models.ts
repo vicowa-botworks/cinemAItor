@@ -56,6 +56,19 @@ export interface Model {
   ram_requirement_mb: number | null;
   dependencies: string[];
   default_settings: Record<string, unknown>;
+  /**
+   * Speed-first settings overrides for draft (composition) generation runs.
+   * Free-form JSON object, same shape as default_settings; merged over
+   * default_settings (under job settings) when a job sets profile "draft".
+   */
+  draft_settings: Record<string, unknown>;
+  /**
+   * Quality-first settings overrides for production (final take) generation
+   * runs. Free-form JSON object, same shape as default_settings; merged over
+   * default_settings (under job settings) when a job sets profile
+   * "production".
+   */
+  production_settings: Record<string, unknown>;
   known_limitations: string[] | null;
   enabled: boolean;
   /**
@@ -94,6 +107,8 @@ export interface RegisterModelInput {
   ram_requirement_mb?: number;
   dependencies?: string[];
   default_settings?: Record<string, unknown>;
+  draft_settings?: Record<string, unknown>;
+  production_settings?: Record<string, unknown>;
   known_limitations?: string[];
   enabled?: boolean;
 }
@@ -115,6 +130,8 @@ export interface UpdateModelInput {
   ram_requirement_mb?: number;
   dependencies?: string[];
   default_settings?: Record<string, unknown>;
+  draft_settings?: Record<string, unknown>;
+  production_settings?: Record<string, unknown>;
   known_limitations?: string[];
   enabled?: boolean;
   agent_auto_approve?: boolean;
@@ -182,6 +199,8 @@ export function rowToModel(row: Record<string, unknown>): Model {
     ram_requirement_mb: asNullableNumber(row.ram_requirement_mb),
     dependencies: JSON.parse((row.dependencies_json as string) ?? "[]"),
     default_settings: JSON.parse((row.default_settings_json as string) ?? "{}"),
+    draft_settings: JSON.parse((row.draft_settings_json as string) ?? "{}"),
+    production_settings: JSON.parse((row.production_settings_json as string) ?? "{}"),
     known_limitations: asStringArray(
       row.known_limitations_json === null ? null : JSON.parse(row.known_limitations_json as string),
       [],
@@ -358,10 +377,11 @@ export function registerModel(
       license, backend, task_types_json, input_types_json, output_types_json,
       supported_resolutions_json, supported_frame_rates_json,
       supported_duration_json, vram_requirement_mb, ram_requirement_mb,
-      dependencies_json, default_settings_json, known_limitations_json,
+      dependencies_json, default_settings_json, draft_settings_json,
+      production_settings_json, known_limitations_json,
       enabled, installed_at, last_used_at, health_status, health_error,
       health_checked_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
       NULL, NULL, NULL, NULL, ?, ?)`,
   );
   (insert.run as (...params: unknown[]) => unknown)(
@@ -383,6 +403,8 @@ export function registerModel(
     input.ram_requirement_mb ?? null,
     JSON.stringify(input.dependencies ?? []),
     JSON.stringify(defaultSettings ?? {}),
+    JSON.stringify(input.draft_settings ?? {}),
+    JSON.stringify(input.production_settings ?? {}),
     JSON.stringify(input.known_limitations ?? null),
     input.enabled === false ? 0 : 1,
     now,
@@ -461,6 +483,10 @@ export function updateModel(
       : existing.ram_requirement_mb,
     dependencies_json: JSON.stringify(patch.dependencies ?? existing.dependencies),
     default_settings_json: JSON.stringify(mergedSettings),
+    draft_settings_json: JSON.stringify(patch.draft_settings ?? existing.draft_settings),
+    production_settings_json: JSON.stringify(
+      patch.production_settings ?? existing.production_settings,
+    ),
     known_limitations_json: JSON.stringify(
       patch.known_limitations !== undefined ? patch.known_limitations : existing.known_limitations,
     ),

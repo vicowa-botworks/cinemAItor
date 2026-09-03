@@ -642,6 +642,20 @@ The product track follows `MASTER-PLAN.md`.
       id — `{{prompt}}`/`{{seed}}`/`{{input:0}}` wiring, output-node requirement, no local install
       needed, and why the ComfyUI "Save as Python script" export is the wrong artifact); +1 backend
       test step
+- [x] Generation profiles — draft/production (issue #155, Workstream 18): models can carry two
+      optional settings profiles — `draft_settings` (speed-first) and `production_settings`
+      (quality-first), free-form JSON overrides of the same shape as `default_settings` (migration
+      `0030`). A generation request (`POST /api/v1/assets/generate` and `/:id/generate`) accepts
+      `profile: "draft" | "production"`; the profile lands in the job's `settings.profile` and the
+      runner merges `default_settings` ← profile ← job settings (pure, unit-tested
+      `mergeProfileSettings` — job-level keys always win, so a profile can tune quality but never
+      break the invocation; models without the profile behave exactly as before). Draft→production
+      workflow: generate draft → approve the candidate → re-run with `profile: "production"` +
+      `include_current` (the approved draft becomes a reference for reference-to-video models). UI:
+      "Quality profile" picker on the asset generate form + a one-click "Produce final from current
+      version" button in edit mode; per-model Profiles editor (two JSON textareas, admin) on the
+      model cards. See `docs/generation_profiles.md`; +4 backend test steps (pure helper, model
+      round-trip, generate threading + 400)
 
 ### Planned (next work packages per MASTER-PLAN.md)
 
@@ -716,3 +730,5 @@ The product track follows `MASTER-PLAN.md`.
   Aug 25 2026
 - ComfyUI hosted-server support (health check no longer requires a local file for remote backends
   - hosted-ComfyUI docs): Tue Aug 25 2026
+- Generation profiles (draft/production settings per model + quality-profile picker +
+  draft→production one-click): Thu Sep 3 2026

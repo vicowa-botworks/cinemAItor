@@ -1213,6 +1213,8 @@ export class ModelManager extends LitElement {
     taskDraft: { state: true },
     settingsEditorId: { state: true },
     settingsDraft: { state: true },
+    profileEditorId: { state: true },
+    profileDrafts: { state: true },
     llm: { state: true },
     llmConfigured: { state: true },
     llmDraft: { state: true },
@@ -1285,6 +1287,8 @@ export class ModelManager extends LitElement {
     this.taskDraft = [];
     this.settingsEditorId = null;
     this.settingsDraft = "";
+    this.profileEditorId = null;
+    this.profileDrafts = { draft: "", production: "" };
     this.llm = null;
     this.llmConfigured = false;
     this.llmDraft = null;
@@ -3361,11 +3365,19 @@ export class ModelManager extends LitElement {
                   @click=${() => this._openSettingsEditor(m)}>
                   ${this.settingsEditorId === m.id ? "Close" : "Settings"}
                 </button>
+                <button
+                  class="btn-small task-edit-btn"
+                  ?disabled=${busy || this.busyId === m.id}
+                  title="Edit the draft/production generation profiles (JSON overrides merged over default_settings by the quality profile)"
+                  @click=${() => this._openProfileEditor(m)}>
+                  ${this.profileEditorId === m.id ? "Close" : "Profiles"}
+                </button>
               `
               : null}
           </div>
           ${this.taskEditorId === m.id ? this._renderTaskEditor(m) : null}
           ${this.settingsEditorId === m.id ? this._renderSettingsEditor(m) : null}
+          ${this.profileEditorId === m.id ? this._renderProfileEditor(m) : null}
           ${m.vram_requirement_mb !== null
             ? html`<span>VRAM ≥ ${this._fmtMb(m.vram_requirement_mb)}</span>`
             : null}
@@ -3609,6 +3621,100 @@ export class ModelManager extends LitElement {
       await this._loadModels();
     } catch (err) {
       this.error = err.message || "Failed to update settings.";
+    } finally {
+      this.busyId = null;
+    }
+  }
+
+  _renderProfileEditor(m) {
+    const drafts = this.profileDrafts;
+    return html`
+      <div class="task-editor">
+        <span class="reg-tasks-label">
+          Generation profiles (JSON overrides, merged over default_settings — empty {}
+          = use the defaults):
+        </span>
+        <span class="reg-tasks-label">draft (fast, speed-first):</span>
+        <textarea
+          class="settings-editor-input"
+          spellcheck="false"
+          .value=${drafts.draft}
+          @input=${(e) => (this.profileDrafts = { ...drafts, draft: e.target.value })}></textarea>
+        <span class="reg-tasks-label">production (quality-first):</span>
+        <textarea
+          class="settings-editor-input"
+          spellcheck="false"
+          .value=${drafts.production}
+          @input=${(
+            e,
+          ) => (this.profileDrafts = { ...drafts, production: e.target.value })}></textarea>
+        <span class="reg-tasks-label">
+          Jobs pick a profile via the generate form's "Quality profile" (draft/production).
+          Job settings always win over the profile.
+        </span>
+        <span class="task-editor-actions">
+          <button
+            class="btn-small"
+            ?disabled=${this.busyId === m.id}
+            @click=${() => this._saveProfiles(m)}>
+            ${this.busyId === m.id ? "Saving…" : "Save profiles"}
+          </button>
+          <button class="btn-small btn-quiet" @click=${() => this._closeProfileEditor()}>
+            Cancel
+          </button>
+        </span>
+      </div>
+    `;
+  }
+
+  _openProfileEditor(m) {
+    if (this.profileEditorId === m.id) {
+      this._closeProfileEditor();
+      return;
+    }
+    this._closeTaskEditor();
+    this._closeSettingsEditor();
+    const draft = JSON.stringify(m.draft_settings || {}, null, 2);
+    const production = JSON.stringify(m.production_settings || {}, null, 2);
+    this.profileEditorId = m.id;
+    this.profileDrafts = { draft, production };
+  }
+
+  _closeProfileEditor() {
+    this.profileEditorId = null;
+    this.profileDrafts = { draft: "", production: "" };
+  }
+
+  async _saveProfiles(m) {
+    const payload = {};
+    for (const key of ["draft_settings", "production_settings"]) {
+      const raw = this.profileDrafts[key === "draft_settings" ? "draft" : "production"];
+      let parsed;
+      try {
+        parsed = JSON.parse(raw || "{}");
+        if (
+          typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+        ) {
+          throw new Error("must be a JSON object");
+        }
+      } catch (err) {
+        this.error = `${key} is not valid JSON: ${err.message}`;
+        return;
+      }
+      payload[key] = parsed;
+    }
+    this.busyId = m.id;
+    this.error = "";
+    try {
+      await api.updateModel(m.id, payload);
+      this._closeProfileEditor();
+      this.notice = {
+        kind: "ok",
+        text: `"${m.name}" generation profiles updated.`,
+      };
+      await this._loadModels();
+    } catch (err) {
+      this.error = err.message || "Failed to update profiles.";
     } finally {
       this.busyId = null;
     }

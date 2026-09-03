@@ -271,6 +271,7 @@ export const assetRouter = new Router()
       candidates: body.candidates,
       references: parseReferences(body.references),
       device: body.device,
+      profile: body.profile,
     });
     ctx.response.status = 202;
     ctx.response.body = result;
@@ -288,6 +289,7 @@ export const assetRouter = new Router()
       include_current: body.include_current === true,
       references: parseReferences(body.references),
       device: body.device,
+      profile: body.profile,
     });
     ctx.response.status = 202;
     ctx.response.body = result;
@@ -714,7 +716,9 @@ export const openApiOps: Record<string, OperationMeta> = {
       "references the task is text_to_image / text_to_video; with image or " +
       "video references it becomes image_to_image / image_to_video. " +
       "Candidates are stored as versions of the new asset and picked in the " +
-      "review workflow.",
+      "review workflow. An optional profile ('draft' / 'production') merges " +
+      "the model's matching settings profile over its default_settings " +
+      "(see docs/generation_profiles.md).",
     requestBody: { schema: ref("AssetGenerateRequest") },
     responses: {
       202: {
@@ -730,7 +734,11 @@ export const openApiOps: Record<string, OperationMeta> = {
       "versions of the target asset (the last candidate becomes the active " +
       "version; use the review board to compare and approve). With " +
       "include_current or references the task is image_to_image / " +
-      "image_to_video, otherwise text_to_image / text_to_video.",
+      "image_to_video, otherwise text_to_image / text_to_video. An optional " +
+      "profile ('draft' / 'production') merges the model's matching settings " +
+      "profile over its default_settings; the draft→production workflow " +
+      "re-runs the winning prompt with include_current + profile " +
+      "'production' (see docs/generation_profiles.md).",
     requestBody: { schema: ref("AssetEditRequest") },
     responses: {
       202: {

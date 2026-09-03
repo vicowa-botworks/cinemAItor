@@ -53,6 +53,16 @@ export const DEFAULT_CANDIDATES = 2;
 export const GENERATION_DEVICES = ["cpu", "cuda"] as const;
 export type GenerationDevice = (typeof GENERATION_DEVICES)[number];
 
+/**
+ * Quality profiles for prompt-based generation (Workstream 18, issue #155).
+ * Selects the model's optional override profile that the runner merges over
+ * the model's default_settings (under the job's own settings): "draft" is
+ * speed-first (composition iterations), "production" is quality-first (the
+ * final take). Models without the profile keep their default settings.
+ */
+export const GENERATION_PROFILES = ["draft", "production"] as const;
+export type GenerationProfile = (typeof GENERATION_PROFILES)[number];
+
 export interface AssetReferenceInput {
   asset_id: string;
   version_number?: number;
@@ -71,6 +81,7 @@ export interface GenerateNewAssetOptions {
   candidates?: unknown;
   references?: AssetReferenceInput[];
   device?: unknown;
+  profile?: unknown;
 }
 
 export interface GenerateIntoAssetOptions {
@@ -82,6 +93,7 @@ export interface GenerateIntoAssetOptions {
   include_current?: boolean;
   references?: AssetReferenceInput[];
   device?: unknown;
+  profile?: unknown;
 }
 
 export interface AssetGenerateResult {
@@ -121,6 +133,14 @@ export function resolveDevice(value: unknown): GenerationDevice | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (value !== "cpu" && value !== "cuda") {
     throw badRequest(`device must be one of: ${GENERATION_DEVICES.join(", ")}`);
+  }
+  return value;
+}
+
+export function resolveProfile(value: unknown): GenerationProfile | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value !== "draft" && value !== "production") {
+    throw badRequest(`profile must be one of: ${GENERATION_PROFILES.join(", ")}`);
   }
   return value;
 }
@@ -225,6 +245,7 @@ function enqueueGeneration(
   inputs: { asset_id: string; version_number: number }[],
   target: { asset_id: string; project_id: string | null },
   device: GenerationDevice | undefined,
+  profile: GenerationProfile | undefined,
 ) {
   const taskType = inputs.length > 0 ? KIND_TASK_TYPES[kind].input : KIND_TASK_TYPES[kind].text;
   const model = pickModel(taskType, modelId);
@@ -238,6 +259,9 @@ function enqueueGeneration(
     settings: {
       candidates,
       ...(device ? { device } : {}),
+      // Quality profile (draft/production): the runner merges the model's
+      // matching settings profile over default_settings (under job settings).
+      ...(profile ? { profile } : {}),
       // The model's declared VRAM requirement, so the runner's auto-fallback
       // threshold matches the UI's pre-generation VRAM check (both read
       // vram_requirement_mb). local_cli only — other backends ignore it.
@@ -307,6 +331,7 @@ export function generateNewAsset(
     inputs,
     { asset_id: asset.id, project_id: projectId ?? null },
     resolveDevice(options.device),
+    resolveProfile(options.profile),
   );
 }
 
@@ -366,5 +391,6 @@ export function generateIntoAsset(
     inputs,
     { asset_id: asset.id, project_id: asset.project_id },
     resolveDevice(options.device),
+    resolveProfile(options.profile),
   );
 }

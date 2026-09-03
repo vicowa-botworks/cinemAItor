@@ -11,7 +11,7 @@
  * resolves to a schema defined here.
  */
 
-import { deviceProperty, type OpenApiSchema, ref } from "./types.ts";
+import { deviceProperty, type OpenApiSchema, profileProperty, ref } from "./types.ts";
 
 const isoDate = { type: "string", format: "date-time" };
 
@@ -853,6 +853,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         items: ref("AssetReference"),
       },
       device: deviceProperty(),
+      profile: profileProperty(),
     },
   },
 
@@ -885,6 +886,7 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
         items: ref("AssetReference"),
       },
       device: deviceProperty(),
+      profile: profileProperty(),
     },
   },
 
@@ -1950,6 +1952,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       "output_types",
       "dependencies",
       "default_settings",
+      "draft_settings",
+      "production_settings",
       "enabled",
       "created_at",
       "updated_at",
@@ -1980,6 +1984,18 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       default_settings: {
         type: "object",
         additionalProperties: true,
+      },
+      draft_settings: {
+        type: "object",
+        additionalProperties: true,
+        description: "Speed-first settings overrides merged over default_settings " +
+          "when a generation job sets profile 'draft' ({} = no overrides).",
+      },
+      production_settings: {
+        type: "object",
+        additionalProperties: true,
+        description: "Quality-first settings overrides merged over default_settings " +
+          "when a generation job sets profile 'production' ({} = no overrides).",
       },
       known_limitations: { type: ["array", "null"], items: { type: "string" } },
       enabled: { type: "boolean" },
@@ -2043,6 +2059,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       ram_requirement_mb: { type: "integer" },
       dependencies: { type: "array", items: { type: "string" } },
       default_settings: { type: "object", additionalProperties: true },
+      draft_settings: { type: "object", additionalProperties: true },
+      production_settings: { type: "object", additionalProperties: true },
       known_limitations: { type: "array", items: { type: "string" } },
       enabled: { type: "boolean" },
     },
@@ -2068,6 +2086,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       ram_requirement_mb: { type: "integer" },
       dependencies: { type: "array", items: { type: "string" } },
       default_settings: { type: "object", additionalProperties: true },
+      draft_settings: { type: "object", additionalProperties: true },
+      production_settings: { type: "object", additionalProperties: true },
       enabled: { type: "boolean" },
       agent_auto_approve: { type: "boolean" },
     },

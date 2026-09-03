@@ -26,7 +26,7 @@ import {
 import { executeBenchmarkJob } from "./model_benchmark.ts";
 import { hfTokenForUrl } from "./huggingface.ts";
 import { analyzeAudioFile, buildAudioMetadata } from "./audio_info.ts";
-import { getModel, touchModelLastUsed } from "../db/models.ts";
+import { getModel, type Model, touchModelLastUsed } from "../db/models.ts";
 import {
   type AssetVersion,
   createAsset,
@@ -59,6 +59,29 @@ const IMAGE_TASKS = ["text_to_image", "image_to_image"];
 function randomHex(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Merge a model's generation profile settings (Workstream 18, issue #155):
+ * default_settings <- profile <- job settings. When job.settings.profile is
+ * "draft" / "production", the model's matching profile object is merged over
+ * default_settings. Job-level keys always win, so operational settings
+ * (candidates, device, min_free_vram_mb) — and the invocation itself
+ * (command/endpoint/workflow) — can never be overridden or dropped by a
+ * profile. A requested-but-absent (or empty) profile is a no-op, so models
+ * without profiles keep their exact previous behavior.
+ */
+export function mergeProfileSettings(
+  model: Model,
+  jobSettings: Record<string, unknown>,
+): Record<string, unknown> {
+  const profile = jobSettings.profile;
+  const profileSettings = profile === "draft"
+    ? model.draft_settings
+    : profile === "production"
+    ? model.production_settings
+    : {};
+  return { ...model.default_settings, ...profileSettings, ...jobSettings };
 }
 
 /**
@@ -412,9 +435,10 @@ export function startJobRunner(options: JobRunnerOptions = {}): JobRunner {
       await Deno.mkdir(store.layout.cache, { recursive: true });
       const inputRefs = await resolveInputFiles(job);
 
-      // Model presets (default_settings) apply to every backend; job-level
+      // Model presets (default_settings) apply to every backend; the job's
+      // quality profile (draft/production), when set, sits in between; job-level
       // settings override them key by key.
-      const adapterSettings = { ...model.default_settings, ...job.settings };
+      const adapterSettings = mergeProfileSettings(model, job.settings);
 
       const result = await adapter.generate(
         {

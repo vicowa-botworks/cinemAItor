@@ -69,6 +69,12 @@ export class AssetGenerate extends VramGuard(LitElement) {
       gap: 14px;
     }
 
+    .row-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
     .kind-toggle {
       display: flex;
       gap: 8px;
@@ -171,6 +177,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     modelId: { state: true },
     seed: { state: true },
     candidates: { state: true },
+    profile: { state: true },
     references: { state: true },
     includeCurrent: { state: true },
     models: { state: true },
@@ -196,6 +203,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this.modelId = "";
     this.seed = "";
     this.candidates = 2;
+    this.profile = "";
     this.references = [];
     this.includeCurrent = false;
     this.models = [];
@@ -305,6 +313,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     if (seed !== undefined) payload.seed = seed;
     payload.candidates = normalizeCandidates(this.candidates);
     if (this.modelId) payload.model_id = this.modelId;
+    if (this.profile) payload.profile = this.profile;
     if (this.references.length > 0) payload.references = this.references;
     if (this._isEdit()) {
       if (this.includeCurrent && this.editAsset.active_version_id) {
@@ -539,7 +548,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
             : ""}
         `}
 
-        <div class="row-3">
+        <div class="row-4">
           <div>
             <label for="gen-model">Model</label>
             <select
@@ -583,6 +592,22 @@ export class AssetGenerate extends VramGuard(LitElement) {
               }}
               ?disabled=${this.busy} />
           </div>
+          <div>
+            <label
+              for="gen-profile"
+              title="Use the model's matching settings profile (draft = speed-first, production = quality-first). Models without profiles keep their default settings.">Quality profile</label>
+            <select
+              id="gen-profile"
+              .value=${this.profile}
+              @change=${(e) => {
+                this.profile = e.target.value;
+              }}
+              ?disabled=${this.busy}>
+              <option value="">model default</option>
+              <option value="draft">draft (fast)</option>
+              <option value="production">production (quality)</option>
+            </select>
+          </div>
         </div>
 
         ${this._isEdit() && this.editAsset?.active_version_id
@@ -599,6 +624,18 @@ export class AssetGenerate extends VramGuard(LitElement) {
                 ?.version_number ??
                 "?"}) as a reference
             </label>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              ?disabled=${this.busy}
+              title="Draft→production: re-run this prompt with the model's production profile, using the current version as a reference."
+              @click=${() => {
+                this.profile = "production";
+                this.includeCurrent = true;
+                this._submit();
+              }}>
+              Produce final from current version (production profile)
+            </button>
           `
           : ""}
 
