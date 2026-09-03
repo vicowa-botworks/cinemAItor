@@ -36,6 +36,24 @@ export function deviceProperty(): OpenApiSchema {
   };
 }
 
+/**
+ * Quality profile for prompt-based generation (Workstream 18, issue #155).
+ * Selects the model's optional override profile that the runner merges over
+ * the model's default_settings (under the job's own settings); models
+ * without the profile keep their default settings.
+ */
+export function profileProperty(): OpenApiSchema {
+  return {
+    type: "string",
+    enum: ["draft", "production"],
+    description: "Run the generation with the model's matching settings " +
+      "profile: 'draft' is speed-first (composition iterations), " +
+      "'production' is quality-first (the final take). The profile is " +
+      "merged over the model's default_settings (job settings win). " +
+      "Without it the model's default_settings apply unchanged.",
+  };
+}
+
 export interface ResponseMeta {
   description: string;
   /** JSON response schema. Omit for empty (204) responses. */

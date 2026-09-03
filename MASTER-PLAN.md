@@ -1307,6 +1307,21 @@ The Model Copilot exposes MCP server tools alongside its built-ins (qualified na
 `mcp__<server>__<tool>`); non-read-only MCP tools go through the same approval-proposal flow as
 built-in mutating tools (see section 38).
 
+## 8.16 Generation Profiles (Workstream 18)
+
+```text
+POST   /api/v1/models                  (admin) register — optional draft_settings /
+                                            production_settings JSON profiles
+PATCH  /api/v1/models/:id              (admin) update — same profile fields (patch semantics)
+GET    /api/v1/models[/:id]            return both profiles (default {})
+POST   /api/v1/assets/generate         new optional body field: profile "draft" | "production"
+POST   /api/v1/assets/:id/generate     same (the draft→production loop composes from
+                                        include_current + profile=production)
+```
+
+The profile is merged over the model's default_settings (under the job's operational settings) when
+the runner builds the adapter settings; an empty or absent profile changes nothing (see section 39).
+
 ---
 
 # 9. Core Workstreams
@@ -1577,6 +1592,29 @@ Non-goals (v1):
 - Durable proposals or persistent MCP state (proposals stay in-memory, TTL 1 h)
 
 Detailed design: section 38.
+
+## Workstream 18: Generation Profiles (Draft / Production)
+
+Goal: make prompt-based video generation fast to iterate and high quality on the final pass — models
+carry optional draft (speed-first) and production (quality-first) settings profiles, and an approved
+draft can be fed back as a reference to produce the final take.
+
+Scope:
+
+- Per-model `draft_settings` / `production_settings` JSON profiles (migration 0030), admin-editable
+  in the model registry (register/update/PATCH + the per-model settings editor on the Models page)
+- Generation requests accept `profile: "draft" | "production"` (asset generate + edit endpoints);
+  the runner merges default_settings ← profile ← job settings (pure, unit-tested helper); the
+  profile is recorded in the job's settings and carried in the produced version's provenance
+- UI: "Quality profile" select on the asset generate form (create + edit) and a "Produce from
+  current draft" one-click button (edit mode, video assets with an active version:
+  profile=production + current version as reference, same prompt and references)
+
+Non-goals (v1): profiles on scene/shot, storyboard, audio, skill, or timeline-score generation;
+per-asset or per-request ad-hoc profile JSON; runner-side interpretation of profile keys (they pass
+through to the model's invocation).
+
+Detailed design: section 39.
 
 ---
 
@@ -2293,6 +2331,17 @@ Post-MVP, JSON/YAML first.
 | MCP-005 | Approval gating     | MCP tools without `readOnlyHint` create admin approval proposals (dedupe, in-flight, auto-continue unchanged); non-admin callers do not receive any non-read-only MCP tool in the tool schema                                           |
 | MCP-006 | Lifecycle           | Disable/delete closes the live connection; SIGTERM/SIGINT close all MCP connections (no orphaned stdio children); the next use reconnects transparently                                                                                 |
 | MCP-007 | MCP Servers UI      | Models page panel (admin): server rows with status chips, add/edit form, test button (save-then-test), tool list with read-only chips; copilot steps/proposals for `mcp__…` tools show an `MCP: <server>` badge                         |
+
+## 11.21 Generation Profiles (Workstream 18)
+
+| ID     | Feature             | Acceptance criteria                                                                                                                                                                                                       |
+| ------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VP-001 | Model profiles      | Migration 0030 adds `draft_settings_json` / `production_settings_json` (DEFAULT '{}'); register/update validate JSON objects and persist them; GET views return both (empty {} when unset)                                |
+| VP-002 | Generation profile  | Both asset generate endpoints accept `profile` "draft" / "production" (400 for any other value) and record it in the queued job's settings                                                                                |
+| VP-003 | Settings merge      | The runner merges default_settings ← profile ← job settings (unit-tested pure helper); a model without the requested profile behaves exactly as before                                                                    |
+| VP-004 | Model manager UI    | Per-model settings editor covers all three fields (default / draft / production) with individual edit buttons + single-field PATCH (admin only)                                                                           |
+| VP-005 | Draft→production UX | Asset generate form (create + edit) offers a Quality profile select; edit mode for video assets with an active version offers "Produce from current draft" (profile=production + include_current, same prompt/references) |
+| VP-006 | Docs + contract     | `docs/generation_profiles.md` contract, MASTER-PLAN workstream 18 + section 39, ARCHITECTURE.md + docs/assets.md + docs/models.md mentions, OpenAPI schemas updated; full gate green                                      |
 
 ---
 
@@ -3985,3 +4034,119 @@ per-server `auto_approve` for auto-execution; everything else costs an approval)
 initiates MCP sampling and does not expose MCP resources/prompts — tools only. Limits: name ≤ 64
 chars, description ≤ 500 chars, timeout 5–3600 s, tool JSON schema ≤ 16 KB (larger tools are dropped
 with a warning), qualified tool name ≤ 64 chars.
+
+---
+
+# 39. Generation Profiles Design (Workstream 18)
+
+## Problem
+
+Video generation runs are slow. Iterating on composition at production quality is expensive; the
+final take, however, should use the model's full quality settings. Issue #155: assign per-model
+**draft** (speed-first) and **production** (quality-first) settings, and once a draft composition is
+approved, regenerate it with the production settings while feeding the approved draft back in as an
+additional reference (models that accept a video reference, e.g. minimax H3 reference-to-video). All
+other references and the winning prompt stay unchanged.
+
+## Design
+
+### Storage
+
+Migration `0030_generation_profiles.sql`:
+
+```sql
+ALTER TABLE models ADD COLUMN draft_settings_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE models ADD COLUMN production_settings_json TEXT NOT NULL DEFAULT '{}';
+```
+
+Both are JSON objects of the same free-form shape as `default_settings` (model/runner-specific keys
+the app does not interpret). No backend-specific contract: a profile is an _override_, so it never
+has to carry `command` / `endpoint` / `workflow`.
+
+`db/models.ts`: `Model.draft_settings` / `Model.production_settings` (parsed, default `{}`);
+`RegisterModelInput` / `UpdateModelInput` accept both; the insert + update paths persist them;
+`rowToModel` parses with the same `JSON.parse(row.x ?? "{}")` idiom as `default_settings`.
+
+### Settings precedence
+
+When the job runner builds the adapter settings (`services/job_runner.ts`):
+
+```text
+adapterSettings = { ...model.default_settings, ...profileSettings, ...job.settings }
+```
+
+- `profileSettings` is the model's draft/production profile when `job.settings.profile` is set
+  **and** the model has a non-empty profile for it; otherwise `{}`. A requested-but-absent profile
+  is a no-op, never an error — models without profiles keep today's behavior.
+- Job settings always win: `candidates`, `device`, `min_free_vram_mb` are operational and must not
+  be overridable by a profile; a profile must also not be able to break the invocation (e.g. drop
+  `command`).
+
+Implemented as a pure helper `mergeProfileSettings(model, jobSettings)` (unit-tested: precedence,
+empty profile, absent profile, profile-only keys, job-key wins).
+
+### Generation API
+
+`services/asset_generation.ts`:
+
+- `GENERATION_PROFILES = ["draft", "production"]`; `resolveProfile(value)` mirrors `resolveDevice`
+  (undefined / `""` → undefined; any other value not in the list → 400).
+- `GenerateNewAssetOptions.profile` / `GenerateIntoAssetOptions.profile`; `enqueueGeneration` stores
+  it in the job settings when set
+  (`settings: { candidates, profile?, device?,
+  min_free_vram_mb? }`).
+- `routes/assets.ts`: both generate endpoints pass `profile: body.profile`.
+
+The profile rides on the job row, so it shows in job details and in the produced version's
+job-settings provenance without new storage.
+
+### Draft → production loop
+
+1. `POST /api/v1/assets/generate` (or `/:id/generate`) with `profile: "draft"` → fast composition
+   candidates.
+2. Approve a candidate (review board) → it becomes the active version.
+3. `POST /api/v1/assets/:id/generate` with the same prompt, the same other references,
+   `include_current: true` (the approved draft joins the reference list as a video input) and
+   `profile: "production"` → the reference-accepting model renders the final take conditioned on the
+   approved draft.
+4. Approve the production candidate as the final version.
+
+No new endpoint: step 3 composes from the existing generate endpoint's `references` +
+`include_current` + the new `profile`.
+
+### Frontend
+
+**Model manager (admin).** The per-model settings editor (`_renderSettingsEditor`) is generalized
+from one field to three: `default_settings`, `draft_settings`, `production_settings`. State:
+`settingsEditorId` + `settingsField`; the model card's admin row gains "Settings", "Draft settings"
+and "Production settings" edit buttons (opening the same editor UI with a field-specific hint: draft
+= speed-first overrides, production = quality-first overrides). Save patches the single field
+(`api.updateModel(id, { [field]: parsed })`).
+
+**Asset generate form (create + edit).** New "Quality profile" select (Default / Draft — speed first
+/ Production — quality first); non-default values are added to the payload as `profile`. In edit
+mode for video assets with an active version, a "Produce from current draft" button sets
+`profile="production"` and "use current version" (include_current) and submits the form — the
+draft→production loop in one click, prompt and references untouched.
+
+### OpenAPI
+
+- `Model`, `ModelCreateRequest`, `ModelUpdateRequest`: add `draft_settings` / `production_settings`
+  (object, additionalProperties).
+- `AssetGenerateRequest` / `AssetEditRequest`: add `profile` (`enum: ["draft", "production"]`)
+  - description update on both generate ops.
+
+### Docs
+
+- `docs/generation_profiles.md` — this contract.
+- `docs/models.md` — registry fields; `docs/assets.md` — generation profile + workflow;
+  `ARCHITECTURE.md` — model routes + asset routes + model-manager / asset-generate UI entries.
+
+### Tests
+
+- `migrations.test.ts`: 0030 in the filename list + `schema_migrations` count.
+- Models: register/update with both profiles round-trip; GET exposes them; non-object profile
+  rejected 400.
+- `mergeProfileSettings`: precedence table (pure unit test).
+- Generate routes: `profile` accepted → job settings carry it; invalid value 400; absent profile →
+  no `profile` key, behavior unchanged.

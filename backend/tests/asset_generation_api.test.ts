@@ -314,6 +314,112 @@ describe("asset generation api", () => {
     });
   });
 
+  it("threads the quality profile into job settings and rejects unknown profiles", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const profiledModelId = registerModel(ownerId, {
+          name: "mock-t2i-profiled",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["text_to_image"],
+          enabled: true,
+          draft_settings: { resolution: "512" },
+          production_settings: { resolution: "1024" },
+        }).id;
+
+        const gen = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "a lighthouse at dusk",
+            unique_slug: uniqueSlug("profiled"),
+            model_id: profiledModelId,
+            profile: "production",
+          },
+          ownerToken,
+        );
+        assertEquals(gen.status, 202);
+        const body = gen.json as { job_id: string; asset_id: string };
+
+        const { status, json } = await req(
+          "GET",
+          `/api/v1/jobs/${body.job_id}`,
+          undefined,
+          ownerToken,
+        );
+        assertEquals(status, 200);
+        const settings = (json as { settings: Record<string, unknown> }).settings;
+        assertEquals(settings.profile, "production");
+
+        // Draft profile on the edit endpoint (same asset, new versions).
+        const edit = await req(
+          "POST",
+          `/api/v1/assets/${body.asset_id}/generate`,
+          {
+            kind: "image",
+            prompt: "warmer light",
+            model_id: profiledModelId,
+            profile: "draft",
+          },
+          ownerToken,
+        );
+        assertEquals(edit.status, 202);
+        const editJobId = (edit.json as { job_id: string }).job_id;
+        const editJob = await req(
+          "GET",
+          `/api/v1/jobs/${editJobId}`,
+          undefined,
+          ownerToken,
+        );
+        assertEquals(
+          (editJob.json as { settings: Record<string, unknown> }).settings.profile,
+          "draft",
+        );
+
+        // No profile → no profile key in the job settings.
+        const plain = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "a lighthouse at dawn",
+            unique_slug: uniqueSlug("plain"),
+            model_id: profiledModelId,
+          },
+          ownerToken,
+        );
+        assertEquals(plain.status, 202);
+        const plainJob = await req(
+          "GET",
+          `/api/v1/jobs/${(plain.json as { job_id: string }).job_id}`,
+          undefined,
+          ownerToken,
+        );
+        assert(
+          !("profile" in (plainJob.json as { settings: Record<string, unknown> }).settings),
+          "no profile key without the profile field",
+        );
+
+        // Unknown profile → 400 (asset created nothing, job not queued).
+        const bad = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "a lighthouse",
+            unique_slug: uniqueSlug("badprofile"),
+            model_id: profiledModelId,
+            profile: "ultra",
+          },
+          ownerToken,
+        );
+        assertEquals(bad.status, 400);
+      })();
+    });
+  });
+
   it("generates a new video asset with the text_to_video task", async () => {
     await withServer((base) => {
       baseUrl = base;

@@ -19,9 +19,10 @@ leases, and model runtimes behind a common adapter interface.
   run without model binaries. **local_cli** (GEN-009) runs a user-configured command per candidate
   and **comfyui** (GEN-010) submits a workflow to a local ComfyUI server — both are driven by the
   model's `default_settings` (see `docs/models.md` "Real adapters"). The runner resolves the job's
-  input asset files, merges `default_settings` into the job settings, and passes a per-job working
-  directory before invoking the adapter. Unknown backends fail the job with a clear error until an
-  adapter is registered.
+  input asset files, merges `default_settings` into the job settings (then the job's quality profile
+  over them, see `docs/generation_profiles.md`), and passes a per-job working directory before
+  invoking the adapter. Unknown backends fail the job with a clear error until an adapter is
+  registered.
 
 ## Endpoints
 

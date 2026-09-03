@@ -180,6 +180,72 @@ describe("models api", () => {
     });
   });
 
+  it("stores and patches generation profile settings", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        // Without profiles the fields default to empty objects.
+        const bare = await registerModel({
+          name: "no-profiles",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["text_to_image"],
+        });
+        assertEquals(bare.status, 201);
+        const bareBody = (await bare.json()) as Record<string, unknown>;
+        assertEquals(bareBody.draft_settings, {});
+        assertEquals(bareBody.production_settings, {});
+
+        const res = await registerModel({
+          name: "profiled",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["text_to_image"],
+          draft_settings: { resolution: "512", steps: 4 },
+          production_settings: { resolution: "1024", steps: 50 },
+        });
+        assertEquals(res.status, 201);
+        const model = (await res.json()) as Record<string, unknown>;
+        assertEquals(model.draft_settings, { resolution: "512", steps: 4 });
+        assertEquals(model.production_settings, { resolution: "1024", steps: 50 });
+
+        // Non-object profiles are rejected.
+        assertEquals(
+          (
+            await registerModel({
+              name: "bad-profile",
+              version: "1.0",
+              backend: "mock",
+              task_types: ["text_to_image"],
+              draft_settings: "fast",
+            })
+          ).status,
+          400,
+        );
+
+        // PATCH round-trip: swap the profiles.
+        const patched = await patch(
+          `/api/v1/models/${model.id}`,
+          {
+            draft_settings: { resolution: "256" },
+            production_settings: {},
+          },
+          adminToken,
+        );
+        assertEquals(patched.status, 200);
+        const patchBody = (await patched.json()) as Record<string, unknown>;
+        assertEquals(patchBody.draft_settings, { resolution: "256" });
+        assertEquals(patchBody.production_settings, {});
+
+        const one = await get(`/api/v1/models/${model.id}`, adminToken);
+        assertEquals(
+          ((await one.json()) as Record<string, unknown>).draft_settings,
+          { resolution: "256" },
+        );
+      })();
+    });
+  });
+
   it("normalizes HF dashed task type aliases on registration", async () => {
     await withServer((base) => {
       baseUrl = base;

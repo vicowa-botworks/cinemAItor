@@ -15,7 +15,12 @@ import {
   retryJob,
   updateJobLease,
 } from "../src/db/jobs.ts";
-import { type JobRunner, requeueJobOnDevice, startJobRunner } from "../src/services/job_runner.ts";
+import {
+  type JobRunner,
+  mergeProfileSettings,
+  requeueJobOnDevice,
+  startJobRunner,
+} from "../src/services/job_runner.ts";
 import { resetContentStore } from "../src/storage/content_store.ts";
 import { MockAdapter } from "../src/services/adapters.ts";
 
@@ -640,5 +645,86 @@ describe("job runner", () => {
     assert(final);
     assertEquals(final.settings.device, "cuda");
     assert(final.output_asset_version_id);
+  });
+
+  it("merges generation profile settings: default < profile < job settings", () => {
+    const model = getModel(
+      registerModel(ownerId, {
+        name: "profile-model",
+        version: "1.0",
+        backend: "mock",
+        task_types: ["text_to_image"],
+        enabled: true,
+        default_settings: { resolution: "256", steps: 10, seed_policy: "keep" },
+        draft_settings: { resolution: "512", steps: 4 },
+        production_settings: { resolution: "1024", steps: 50 },
+      }).id,
+    )!;
+
+    // No profile: defaults only (job settings pass through).
+    assertEquals(
+      mergeProfileSettings(model, { candidates: 3 }),
+      { resolution: "256", steps: 10, seed_policy: "keep", candidates: 3 },
+    );
+
+    // Draft profile overrides matching keys, keeps the rest.
+    assertEquals(
+      mergeProfileSettings(model, { candidates: 3, profile: "draft" }),
+      { resolution: "512", steps: 4, seed_policy: "keep", candidates: 3, profile: "draft" },
+    );
+
+    // Production profile overrides.
+    assertEquals(
+      mergeProfileSettings(model, { profile: "production" }),
+      { resolution: "1024", steps: 50, seed_policy: "keep", profile: "production" },
+    );
+
+    // Job settings always beat the profile (operational + invocation keys).
+    assertEquals(
+      mergeProfileSettings(
+        model,
+        { profile: "production", resolution: "768", command: "real" },
+      ),
+      {
+        resolution: "768",
+        steps: 50,
+        seed_policy: "keep",
+        profile: "production",
+        command: "real",
+      },
+    );
+
+    // A model without the requested profile keeps its defaults (no-op).
+    const bare = getModel(
+      registerModel(ownerId, {
+        name: "bare-model",
+        version: "1.0",
+        backend: "mock",
+        task_types: ["text_to_video"],
+        enabled: true,
+        default_settings: { duration: 5 },
+      }).id,
+    )!;
+    assertEquals(
+      mergeProfileSettings(bare, { profile: "draft", candidates: 2 }),
+      { duration: 5, profile: "draft", candidates: 2 },
+    );
+
+    // An empty profile object is a no-op too.
+    const empty = getModel(
+      registerModel(ownerId, {
+        name: "empty-profile-model",
+        version: "1.0",
+        backend: "mock",
+        task_types: ["text_to_video"],
+        enabled: true,
+        default_settings: { duration: 5 },
+        draft_settings: {},
+      }).id,
+    )!;
+    assertEquals(
+      mergeProfileSettings(empty, { profile: "draft" }),
+      { duration: 5, profile: "draft" },
+    );
   });
 });

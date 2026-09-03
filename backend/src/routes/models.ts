@@ -210,6 +210,8 @@ export const modelRouter = new Router()
       ram_requirement_mb: optionalInt(body, "ram_requirement_mb"),
       dependencies: stringArray(body, "dependencies"),
       default_settings: jsonObject(body, "default_settings"),
+      draft_settings: jsonObject(body, "draft_settings"),
+      production_settings: jsonObject(body, "production_settings"),
       known_limitations: stringArray(body, "known_limitations"),
       enabled: optionalBool(body, "enabled"),
     };
@@ -313,6 +315,8 @@ export const modelRouter = new Router()
       ram_requirement_mb: optionalInt(body, "ram_requirement_mb"),
       dependencies: stringArray(body, "dependencies"),
       default_settings: jsonObject(body, "default_settings"),
+      draft_settings: jsonObject(body, "draft_settings"),
+      production_settings: jsonObject(body, "production_settings"),
       known_limitations: stringArray(body, "known_limitations"),
       enabled: optionalBool(body, "enabled"),
       agent_auto_approve: optionalBool(body, "agent_auto_approve"),

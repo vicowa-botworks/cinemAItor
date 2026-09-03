@@ -234,9 +234,10 @@ repo, `409` model id already registered, `502` HuggingFace unreachable, timed ou
 `mock` simulates generation; `local_cli` and `comfyui` run real generation. A job executes through
 the adapter registered for the picked model's backend (`getAdapter` in `services/adapters.ts`). The
 job runner resolves the job's input asset files, merges the model's `default_settings` into the job
-settings, and passes a scratch working directory (a content-store cache area; adapters write
-UUID-named temp files there) — adapters receive a ready context and return candidate bytes.
-`local_http` is still unimplemented (jobs for such models fail with "No adapter registered").
+settings (then the job's quality profile over them — `draft_settings` / `production_settings`, see
+`docs/generation_profiles.md`), and passes a scratch working directory (a content-store cache area;
+adapters write UUID-named temp files there) — adapters receive a ready context and return candidate
+bytes. `local_http` is still unimplemented (jobs for such models fail with "No adapter registered").
 
 Shared setting: `candidates` (number, 1–8, default 1) — one candidate per adapter pass.
 
