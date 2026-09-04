@@ -98,6 +98,7 @@ describe("migrations", () => {
         "0028_movie_scripts.sql",
         "0029_mcp_servers.sql",
         "0030_generation_profiles.sql",
+        "0031_asset_slug_partial_unique.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -133,12 +134,13 @@ describe("migrations", () => {
         "0028_movie_scripts.sql",
         "0029_mcp_servers.sql",
         "0030_generation_profiles.sql",
+        "0031_asset_slug_partial_unique.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        30,
+        31,
       );
     } finally {
       db.close();
@@ -180,6 +182,7 @@ describe("migrations", () => {
       "0028_movie_scripts.sql",
       "0029_mcp_servers.sql",
       "0030_generation_profiles.sql",
+      "0031_asset_slug_partial_unique.sql",
     ]);
   });
 
@@ -273,5 +276,35 @@ describe("migrations", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("frees a slug when its only asset is deleted (0031)", () => {
+    const db = getDb(":memory:");
+    const insertAsset = (id: string, slug: string, status: string) =>
+      db.exec(
+        `INSERT INTO assets
+           (id, library_scope, unique_slug, display_name, asset_type, status,
+            created_at, updated_at)
+         VALUES ('${id}', 'global', '${slug}', '${slug}', 'image', '${status}',
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      );
+
+    // A live asset and a deleted asset may share a slug — the partial index
+    // ignores deleted rows, so the user's original scenario passes.
+    insertAsset("a1", "shared", "draft");
+    insertAsset("a2", "shared", "deleted");
+
+    // But two live assets with the same slug are still rejected by the index.
+    let liveDuplicateThrew = false;
+    try {
+      insertAsset("a3", "shared", "draft");
+    } catch {
+      liveDuplicateThrew = true;
+    }
+    assert(liveDuplicateThrew, "expected a duplicate live slug to be rejected");
+
+    // A slug held only by deleted assets is freely reusable.
+    insertAsset("a4", "freed", "deleted");
+    insertAsset("a5", "freed", "draft");
   });
 });

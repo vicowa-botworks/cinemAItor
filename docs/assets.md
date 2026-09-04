@@ -10,7 +10,11 @@ and audit logs.
 - Primary slugs and aliases live in one global namespace: `@person`, `@room`, `@table`, ...
 - Slugs match `[a-z0-9][a-z0-9_]{0,63}` and are immutable after creation (aliases can change without
   breaking names).
-- Duplicates are rejected with a `CONFLICT` error.
+- Uniqueness is enforced across **live** assets only (a partial
+  `UNIQUE(unique_slug) WHERE status !=
+  'deleted'` index): two active assets cannot share a slug
+  and the duplicate is rejected with a `CONFLICT` error, but a deleted asset does not hold its slug,
+  so a new asset may reuse the name of a deleted one.
 
 ## Scoping
 
