@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import "./ref-input.js";
 import {
   generationKindForAsset,
   generationTaskType,
@@ -452,13 +453,14 @@ export class AssetGenerate extends VramGuard(LitElement) {
 
         <div>
           <label for="gen-prompt">Prompt</label>
-          <textarea
+          <ref-input
             id="gen-prompt"
             .value=${this.prompt}
             @input=${this._onPromptInput}
             ?disabled=${this.busy}
-            placeholder="Describe the ${kind === "video" ? "video" : "image"} to generate..."
-            required></textarea>
+            placeholder="Describe the ${kind === "video"
+              ? "video"
+              : "image"} to generate..."></ref-input>
           <div class="note">
             Task: ${inputLabel}
             ${this._hasInputs()

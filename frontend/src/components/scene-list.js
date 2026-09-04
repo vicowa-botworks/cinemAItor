@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import "./ref-input.js";
 import { parseScript, scriptToSceneInputs } from "../script-parse.js";
 import "./ai-assist-dialog.js";
 
@@ -495,12 +496,12 @@ export class SceneList extends LitElement {
                 </div>
                 <div class="field wide">
                   <label>Prompt (supports @asset references)</label>
-                  <textarea
+                  <ref-input
                     rows="3"
                     .value=${this.form.prompt}
                     @input=${(
                       e,
-                    ) => (this.form = { ...this.form, prompt: e.target.value })}></textarea>
+                    ) => (this.form = { ...this.form, prompt: e.target.value })}></ref-input>
                 </div>
               </div>
               <div class="filters">

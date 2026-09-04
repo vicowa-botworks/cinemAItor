@@ -108,7 +108,13 @@ export const referenceRouter = new Router()
           id: r.asset.id,
           slug: r.asset.unique_slug,
           display_name: r.asset.display_name,
+          asset_type: r.asset.asset_type,
           active_version_id: r.asset.active_version_id,
+          // The version this token resolves to (active for bare slugs, the
+          // requested one for `@slug:vN`) plus its media type — the UI uses
+          // these to render an inline thumbnail for image/video references.
+          version_id: r.asset_version?.id ?? null,
+          mime_type: r.asset_version?.mime_type ?? null,
         }
         : null,
     }));

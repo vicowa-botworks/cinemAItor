@@ -1,5 +1,6 @@
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
+import "./ref-input.js";
 import { VramGuard } from "./vram-guard.js";
 
 const KINDS = [
@@ -182,12 +183,12 @@ export class AudioDialog extends VramGuard(LitElement) {
           </div>
           <div class="field grow">
             <label for="audio-prompt">Prompt</label>
-            <textarea
+            <ref-input
               id="audio-prompt"
               placeholder="Describe the sound, e.g. 'tense orchestral drone with distant thunder'"
               .value=${this.prompt}
               ?disabled=${this.submitting}
-              @input=${(e) => (this.prompt = e.target.value)}></textarea>
+              @input=${(e) => (this.prompt = e.target.value)}></ref-input>
           </div>
         </div>
         ${this.error ? html`<div class="error">${this.error}</div>` : nothing}

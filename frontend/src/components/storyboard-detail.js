@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import "./ref-input.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
 import { VramGuard } from "./vram-guard.js";
 import { reconcilePreviews } from "./preview-reconcile.js";
@@ -539,11 +540,10 @@ export class StoryboardDetail extends VramGuard(LitElement) {
 
                 <div class="prompt-area">
                   <label for="prompt-${panel.id}">Prompt</label>
-                  <textarea
+                  <ref-input
                     id="prompt-${panel.id}"
                     .value=${panel.prompt?.content ?? ""}
-                    @change=${(e) => this._savePrompt(panel, e.target.value)}>
-      ${panel.prompt?.content ?? ""}</textarea>
+                    @change=${(e) => this._savePrompt(panel, e.target.value)}></ref-input>
                   ${panel.prompt?.warnings?.length
                     ? html`<div class="warnings">
                   ${panel.prompt.warnings.join(" · ")}

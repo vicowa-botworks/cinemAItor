@@ -1,6 +1,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
 import { replaceReferenceToken } from "../reference-repair.js";
+import "./ref-input.js";
 import "./ai-assist-dialog.js";
 
 const SCOPE_TYPES = ["generic", "prompt", "scene", "shot", "storyboard_panel"];
@@ -342,7 +343,6 @@ export class PromptEditor extends LitElement {
     content: { state: true },
     tokens: { state: true },
     parseWarnings: { state: true },
-    parsing: { state: true },
     history: { state: true },
     loading: { state: true },
     viewingVersion: { state: true },
@@ -368,7 +368,6 @@ export class PromptEditor extends LitElement {
     this.content = "";
     this.tokens = [];
     this.parseWarnings = [];
-    this.parsing = false;
     this.history = [];
     this.loading = false;
     this.viewingVersion = null;
@@ -384,14 +383,12 @@ export class PromptEditor extends LitElement {
     this.repairAssets = [];
     this.repairLoading = false;
     this.assistOpen = false;
-    this._parseTimer = null;
     this._pickerTimer = null;
     this._repairTimer = null;
   }
 
   disconnectedCallback() {
     super.disconnectedCallback?.();
-    if (this._parseTimer) clearTimeout(this._parseTimer);
     if (this._pickerTimer) clearTimeout(this._pickerTimer);
     if (this._repairTimer) clearTimeout(this._repairTimer);
   }
@@ -456,11 +453,12 @@ export class PromptEditor extends LitElement {
               `
               : null}
             <h3>Prompt text</h3>
-            <textarea
+            <ref-input
               class="content"
               placeholder="@hero walks into @room and spots @ghost:v2..."
               .value=${this.content}
-              @input=${this._onContentInput}></textarea>
+              @input=${this._onContentInput}
+              @references=${(e) => this._onReferences(e.detail)}></ref-input>
             <div class="editor-actions">
               <button
                 class="btn"
@@ -536,7 +534,7 @@ export class PromptEditor extends LitElement {
 
           <div style="display:flex; flex-direction:column; gap:20px;">
             <div class="panel">
-              <h3>References ${this.parsing ? "(parsing...)" : ""}</h3>
+              <h3>References</h3>
               ${this.tokens.length === 0
                 ? html`<div class="no-refs">
                     No @-references in the current text.
@@ -682,7 +680,6 @@ export class PromptEditor extends LitElement {
       };
       this.history = versions;
       this.content = versions[0]?.content ?? "";
-      await this._parse();
     } catch (err) {
       this.error = err.message || "Failed to load prompt scope.";
     } finally {
@@ -695,7 +692,6 @@ export class PromptEditor extends LitElement {
     this.viewingVersion = null;
     this.saveMsg = null;
     this._closeRepair();
-    this._scheduleParse();
   }
 
   _onAssistInsert(e) {
@@ -703,42 +699,11 @@ export class PromptEditor extends LitElement {
     this.viewingVersion = null;
     this.saveMsg = null;
     this.assistOpen = false;
-    this._scheduleParse();
   }
 
-  _scheduleParse() {
-    if (this._parseTimer) clearTimeout(this._parseTimer);
-    if (!this.content.trim()) {
-      this.tokens = [];
-      this.parseWarnings = [];
-      this.parsing = false;
-      return;
-    }
-    this.parsing = true;
-    this._parseTimer = setTimeout(() => this._parse(), 400);
-  }
-
-  async _parse() {
-    if (this._parseTimer) {
-      clearTimeout(this._parseTimer);
-      this._parseTimer = null;
-    }
-    if (!this.content.trim()) {
-      this.tokens = [];
-      this.parseWarnings = [];
-      this.parsing = false;
-      return;
-    }
-    try {
-      const result = await api.parseReferences({ text: this.content });
-      this.tokens = result.tokens ?? [];
-      this.parseWarnings = result.warnings ?? [];
-    } catch {
-      this.tokens = [];
-      this.parseWarnings = [];
-    } finally {
-      this.parsing = false;
-    }
+  _onReferences(detail) {
+    this.tokens = detail.tokens ?? [];
+    this.parseWarnings = detail.warnings ?? [];
   }
 
   async _save() {
@@ -776,7 +741,6 @@ export class PromptEditor extends LitElement {
     this.viewingVersion = version;
     this.saveMsg = null;
     this._closeRepair();
-    this._scheduleParse();
   }
 
   async _restore(versionId) {
@@ -878,7 +842,6 @@ export class PromptEditor extends LitElement {
         kind: "ok",
         text: `Repaired @${token.slug} → @${asset.unique_slug}. Save a version to persist.`,
       };
-      this._parse();
     } catch (err) {
       this.error = err.message || "Couldn't repair the reference.";
     }
@@ -886,11 +849,10 @@ export class PromptEditor extends LitElement {
 
   _insertToken(slug) {
     const token = `@${slug}`;
-    const ta = this.shadowRoot?.querySelector("textarea.content");
+    const ta = this.shadowRoot?.querySelector("ref-input.content");
     if (!ta) {
       this.content = `${this.content}${token} `.trimStart();
       this.pickerOpen = false;
-      this._scheduleParse();
       return;
     }
     const start = ta.selectionStart ?? this.content.length;
@@ -901,10 +863,9 @@ export class PromptEditor extends LitElement {
     this.content = prefix + (needsSpace ? " " : "") + inserted + this.content.slice(end);
     this.pickerOpen = false;
     this.pickerQuery = "";
-    this._scheduleParse();
     const insertLen = inserted.length + (needsSpace ? 1 : 0);
     requestAnimationFrame(() => {
-      const el = this.shadowRoot?.querySelector("textarea.content");
+      const el = this.shadowRoot?.querySelector("ref-input.content");
       if (!el) return;
       const pos = start + insertLen;
       el.focus();

@@ -609,7 +609,18 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
               id: { type: "string" },
               slug: { type: "string" },
               display_name: { type: "string" },
+              asset_type: { type: "string" },
               active_version_id: { type: ["string", "null"] },
+              version_id: {
+                type: ["string", "null"],
+                description:
+                  "The version this token resolves to (active for bare slugs, requested for @slug:vN)",
+              },
+              mime_type: {
+                type: ["string", "null"],
+                description:
+                  "MIME type of the resolved version (image/* or video/* when thumbnailable)",
+              },
             },
           },
         ],
