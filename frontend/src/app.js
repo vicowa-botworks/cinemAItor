@@ -11,6 +11,7 @@ import "./components/asset-form.js";
 import "./components/asset-upload.js";
 import "./components/asset-generate.js";
 import "./components/asset-reference-picker.js";
+import "./components/ref-input.js";
 import "./components/prompt-editor.js";
 import "./components/model-manager.js";
 import "./components/confirm-dialog.js";

@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import "./ref-input.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
 import "./audio-dialog.js";
 import "./ai-assist-dialog.js";
@@ -464,11 +465,10 @@ export class SceneDetail extends VramGuard(LitElement) {
                 <div class="card-title">Prompt &amp; generation</div>
                 <div class="field">
                   <label>Scene prompt (supports @asset references)</label>
-                  <textarea
+                  <ref-input
                     rows="3"
                     .value=${s.prompt?.content ?? ""}
-                    @change=${(e) => this._savePrompt(e.target.value)}>
-      ${s.prompt?.content ?? ""}</textarea>
+                    @change=${(e) => this._savePrompt(e.target.value)}></ref-input>
                   <button
                     class="btn-small"
                     ?disabled=${this.busy}
@@ -614,11 +614,10 @@ export class SceneDetail extends VramGuard(LitElement) {
             <div class="shot-grid">
               <div class="field wide">
                 <label>Shot prompt (optional — falls back to scene prompt)</label>
-                <textarea
+                <ref-input
                   rows="2"
                   .value=${String(d.prompt ?? "")}
-                  @input=${(e) => this._setShotField("prompt", e.target.value)}>
-            ${String(d.prompt ?? "")}</textarea>
+                  @input=${(e) => this._setShotField("prompt", e.target.value)}></ref-input>
                 <button
                   class="btn-small"
                   ?disabled=${this.busy || !String(d.prompt ?? "").trim()}

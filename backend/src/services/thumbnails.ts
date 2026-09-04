@@ -135,7 +135,14 @@ export async function generateThumbnail(opts: ThumbnailOptions): Promise<void> {
     throw new ThumbnailUnavailableError();
   }
   const config = loadConfig();
-  const partPath = `${opts.outPath}.part`;
+  // ffmpeg 8.0 infers the output format from the file extension, so the temp
+  // part must keep a real media suffix (`.jpg`) — a trailing `.part` makes it
+  // refuse to open the output ("Unable to choose an output format"). Insert
+  // `.part` before the final extension instead of appending it after.
+  const dot = opts.outPath.lastIndexOf(".");
+  const partPath = dot > 0
+    ? `${opts.outPath.slice(0, dot)}.part${opts.outPath.slice(dot)}`
+    : `${opts.outPath}.part`;
   Deno.mkdirSync(dirname(opts.outPath), { recursive: true });
   try {
     const args = ffmpegThumbnailArgs(
