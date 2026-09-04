@@ -307,4 +307,63 @@ describe("migrations", () => {
     insertAsset("a4", "freed", "deleted");
     insertAsset("a5", "freed", "draft");
   });
+
+  it("keeps asset_versions alive across the 0031 assets rebuild (FK off in runner)", () => {
+    const db = new Database(":memory:");
+    try {
+      // Apply the real migrations up to (not including) 0031 so 0031 — the one
+      // that rebuilds `assets` via DROP TABLE — is the only pending migration.
+      const dir = new URL("../src/db/migrations/", import.meta.url);
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS schema_migrations (
+           name TEXT PRIMARY KEY,
+           applied_at TEXT NOT NULL
+         )`,
+      );
+      const files = [...Deno.readDirSync(dir.pathname)]
+        .filter((e) => e.isFile && e.name.endsWith(".sql"))
+        .map((e) => e.name)
+        .sort()
+        .filter((name) => !name.startsWith("0031"));
+      for (const name of files) {
+        db.exec(Deno.readTextFileSync(new URL(name, dir)));
+        db.exec(
+          `INSERT INTO schema_migrations (name, applied_at) VALUES ('${name}', '2026-01-01T00:00:00.000Z')`,
+        );
+      }
+
+      // Seed an asset + a version row: the data 0031's DROP TABLE would
+      // cascade-wipe if FK enforcement were ON during the migration.
+      db.exec(
+        `INSERT INTO assets (id, library_scope, unique_slug, display_name, asset_type, created_at, updated_at)
+         VALUES ('as-1', 'global', 'slug-1', 'Slug 1', 'image', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      );
+      db.exec(
+        `INSERT INTO asset_versions (id, asset_id, version_number, created_at)
+         VALUES ('av-1', 'as-1', 1, '2026-01-01T00:00:00.000Z')`,
+      );
+
+      // The runner now applies only the pending 0031 (the rebuild).
+      const result = runMigrations(db);
+      assertEquals(result.applied, ["0031_asset_slug_partial_unique.sql"]);
+
+      // Both rows must survive — proving the runner disabled FK around the
+      // migration, so the DROP TABLE did not cascade into asset_versions.
+      assertEquals(
+        (db.prepare("SELECT COUNT(*) AS n FROM assets WHERE id = 'as-1'").get() as { n: number })
+          .n,
+        1,
+        "the rebuilt assets table must keep the row",
+      );
+      assertEquals(
+        (db.prepare("SELECT COUNT(*) AS n FROM asset_versions WHERE id = 'av-1'").get() as {
+          n: number;
+        }).n,
+        1,
+        "asset_versions must survive the 0031 assets rebuild",
+      );
+    } finally {
+      db.close();
+    }
+  });
 });

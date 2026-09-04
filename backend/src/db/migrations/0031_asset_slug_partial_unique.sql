@@ -10,10 +10,13 @@
 -- SQLite cannot drop an inline UNIQUE constraint in place, so we rebuild the
 -- table: create a copy without the inline UNIQUE, move the data, swap the
 -- name, recreate the non-unique indexes, and add a PARTIAL unique index that
--- only covers live (non-deleted) assets. FK enforcement is OFF in this app
--- (cascades are declarative-only), so the rebuild is safe; it is fully
--- validated on a database copy before shipping (row count, data fingerprint,
--- integrity_check, foreign_key_check all preserved).
+-- only covers live (non-deleted) assets.
+--
+-- IMPORTANT: the DROP TABLE below would cascade through ON DELETE CASCADE into
+-- asset_versions (and any other child) if FK enforcement were ON. The driver
+-- opens connections with foreign_keys=ON, so the migration runner disables FK
+-- around every migration (see migrate.ts). Never run this migration through a
+-- plain FK-ON connection or it will silently wipe the asset child tables.
 CREATE TABLE assets_new (
   id TEXT PRIMARY KEY,
   library_scope TEXT NOT NULL,
