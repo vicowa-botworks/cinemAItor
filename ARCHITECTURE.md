@@ -530,7 +530,11 @@ server.ts (entry point)
 **Database layer:**
 
 - `database.ts`: Singleton `Database` instance, schema initialization
-- `migrations/`: Ordered, idempotent SQL migrations tracked in `schema_migrations`
+- `migrations/`: Ordered, idempotent SQL migrations tracked in `schema_migrations`, applied by
+  `migrate.ts`. The `@db/sqlite` driver opens connections with `foreign_keys=ON`, so the runner
+  wraps the whole migration loop in `PRAGMA foreign_keys=OFF` … `ON` (outside each file's
+  transaction, since the pragma is a no-op inside one) — this is what lets table-rebuild migrations
+  (e.g. `0031` rebuilding `assets`) run without cascading `ON DELETE CASCADE` wipes
 - `schema.ts`: Legacy CRUD functions with parameterized queries (SQL injection safe)
 - `projects.ts`: Project repository + project permission checks
 - `assets.ts`: Asset/alias/tag/version repository + asset permission checks
