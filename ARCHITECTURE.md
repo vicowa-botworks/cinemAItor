@@ -101,7 +101,8 @@ app-root (main router)
  │   │   │               docs/generation_profiles.md), "use current version" toggle in edit mode +
  │   │   │               one-click "produce final from current version" (production profile)
  │   │   │               draft→production button, pre-generation VRAM check → vram-choice-dialog
- │   │   │               for local_cli models)
+ │   │   │               for local_cli models, Enhance with AI button (shared ai-assist-dialog,
+ │   │   │               pre-selects the chosen model))
  │   └── asset-reference-picker (pick existing image/video assets as generation references,
  │   │                           active version by default, max 8)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
@@ -179,7 +180,8 @@ app-root (main router)
 │   │             history + restore, name/status + delete, #/script/:id — see docs/scripts.md)
 ├── storyboard-list (board list + create; project filter via #/storyboards?project=)
 ├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
-│   │                 live preview polling)
+│   │                 live preview polling, per-panel Enhance with AI (shared ai-assist-dialog,
+│   │                 pre-selects the preview model))
 ├── scene-list (scene list + create; project/storyboard filters; Import script — paste/load a
 │   │             screenplay, preview the parsed Fountain-lite scenes, bulk-create them as
 │   │             draft scenes with prompts (SCN-015, parser in script-parse.js); continuity
@@ -214,7 +216,8 @@ app-root (main router)
 ├── undo-history (bounded in-memory undo/redo stack + detail→state flatten, unit-tested;
 │   │             consumed by timeline-detail)
 ├── audio-dialog (shareable audio generation: music/voiceover/SFX prompt → job queue;
-│   │             embedded in scene-detail and timeline-detail)
+│   │             embedded in scene-detail and timeline-detail, Enhance with AI button (shared
+│   │             ai-assist-dialog, pre-selects the auto-picked model))
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
 ├── audio-adjustments (shared trim/gain parse/prefill/validation for the asset-detail
 │   │                  adjustments UI)

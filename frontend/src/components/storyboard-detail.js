@@ -373,6 +373,7 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     previewUrls: { state: true },
     busyPanelId: { state: true },
     saving: { state: true },
+    assistOpen: { state: true },
   };
 
   constructor() {
@@ -390,6 +391,9 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     this.previewUrls = new Map();
     this.busyPanelId = null;
     this.saving = false;
+    this.assistOpen = false;
+    this.assistContext = "";
+    this.assistPanelId = null;
     this._timer = null;
     this._boardId = null;
   }
@@ -401,6 +405,7 @@ export class StoryboardDetail extends VramGuard(LitElement) {
         (window.location.hash.match(/#\/storyboard\/([^/?]+)/) ?? [])[1] ?? "",
       );
     await this._load();
+    this._loadModels();
   }
 
   disconnectedCallback() {
@@ -497,6 +502,17 @@ export class StoryboardDetail extends VramGuard(LitElement) {
           </button>
         </div>
       </div>
+      ${this.assistOpen
+        ? html`
+          <ai-assist-dialog
+            purpose="enhance_prompt"
+            default-model-id=${this._panelModelId() ?? ""}
+            .initial-context=${this.assistContext ?? ""}
+            insert-label="Use as prompt"
+            @insert=${(e) => this._onAssistInsert(e)}
+            @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+        `
+        : null}
     `;
   }
 
@@ -559,6 +575,15 @@ export class StoryboardDetail extends VramGuard(LitElement) {
                         : panel.prompt
                         ? "Generate preview"
                         : "Set a prompt first"}
+                    </button>
+                    <button
+                      class="btn-small"
+                      ?disabled=${!panel.prompt?.content?.trim()}
+                      title=${panel.prompt?.content?.trim()
+                        ? "Rewrite the panel prompt with the configured LLM, using the selected preview model"
+                        : "Set a prompt first"}
+                      @click=${() => this._openAssist(panel)}>
+                      Enhance
                     </button>
                     <a class="btn-small"
                       href="#/jobs"
@@ -678,6 +703,22 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     } catch {
       this.models = [];
     }
+  }
+
+  _panelModelId() {
+    return this.models[0]?.id ?? null;
+  }
+
+  _openAssist(panel) {
+    this.assistContext = panel.prompt?.content ?? "";
+    this.assistPanelId = panel.id;
+    this.assistOpen = true;
+  }
+
+  _onAssistInsert(e) {
+    const panel = this.panels.find((p) => p.id === this.assistPanelId);
+    if (panel) this._savePrompt(panel, e.detail.content);
+    this.assistOpen = false;
   }
 
   async _load() {
@@ -881,7 +922,7 @@ export class StoryboardDetail extends VramGuard(LitElement) {
 
   async _generatePreview(panel) {
     const d = this.draft ?? {};
-    const modelId = d.model_id;
+    const modelId = d.model_id || this._panelModelId() || "";
     const model = modelId
       ? this.models.find((m) => m.id === modelId) ?? null
       : this.models[0] ?? null;

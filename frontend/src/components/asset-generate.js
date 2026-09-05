@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import "./ref-input.js";
+import "./ai-assist-dialog.js";
 import {
   generationKindForAsset,
   generationTaskType,
@@ -118,6 +119,12 @@ export class AssetGenerate extends VramGuard(LitElement) {
       cursor: not-allowed;
     }
 
+    .btn-secondary {
+      background-color: var(--color-surface-hover);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
     .status {
       font-size: 13px;
       color: var(--color-text-muted);
@@ -186,6 +193,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     error: { state: true },
     status: { state: true },
     queuedResult: { state: true },
+    assistOpen: { state: true },
   };
 
   constructor() {
@@ -212,6 +220,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this.error = "";
     this.status = "";
     this.queuedResult = null;
+    this.assistOpen = false;
     this._modelCache = new Map();
   }
 
@@ -409,6 +418,11 @@ export class AssetGenerate extends VramGuard(LitElement) {
     // Matches the backend's pickModel auto-pick (first enabled model for the
     // task, ordered by name, version).
     return this.models[0] ?? null;
+  }
+
+  _onAssistInsert(e) {
+    this.prompt = e.detail.content;
+    this.assistOpen = false;
   }
 
   render() {
@@ -664,7 +678,17 @@ export class AssetGenerate extends VramGuard(LitElement) {
           `
           : ""}
 
-        <div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            ?disabled=${!this.prompt.trim()}
+            title=${this.prompt.trim()
+              ? "Rewrite the prompt with the configured LLM, using the selected generation model"
+              : "Type a prompt first"}
+            @click=${() => (this.assistOpen = true)}>
+            Enhance with AI
+          </button>
           <button type="submit" class="btn" ?disabled=${this.busy}>
             ${this.busy
               ? "Queueing..."
@@ -675,6 +699,17 @@ export class AssetGenerate extends VramGuard(LitElement) {
         </div>
       </form>
       ${this.vramDialog}
+      ${this.assistOpen
+        ? html`
+          <ai-assist-dialog
+            purpose="enhance_prompt"
+            default-model-id=${this._selectedModel()?.id ?? ""}
+            .initial-context=${this.prompt}
+            insert-label="Use as prompt"
+            @insert=${this._onAssistInsert}
+            @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+        `
+        : ""}
     `;
   }
 }

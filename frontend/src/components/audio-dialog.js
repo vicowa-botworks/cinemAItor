@@ -1,6 +1,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
 import "./ref-input.js";
+import "./ai-assist-dialog.js";
 import { VramGuard } from "./vram-guard.js";
 
 const KINDS = [
@@ -128,6 +129,7 @@ export class AudioDialog extends VramGuard(LitElement) {
     submitting: { state: true },
     error: { state: true },
     result: { state: true },
+    assistOpen: { state: true },
   };
 
   constructor() {
@@ -140,6 +142,8 @@ export class AudioDialog extends VramGuard(LitElement) {
     this.submitting = false;
     this.error = "";
     this.result = null;
+    this.assistOpen = false;
+    this._assistModelId = "";
   }
 
   willUpdate(changed) {
@@ -220,6 +224,15 @@ export class AudioDialog extends VramGuard(LitElement) {
             @click=${this._submit}>
             ${this.submitting ? "Queuing…" : "Generate"}
           </button>
+          <button
+            class="btn btn-secondary"
+            ?disabled=${this.submitting || !this.prompt.trim()}
+            title=${this.prompt.trim()
+              ? "Rewrite the audio prompt with the configured LLM, using the selected model"
+              : "Set a prompt first"}
+            @click=${this._openAssist}>
+            Enhance
+          </button>
           ${this.result
             ? html`
               <button
@@ -233,6 +246,17 @@ export class AudioDialog extends VramGuard(LitElement) {
         </div>
       </div>
       ${this.vramDialog}
+      ${this.assistOpen
+        ? html`
+          <ai-assist-dialog
+            purpose="enhance_prompt"
+            default-model-id=${this._assistModelId ?? ""}
+            .initial-context=${this.prompt}
+            insert-label="Use as prompt"
+            @insert=${(e) => (this.prompt = e.detail.content)}
+            @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
+        `
+        : null}
     `;
   }
 
@@ -245,8 +269,7 @@ export class AudioDialog extends VramGuard(LitElement) {
     }
     // No model picker here — the backend auto-picks the first enabled model
     // for the kind's task type, so the gate checks that same model.
-    const taskType = { music: "music", voiceover: "voice", sfx: "audio" }[this.kind] ??
-      "music";
+    const taskType = this._kindTaskType();
     let model = null;
     try {
       const models = await api.listModels({ task_type: taskType, enabled: true });
@@ -278,6 +301,23 @@ export class AudioDialog extends VramGuard(LitElement) {
     } finally {
       this.submitting = false;
     }
+  }
+
+  _kindTaskType() {
+    return { music: "music", voiceover: "voice", sfx: "audio" }[this.kind] ?? "music";
+  }
+
+  async _openAssist() {
+    try {
+      const models = await api.listModels({
+        task_type: this._kindTaskType(),
+        enabled: true,
+      });
+      this._assistModelId = models[0]?.id ?? "";
+    } catch {
+      this._assistModelId = "";
+    }
+    this.assistOpen = true;
   }
 
   _reset() {

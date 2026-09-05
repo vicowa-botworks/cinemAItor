@@ -12,6 +12,10 @@ import { ASSIST_PURPOSES, buildAssistRequest, skillMatchesModel } from "../ai-as
  *     @close=${() => (this.assistOpen = false)}>
  *   </ai-assist-dialog>
  *
+ * Pass `default-model-id=${...}` to pre-select the model that will run the
+ * generation, so the enhance call carries that model's context automatically
+ * (the picker still lets the user override it).
+ *
  * It reads GET /llm/status on open (buttons are inert with a hint when the
  * endpoint is unconfigured), assembles the request via the pure
  * ai-assist-request helpers, and emits `insert` / `close` CustomEvents.
@@ -21,6 +25,7 @@ class AiAssistDialog extends LitElement {
     purpose: { type: String },
     initialContext: { attribute: "initial-context", type: String },
     insertLabel: { attribute: "insert-label", type: String },
+    defaultModelId: { attribute: "default-model-id", type: String },
     configured: { state: true },
     context: { state: true },
     models: { state: true },
@@ -37,6 +42,7 @@ class AiAssistDialog extends LitElement {
     super();
     this.initialContext = "";
     this.insertLabel = "Insert";
+    this.defaultModelId = "";
     this.configured = false;
     this.context = "";
     this.models = [];
@@ -51,6 +57,7 @@ class AiAssistDialog extends LitElement {
 
   firstUpdated() {
     this.context = this.initialContext ?? "";
+    this.modelId = this.defaultModelId || "";
     void this._load();
   }
 
@@ -108,7 +115,9 @@ class AiAssistDialog extends LitElement {
       request = buildAssistRequest({
         purpose: this.purpose,
         context: this.context,
-        modelId: this.modelId,
+        // Send the model only when it resolves to a real enabled model — a
+        // stale pre-selected id would otherwise 404 the assist call.
+        modelId: this._selectedModel()?.id ?? "",
         skillId: this.skillId,
       });
     } catch (err) {
