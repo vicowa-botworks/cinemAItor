@@ -227,6 +227,53 @@ export class AssetDetail extends LitElement {
       border-color: var(--color-primary);
     }
 
+    .version.viewing {
+      border-color: var(--color-primary);
+      border-style: dashed;
+    }
+
+    .preview-nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .version-arrow {
+      width: 34px;
+      height: 30px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-hover);
+      color: var(--color-text);
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .version-arrow:hover:not(:disabled) {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: #fff;
+    }
+
+    .version-arrow:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .version-pos {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      min-width: 84px;
+      text-align: center;
+    }
+
+    .viewing-hint {
+      color: var(--color-primary);
+      font-weight: 600;
+    }
+
     .version-id {
       font-weight: 600;
       min-width: 42px;
@@ -514,6 +561,7 @@ export class AssetDetail extends LitElement {
     error: { state: true },
     notice: { state: true },
     preview: { state: true },
+    previewVersionId: { state: true },
     mediaKind: { state: true },
     audioMeta: { state: true },
     audioPeaks: { state: true },
@@ -538,6 +586,7 @@ export class AssetDetail extends LitElement {
     this.error = "";
     this.notice = "";
     this.preview = null;
+    this.previewVersionId = null;
     this.mediaKind = "master";
     this.audioMeta = null;
     this.audioPeaks = null;
@@ -577,6 +626,7 @@ export class AssetDetail extends LitElement {
     this.error = "";
     this.notice = "";
     this.preview = null;
+    this.previewVersionId = null;
     this.audioMeta = null;
     this.audioPeaks = null;
     this.audioForm = { start: "", end: "", gain: "" };
@@ -767,6 +817,7 @@ export class AssetDetail extends LitElement {
   async _loadAll() {
     this.loading = true;
     this.error = "";
+    this.previewVersionId = null;
     try {
       const [asset, versions] = await Promise.all([
         api.getAsset(this.assetId),
@@ -799,10 +850,13 @@ export class AssetDetail extends LitElement {
   async _loadPreview() {
     const asset = this.asset;
     this._revokePreview();
-    if (!asset?.active_version_id) return;
+    const targetId = this.previewVersionId ?? asset?.active_version_id;
+    if (!asset || !targetId) return;
     this.mediaKind = "master";
     try {
-      this.preview = await api.getAssetPreviewUrl(asset.id);
+      this.preview = targetId === asset.active_version_id
+        ? await api.getAssetPreviewUrl(asset.id)
+        : await api.getAssetVersionPreviewUrl(asset.id, targetId);
     } catch {
       this.preview = null;
       return;
@@ -823,7 +877,7 @@ export class AssetDetail extends LitElement {
   }
 
   async _viewProxy() {
-    const version = this.asset?.active_version;
+    const version = this._previewVersion();
     if (!version || !version.proxy_path) return;
     this._revokePreview();
     this.mediaKind = "proxy";
@@ -836,7 +890,7 @@ export class AssetDetail extends LitElement {
   }
 
   async _regenerateProxy() {
-    const version = this.asset?.active_version;
+    const version = this._previewVersion() ?? this.asset?.active_version;
     if (!version) return;
     this.error = "";
     try {
@@ -1181,6 +1235,7 @@ export class AssetDetail extends LitElement {
       const result = await api.uploadAsset(this.assetId, file, notes);
       this.asset = result.asset;
       this.versions = await api.listAssetVersions(this.assetId);
+      this.previewVersionId = null;
       form.reset();
       await this._loadPreview();
       await this._refreshAudio();
@@ -1190,18 +1245,52 @@ export class AssetDetail extends LitElement {
     }
   }
 
-  async _restoreVersion(version) {
+  // --- version navigation (non-destructive browse + activate) ---
+
+  _versionNav() {
+    return [...(this.versions ?? [])].sort((a, b) => a.version_number - b.version_number);
+  }
+
+  _previewVersion() {
+    const list = this._versionNav();
+    const id = this.previewVersionId ?? this.asset?.active_version_id;
+    return list.find((v) => v.id === id) ?? null;
+  }
+
+  _stepVersion(delta) {
+    const list = this._versionNav();
+    if (list.length < 2) return;
+    const currentId = this.previewVersionId ?? this.asset?.active_version_id;
+    let idx = list.findIndex((v) => v.id === currentId);
+    if (idx === -1) idx = 0;
+    const next = list[idx + delta];
+    if (!next) return;
+    this.previewVersionId = next.id;
+    this.mediaKind = "master";
+    this._loadPreview();
+  }
+
+  _prevVersion() {
+    this._stepVersion(-1);
+  }
+
+  _nextVersion() {
+    this._stepVersion(1);
+  }
+
+  async _activateVersion(version) {
     this.error = "";
     this.notice = "";
     try {
       const result = await api.restoreAssetVersion(this.assetId, version.id);
       this.asset = result.asset;
       this.versions = await api.listAssetVersions(this.assetId);
+      this.previewVersionId = version.id;
       await this._loadPreview();
       await this._refreshAudio();
-      this.notice = `Restored to version ${version.version_number}.`;
+      this.notice = `Activated version ${version.version_number}.`;
     } catch (err) {
-      this.error = err.message || "Restore failed";
+      this.error = err.message || "Activate failed";
     }
   }
 
@@ -1291,7 +1380,7 @@ export class AssetDetail extends LitElement {
     if (!asset) {
       return html`<div class="preview-box"><span>Loading...</span></div>`;
     }
-    const version = asset.active_version;
+    const version = this._previewVersion() ?? asset.active_version;
     if (!version) {
       return html`<div class="preview-box"><span>No versions yet.</span></div>`;
     }
@@ -1464,6 +1553,10 @@ export class AssetDetail extends LitElement {
     }
 
     const version = asset?.active_version;
+    const previewVersion = this._previewVersion() ?? asset?.active_version;
+    const previewList = this._versionNav();
+    const previewIdx = previewList.findIndex((v) => v.id === (previewVersion?.id));
+    const browsing = previewVersion?.id !== asset?.active_version_id;
 
     return html`
       <div class="asset-detail">
@@ -1494,16 +1587,56 @@ export class AssetDetail extends LitElement {
           <div class="section">
             <h3>Preview</h3>
             <div class="preview-box">${this._renderPreview()}</div>
-            ${version
+            ${previewVersion
               ? html`
-                <div class="preview-meta">
-                  <span>v${version.version_number}</span>
-                  <span>${version.format ?? "?"}</span>
-                  <span>${formatBytes(version.file_size)}</span>
-                  <span>${this.mediaKind === "proxy" ? "proxy" : "master"}</span>
+                <div class="preview-nav">
+                  <button
+                    class="version-arrow"
+                    ?disabled=${previewIdx <= 0}
+                    @click=${() => this._prevVersion()}
+                    aria-label="Previous version"
+                    title="Previous version"
+                  >
+                    &#9664;
+                  </button>
+                  <span class="version-pos">
+                    v${previewVersion.version_number}${previewList.length
+                      ? ` / ${previewList.length}`
+                      : ""}
+                  </span>
+                  <button
+                    class="version-arrow"
+                    ?disabled=${previewIdx === -1 || previewIdx >= previewList.length - 1}
+                    @click=${() => this._nextVersion()}
+                    aria-label="Next version"
+                    title="Next version"
+                  >
+                    &#9654;
+                  </button>
                 </div>
+                <div class="preview-meta">
+                  <span>v${previewVersion.version_number}</span>
+                  <span>${previewVersion.format ?? "?"}</span>
+                  <span>${formatBytes(previewVersion.file_size)}</span>
+                  <span>${this.mediaKind === "proxy" ? "proxy" : "master"}</span>
+                  ${browsing
+                    ? html`<span class="viewing-hint">viewing · active is v${
+                      asset.active_version?.version_number ?? "?"
+                    }</span>`
+                    : ""}
+                </div>
+                ${browsing
+                  ? html`
+                    <div class="preview-actions">
+                      <button class="btn btn-primary" @click=${() =>
+                        this._activateVersion(previewVersion)}>
+                        Activate this version
+                      </button>
+                    </div>
+                  `
+                  : ""}
                 <div class="preview-actions">
-                  ${version.proxy_path
+                  ${previewVersion.proxy_path
                     ? html`
                       ${this.mediaKind === "master"
                         ? html`<button class="btn btn-secondary" @click=${this._viewProxy}>View proxy</button>`
@@ -1591,7 +1724,7 @@ export class AssetDetail extends LitElement {
               <p class="waveform-note">
                 Queues a ${generationKindForAsset(asset)} generation job —
                 candidates are stored as new versions of this asset when the
-                job finishes. Review or restore them from the versions list
+                job finishes. Review or activate them from the versions list
                 below.
               </p>
               <asset-generate .editAsset=${asset}
@@ -1801,7 +1934,10 @@ export class AssetDetail extends LitElement {
                 ${this.versions.map(
                   (v) =>
                     html`
-                      <div class="version ${version?.id === v.id ? "active" : ""}">
+                      <div
+                        class="version ${version?.id === v.id
+                          ? "active "
+                          : ""}${browsing && previewVersion?.id === v.id ? "viewing" : ""}">
                         <span class="version-id">v${v.version_number}</span>
                         <span class="version-info">
                           ${v.format ?? "?"} &middot; ${formatBytes(
@@ -1819,7 +1955,7 @@ export class AssetDetail extends LitElement {
                         </button>
                         ${version?.id === v.id ? html`<span class="chip">active</span>` : html`
                           <button class="btn btn-secondary"
-                            @click=${() => this._restoreVersion(v)}>Restore</button>
+                            @click=${() => this._activateVersion(v)}>Activate</button>
                         `}
                         ${v.notes ? html`<div class="version-notes">${v.notes}</div>` : ""}
                       </div>
