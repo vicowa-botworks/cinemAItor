@@ -1189,6 +1189,59 @@ export class ModelManager extends LitElement {
       background: var(--code-bg, rgba(0, 0, 0, 0.04));
       border-radius: 6px;
     }
+
+    .vram-svc-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .vram-svc {
+      border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .vram-svc-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .vram-svc-endpoint {
+      font-family: var(--font-mono, monospace);
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .vram-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .vram-free-result {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    .vram-free-result .ok {
+      color: var(--color-success, #2e7d32);
+    }
+
+    .vram-free-result .err {
+      color: var(--color-danger, #c62828);
+    }
+
+    .admin-note.warn {
+      color: var(--color-warning, #b26a00);
+    }
   `;
 
   // Live copilot conversation id (server-logged). A private field so the
@@ -1266,6 +1319,10 @@ export class ModelManager extends LitElement {
     confirmState: { state: true },
     confirmBusy: { state: true },
     confirmProgress: { state: true },
+    vramSettings: { state: true },
+    vramServices: { state: true },
+    vramFreeBusy: { state: true },
+    vramFreeResult: { state: true },
   };
 
   constructor() {
@@ -1273,6 +1330,10 @@ export class ModelManager extends LitElement {
     this.models = [];
     this.hardware = null;
     this.hwWarnings = [];
+    this.vramSettings = null;
+    this.vramServices = null;
+    this.vramFreeBusy = false;
+    this.vramFreeResult = null;
     this.isAdmin = false;
     this.loading = false;
     this.busyId = null;
@@ -1466,6 +1527,8 @@ export class ModelManager extends LitElement {
             `
             : html`<div class="empty">No hardware report available.</div>`}
         </div>
+
+        ${this._renderVramUnloadPanel()}
 
         <div class="panel">
           <div class="llm-head">
@@ -2568,6 +2631,126 @@ export class ModelManager extends LitElement {
               </ul>
             `}
         `}
+    `;
+  }
+
+  _renderVramUnloadPanel() {
+    const settings = this.vramSettings;
+    const services = this.vramServices?.services ?? [];
+    const enabled = !!settings?.enabled;
+    const gpu = this.vramServices?.gpu;
+    return html`
+      <div class="panel">
+        <div class="llm-head">
+          <h3>VRAM auto-unload</h3>
+          ${settings
+            ? html`<span class="chip ${enabled ? "enabled" : "disabled"}">
+              ${enabled ? "enabled" : "disabled"}
+            </span>`
+            : null}
+        </div>
+        ${this.isAdmin
+          ? html`
+            <p>
+              When enabled, before a local GPU generation starts, CinemAItor frees
+              VRAM held by the local GPU services below (ComfyUI and the llama
+              router) so the model fits — no manual unloading. Endpoints are
+              auto-detected from the running processes; remote LLM endpoints are
+              never touched.
+            </p>
+            ${services.length
+              ? html`
+                <label class="llm-check">
+                  <input
+                    type="checkbox"
+                    .checked=${enabled}
+                    @change=${this._onVramMasterToggle} />
+                  Enable auto-unload before generation
+                </label>
+                <div class="vram-svc-list">
+                  ${services.map((s) => this._renderVramService(s))}
+                </div>
+                ${gpu?.model
+                  ? html`<p class="admin-note">
+                    GPU ${gpu.model}: free
+                    ${this._fmtMb(Math.round((gpu.vram_free ?? 0) / 1048576))}
+                    of
+                    ${this._fmtMb(Math.round((gpu.vram_total ?? 0) / 1048576))}
+                  </p>`
+                  : null}
+              `
+              : html`
+                <div class="empty">
+                  No local GPU services detected (ComfyUI / llama router) —
+                  there's nothing to free on this machine.
+                </div>
+              `}
+            <div class="vram-actions">
+              <button class="btn btn-secondary btn-small" @click=${this._onVramRefresh}>
+                Refresh detection
+              </button>
+              ${services.length
+                ? html`
+                  <button
+                    class="btn btn-secondary btn-small"
+                    ?disabled=${this.vramFreeBusy}
+                    @click=${this._onVramFree}>
+                    ${this.vramFreeBusy ? "Freeing…" : "Free VRAM now"}
+                  </button>
+                `
+                : null}
+            </div>
+            ${this.vramFreeResult?.length
+              ? html`
+                <div class="vram-free-result">
+                  ${this.vramFreeResult.map(
+                    (r) => html`<div class="${r.ok ? "ok" : "err"}">${r.label}</div>`,
+                  )}
+                </div>
+              `
+              : null}
+          `
+          : html`
+            <p class="admin-note">
+              ${enabled
+                ? "Auto-unload is enabled — local GPU services are freed before generation. "
+                : "Auto-unload is disabled. "}Manage it on this page as an admin.
+            </p>
+          `}
+      </div>
+    `;
+  }
+
+  _renderVramService(s) {
+    const key = s.kind === "comfyui" ? "comfyui" : "llama";
+    const targetEnabled = this.vramSettings?.targets?.[key];
+    const title = s.kind === "comfyui" ? "ComfyUI" : "llama router";
+    const vram = s.vram_bytes ? ` · ${this._fmtMb(Math.round(s.vram_bytes / 1048576))} VRAM` : "";
+    return html`
+      <div class="vram-svc">
+        <div class="vram-svc-head">
+          <strong>${title}</strong>
+          <span class="vram-svc-endpoint">${s.endpoint}</span>
+        </div>
+        <label class="llm-check">
+          <input
+            type="checkbox"
+            data-key=${key}
+            .checked=${targetEnabled !== false}
+            @change=${this._onVramTargetToggle} />
+          Free this service${vram}
+        </label>
+        ${s.loadedModels?.length
+          ? html`
+            <p class="admin-note">
+              Loaded: ${s.loadedModels.map((m) => m.name).join(", ")}
+              ${s.unloadable ? "" : ` (${s.unloadError || "not unloadable"})`}
+            </p>
+          `
+          : s.unloadError
+          ? html`<p class="admin-note warn">${s.unloadError}</p>`
+          : null}
+      </div>
     `;
   }
 
@@ -3768,6 +3951,7 @@ export class ModelManager extends LitElement {
     try {
       await this._loadModels();
       await this._loadHardware();
+      await this._loadVramUnload();
       await this._loadBenchmarks();
       await this._loadLlm();
       await this._loadHfToken();
@@ -3786,6 +3970,81 @@ export class ModelManager extends LitElement {
       this.hfToken = await api.getHuggingFaceSettings();
     } catch {
       this.hfToken = null;
+    }
+  }
+
+  /**
+   * Load the VRAM auto-unload settings (any authenticated user — the guard
+   * reads them) and, for admins, the detected local GPU services.
+   */
+  async _loadVramUnload() {
+    try {
+      this.vramSettings = await api.getVramUnloadSettings();
+    } catch {
+      this.vramSettings = null;
+    }
+    if (!this.isAdmin) {
+      this.vramServices = null;
+      return;
+    }
+    try {
+      this.vramServices = await api.getVramUnloadServices();
+    } catch {
+      this.vramServices = null;
+    }
+  }
+
+  async _onVramRefresh() {
+    if (!this.isAdmin) return;
+    try {
+      this.vramServices = await api.getVramUnloadServices({ refresh: true });
+    } catch {
+      this.vramServices = null;
+    }
+  }
+
+  async _onVramMasterToggle(e) {
+    if (!this.isAdmin) return;
+    const enabled = e.target.checked;
+    try {
+      this.vramSettings = await api.saveVramUnloadSettings({ enabled });
+    } catch (err) {
+      this.error = String(err?.message || err);
+      this.requestUpdate();
+    }
+  }
+
+  async _onVramTargetToggle(e) {
+    if (!this.isAdmin) return;
+    const key = e.currentTarget.dataset.key; // "comfyui" | "llama"
+    const value = e.target.checked;
+    try {
+      this.vramSettings = await api.saveVramUnloadSettings({ [key]: value });
+    } catch (err) {
+      this.error = String(err?.message || err);
+      this.requestUpdate();
+    }
+  }
+
+  async _onVramFree() {
+    if (!this.isAdmin || this.vramFreeBusy) return;
+    this.vramFreeBusy = true;
+    this.vramFreeResult = null;
+    this.requestUpdate();
+    try {
+      const { results } = await api.freeVramUnload();
+      this.vramFreeResult = results;
+      // Reflect the newly-freed state in the service rows.
+      try {
+        this.vramServices = await api.getVramUnloadServices({ refresh: true });
+      } catch {
+        /* keep the pre-free rows on a re-detect failure */
+      }
+    } catch (err) {
+      this.error = String(err?.message || err);
+    } finally {
+      this.vramFreeBusy = false;
+      this.requestUpdate();
     }
   }
 

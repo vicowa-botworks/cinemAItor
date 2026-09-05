@@ -40,6 +40,15 @@ import {
   validateRepoId,
 } from "@cinemaItor/services/huggingface.ts";
 import { getHfSettingsView, updateHfToken } from "@cinemaItor/db/hf_settings.ts";
+import {
+  getVramUnloadSettings,
+  updateVramUnloadSettings,
+} from "@cinemaItor/db/vram_unload_settings.ts";
+import {
+  detectVramServices,
+  freeVram,
+  type VramServiceKind,
+} from "@cinemaItor/services/vram_free.ts";
 import { logAudit } from "@cinemaItor/services/audit.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
@@ -282,6 +291,55 @@ export const modelRouter = new Router()
     });
     ctx.response.status = 201;
     ctx.response.body = result;
+  })
+  .get("/api/v1/models/vram-unload", authMiddleware, (ctx, _next) => {
+    // Auth-only (not admin): the booleans feed the pre-generation auto-free
+    // guard, which must be able to read the master toggle for every user.
+    requireUserId(ctx);
+    ctx.response.body = getVramUnloadSettings();
+  })
+  .patch("/api/v1/models/vram-unload", authMiddleware, async (ctx, _next) => {
+    const adminId = requireAdmin(ctx);
+    const body = await readJsonBody(ctx);
+    const patch: { enabled?: boolean; comfyui?: boolean; llama?: boolean } = {};
+    for (const key of ["enabled", "comfyui", "llama"] as const) {
+      if (key in body) {
+        const value = body[key];
+        if (typeof value !== "boolean") throw badRequest(`${key} must be a boolean`);
+        patch[key] = value;
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      throw badRequest("at least one of enabled, comfyui or llama is required");
+    }
+    const view = updateVramUnloadSettings(patch);
+    logAudit(adminId, "vram_unload.settings_update", "setting", JSON.stringify(patch));
+    ctx.response.body = view;
+  })
+  .get("/api/v1/models/vram-unload/services", authMiddleware, async (ctx, _next) => {
+    requireAdmin(ctx);
+    const params = (ctx.request.url as unknown as URL).searchParams;
+    ctx.response.body = await detectVramServices(params.get("refresh") === "1");
+  })
+  .post("/api/v1/models/vram-unload/free", authMiddleware, async (ctx, _next) => {
+    const adminId = requireAdmin(ctx);
+    const body: Record<string, unknown> = ctx.request.body.type() === "json"
+      ? ((await ctx.request.body.json()) as Record<string, unknown>)
+      : {};
+    let targetKinds: VramServiceKind[] | undefined;
+    if (body.targets !== undefined) {
+      const valid: VramServiceKind[] = ["comfyui", "llama-server"];
+      if (
+        !Array.isArray(body.targets) ||
+        body.targets.some((t) => !valid.includes(t as VramServiceKind))
+      ) {
+        throw badRequest("targets must be an array of 'comfyui' and/or 'llama-server'");
+      }
+      targetKinds = body.targets as VramServiceKind[];
+    }
+    const { results } = await freeVram(targetKinds);
+    logAudit(adminId, "vram_unload.free", "setting", JSON.stringify(targetKinds ?? "all-enabled"));
+    ctx.response.body = { results };
   })
   .get("/api/v1/models/install-progress", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
@@ -563,6 +621,146 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(400, 401, 403, 404, 409, 502),
+    },
+  },
+  "GET /api/v1/models/vram-unload": {
+    summary: "VRAM auto-unload settings",
+    description: "Master toggle (auto-free local GPU services in the pre-generation VRAM " +
+      "guard) + per-target toggles for which detected services to free. Disabled by default. " +
+      "Endpoints are auto-detected (not stored). Auth-only: the guard reads the master " +
+      "toggle for every user; only admins may change it (PATCH).",
+    responses: {
+      200: {
+        description: "Settings",
+        schema: {
+          type: "object",
+          required: ["enabled", "targets"],
+          properties: {
+            enabled: { type: "boolean" },
+            targets: {
+              type: "object",
+              required: ["comfyui", "llama"],
+              properties: { comfyui: { type: "boolean" }, llama: { type: "boolean" } },
+            },
+          },
+        },
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "PATCH /api/v1/models/vram-unload": {
+    summary: "Update VRAM auto-unload settings (admin)",
+    adminOnly: true,
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean" },
+          comfyui: { type: "boolean" },
+          llama: { type: "boolean" },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Updated settings",
+        schema: {
+          type: "object",
+          required: ["enabled", "targets"],
+          properties: {
+            enabled: { type: "boolean" },
+            targets: {
+              type: "object",
+              required: ["comfyui", "llama"],
+              properties: { comfyui: { type: "boolean" }, llama: { type: "boolean" } },
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "GET /api/v1/models/vram-unload/services": {
+    summary: "Detect local GPU services (admin)",
+    description: "Lists the local ComfyUI / llama-server (router) instances found via " +
+      "`nvidia-smi` + `/proc/<pid>/cmdline`, with each one's endpoint and VRAM use. Remote " +
+      "endpoints never appear (they are not local processes). `?refresh=1` bypasses the " +
+      "cache. Empty `services` means no local GPU service is running.",
+    adminOnly: true,
+    responses: {
+      200: {
+        description: "Detected services",
+        schema: {
+          type: "object",
+          required: ["platform", "services"],
+          properties: {
+            platform: { type: "string", nullable: true },
+            gpu: { type: "object", nullable: true },
+            services: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["kind", "endpoint", "vram_mb", "loaded_models", "unloadable"],
+                properties: {
+                  kind: { type: "string", enum: ["comfyui", "llama-server"] },
+                  endpoint: { type: "string" },
+                  vram_mb: { type: "integer" },
+                  loaded_models: { type: "array", items: { type: "string" } },
+                  router: { type: "object", nullable: true },
+                  unloadable: { type: "boolean" },
+                },
+              },
+            },
+            detected_at: { type: "string" },
+          },
+        },
+      },
+      ...errorResponses(401, 403),
+    },
+  },
+  "POST /api/v1/models/vram-unload/free": {
+    summary: "Free VRAM from enabled local services (admin)",
+    description: "Frees VRAM now: ComfyUI `POST /free`, and `POST /models/unload` for every " +
+      "loaded model on a detected llama router. `targets` narrows which kinds to free; " +
+      "omitted means every detected service whose target toggle is on. The master `enabled` " +
+      "flag is ignored here (explicit admin action).",
+    adminOnly: true,
+    requestBody: {
+      schema: {
+        type: "object",
+        properties: {
+          targets: {
+            type: "array",
+            items: { type: "string", enum: ["comfyui", "llama-server"] },
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Per-service result",
+        schema: {
+          type: "object",
+          required: ["results"],
+          properties: {
+            results: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["kind", "endpoint", "ok", "detail"],
+                properties: {
+                  kind: { type: "string", enum: ["comfyui", "llama-server"] },
+                  endpoint: { type: "string" },
+                  ok: { type: "boolean" },
+                  detail: { type: "string" },
+                  freed_models: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(400, 401, 403),
     },
   },
   "GET /api/v1/models/{id}": {

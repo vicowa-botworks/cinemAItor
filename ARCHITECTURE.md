@@ -162,7 +162,10 @@ app-root (main router)
    │   │   device=cpu, or "free up VRAM" + a refresh button re-probes live and auto-starts on the
    │   │   GPU once enough VRAM is free. Shared across every interactive generation path —
   │   │   asset generate/edit, storyboard panel preview, scene/batch, audio, and timeline score —
-  │   │   via the vram-guard mixin + pure helpers in asset-generation.js)
+   │   │   via the vram-guard mixin + pure helpers in asset-generation.js. When VRAM auto-unload
+   │   │   is enabled, the guard first frees the detected local services (ComfyUI / llama — see
+   │   │   the Model routes) and re-probes, starting on the GPU when the model then fits, before
+   │   │   showing the dialog)
  ├── job-monitor (queue monitor: auto-refresh polling + live `/ws/v1/jobs` WebSocket
 │   │            updates (see `job-events.js`), status/type/project filters, progress bars,
  │   │            per-job detail + event log, cancel/retry + cpu↔cuda device
@@ -324,9 +327,15 @@ server.ts (entry point)
    │   ├── HuggingFace catalog: /huggingface/search, /huggingface/:repoId (recursive file
    │   │   listing + README, `main`→`master` branch fallback, entries keyed by `path`),
    │   │   /huggingface/settings (+/test) optional token (stored > env),
-    │   │   POST /from-huggingface registers a url-sourced model row (admin; `resolve/<branch>`
-    │   │   URL); installs forward the HF token on HF-origin downloads (gated repos)
-    │   ├── Task-type normalization: the canonical task types use underscores, but every
+     │   │   POST /from-huggingface registers a url-sourced model row (admin; `resolve/<branch>`
+     │   │   URL); installs forward the HF token on HF-origin downloads (gated repos)
+     │   ├── VRAM auto-unload (services/vram_free.ts): /vram-unload/services detects LOCAL GPU
+     │   │   services holding VRAM (nvidia-smi compute-apps → per-PID cmdline via `ps` — `/proc`
+     │   │   is gated behind `--allow-all`; ComfyUI main.py → /free, a llama-server child is traced
+     │   │   up to its `--models-preset` router → /models/unload; remote endpoints never appear),
+     │   │   /vram-unload (GET settings / PATCH admin), /vram-unload/free (POST, free one or all);
+     │   │   vram_unload.* settings rows (master enabled default OFF + per-target toggles)
+     │   ├── Task-type normalization: the canonical task types use underscores, but every
     │   │   validation boundary (model register/update, skill `model_task_types`, job
     │   │   `job_type`) also accepts the dashed HF pipeline-tag aliases
     │   │   (`text-to-image`, `image-to-image`, `image-to-video`, `text-to-video`) and

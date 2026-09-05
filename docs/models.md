@@ -20,6 +20,10 @@ task mapping, hardware detection, and requirement warnings.
 | GET    | `/api/v1/models`                           | List (filter: `enabled`, `task_type`, `query`)                               |
 | POST   | `/api/v1/models`                           | Register metadata (admin)                                                    |
 | GET    | `/api/v1/models/hardware`                  | Detected hardware + requirement warnings (`?refresh=1` re-probes)            |
+| GET    | `/api/v1/models/vram-unload/services`      | Local GPU services that could free VRAM (`?refresh=1` re-probes)             |
+| GET    | `/api/v1/models/vram-unload`               | Auto-unload settings view (`enabled` + per-target toggles)                   |
+| PATCH  | `/api/v1/models/vram-unload`               | Update auto-unload settings (admin)                                          |
+| POST   | `/api/v1/models/vram-unload/free`          | Free VRAM now; optional `{targets}` to pick which services (admin)           |
 | GET    | `/api/v1/models/huggingface/search`        | Search the public HuggingFace catalog (`?q=&filter=&limit=`)                 |
 | GET    | `/api/v1/models/huggingface/:repoId`       | Repo metadata + recursive file listing + README (`:repoId` = `owner%2Fname`) |
 | GET    | `/api/v1/models/huggingface/settings`      | HF token status, masked (`{tokenSet, tokenSource}`) (admin)                  |
@@ -151,6 +155,35 @@ instead of failing later at benchmark or generation time).
 Errors: `400` bad repo id / no usable weight file / unknown `file` / invalid token, `404` unknown
 repo, `409` model id already registered, `502` HuggingFace unreachable, timed out, or rejected
 (upstream `401`/`403` — store a token in the HF token settings or set `HF_TOKEN`).
+
+## VRAM auto-unload
+
+Local GPU services that hold models in VRAM (a running ComfyUI, a local `llama-server`) starve
+generation jobs of the memory they need. **VRAM auto-unload** detects which such services are
+running _on this machine_ and can free VRAM on demand, so a low-VRAM guard can unblock a local_cli
+job instead of always forcing a CPU fallback.
+
+- **Detection** (`GET .../vram-unload/services`): reads `nvidia-smi --query-compute-apps`, then each
+  GPU process's command line (via `ps` — `/proc/<pid>/cmdline` is gated behind `--allow-all`, which
+  the backend does not run with). A `ComfyUI ... main.py` process is a `comfyui` target (endpoint
+  `127.0.0.1:8188`); a `llama-server` child is traced up its process tree to the `--models-preset`
+  **router** parent, whose port becomes the `llama` endpoint. Only local processes are ever
+  candidates — a remote LLM/ComfyUI is a different host and never appears. `?refresh=1` re-probes
+  (the results are otherwise cached ~60 s).
+- **Freeing** (`POST .../vram-unload/free`): `comfyui` → `POST /free {"unload_models": true}`;
+  `llama` → `GET /v1/models` (loaded models) then `POST /models/unload` per loaded model. An
+  optional `{targets}` body restricts which services are freed. Each target reports `{ok, error?}`
+  in the response; a single failure never aborts the rest.
+- **Settings** (`GET`/`PATCH .../vram-unload`, admin for the write): the `vram_unload.` settings
+  rows — `enabled` (master, **off** by default) plus per-target `comfyui`/`llama` toggles (on by
+  default). No migration is needed (the settings table is key/value).
+- **Trigger**: the vram-guard's live low-VRAM probe, when a local_cli job's free VRAM is below its
+  `vram_requirement_mb`, silently calls the free endpoint (only if `enabled`) and re-probes; if the
+  model now fits it starts on the GPU, otherwise the existing VRAM dialog appears. Disabled = the
+  previous behavior, unchanged.
+- **UI**: the Model Manager's **VRAM auto-unload** panel (admin) lists the detected local services
+  with their live VRAM/loaded models, per-target toggles, a master switch, and a "Free now" button.
+  It renders only when at least one local service is detected, with a Refresh to re-probe.
 
 ## Behavior
 
