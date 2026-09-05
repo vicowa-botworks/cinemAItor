@@ -114,7 +114,7 @@ export class VramChoiceDialog extends LitElement {
             </button>
             <button class="btn btn-recheck" ?disabled=${this.rechecking}
               @click=${this._recheck}>
-              ${this.rechecking ? "Checking…" : "Free VRAM &amp; recheck"}
+              ${this.rechecking ? "Checking…" : "Free VRAM & recheck"}
             </button>
           </div>
         </div>
