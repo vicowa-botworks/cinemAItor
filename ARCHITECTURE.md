@@ -97,7 +97,8 @@ app-root (main router)
 │   ├── asset-upload (create + raw-bytes streaming file upload → first version)
  │   ├── asset-generate (prompt-based generation: new image/video asset OR new versions of an
  │   │   │               existing asset; text→image/video or reference→image/video task upgrade,
- │   │   │               model/seed/candidates pickers, quality-profile picker (draft/production,
+  │   │   │               model/seed/candidates pickers, aspect-ratio + resolution pickers (image
+  │   │   │               kind, live W×H preview), quality-profile picker (draft/production,
  │   │   │               docs/generation_profiles.md), "use current version" toggle in edit mode +
  │   │   │               one-click "produce final from current version" (production profile)
  │   │   │               draft→production button, pre-generation VRAM check → vram-choice-dialog
@@ -296,9 +297,10 @@ server.ts (entry point)
   │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
   │   │     pointers, prompt references, AST-015; feeds the UI "Used in" view)
     │   │   + prompt-based generation: POST /generate (new image/video asset) and
-    │   │     POST /:id/generate (new versions; reference inputs, include_current, optional
-    │   │     device cpu|cuda → job settings → RUNNER_DEVICE env, optional quality
-    │   │     profile draft|production → job settings.profile → the runner merges the
+     │   │     POST /:id/generate (new versions; reference inputs, include_current, optional
+     │   │     device cpu|cuda → job settings → RUNNER_DEVICE env, optional aspect_ratio +
+     │   │     resolution (image kind) → computed job width/height, optional quality
+     │   │     profile draft|production → job settings.profile → the runner merges the
     │   │     model's matching profile over default_settings; docs/generation_profiles.md) —
     │   │     t2i/t2v or i2i/i2v by presence of references (see docs/assets.md)
 │   ├── Media proxies: GET/POST /:id/versions/:versionId/proxy (transcode + serve)
@@ -349,14 +351,16 @@ server.ts (entry point)
   │   │   local_cli job cpu↔cuda: cancels an in-flight run, re-queues on the new
   │   │   device, all other settings intact); in-process runner with leases + recovery
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
-   │   │   candidate, {prompt}/{seed}/{input:<i>}/{output} placeholders), comfyui (workflow graph
+    │   │   candidate, {prompt}/{seed}/{input:<i>}/{width}/{height}/{output} placeholders), comfyui (workflow graph
     │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
       │   │   model default_settings (then the job's quality profile over them,
       │   │   docs/generation_profiles.md), passes per-job workDir; HF-origin models (repository_url on
       │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so
       │   │   runners can fetch gated-repo files; a user-chosen device (job settings) is injected
-      │   │   as RUNNER_DEVICE and the model's vram_requirement_mb as RUNNER_MIN_FREE_VRAM_MB so
-      │   │   the runner's CPU/GPU auto-fallback matches the UI's pre-generation VRAM check;
+       │   │   as RUNNER_DEVICE and the model's vram_requirement_mb as RUNNER_MIN_FREE_VRAM_MB so
+       │   │   the runner's CPU/GPU auto-fallback matches the UI's pre-generation VRAM check;
+       │   │   a computed image size is passed as RUNNER_WIDTH/RUNNER_HEIGHT (plus the {width}/{height}
+       │   │   placeholders / ComfyUI {{width}}/{{height}}) when the job carries width/height;
       │   │   provenance on produced asset versions; local_cli
      │   │   streams stdout and forwards `RUNNER_STATUS {json}` lines live as `runner.log` job
      │   │   events (runners report e.g. device=cuda/cpu so the job card shows it mid-run);

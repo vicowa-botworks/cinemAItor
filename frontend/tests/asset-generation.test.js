@@ -1,6 +1,7 @@
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
+  computeImageSize,
   formatGb,
   generationKindForAsset,
   generationTaskType,
@@ -8,6 +9,9 @@ import {
   isValidSlug,
   normalizeCandidates,
   normalizeSeed,
+  round8,
+  sizeFieldsFromForm,
+  sizePreview,
   slugify,
   validateGenerationForm,
   vramPreCheck,
@@ -352,5 +356,86 @@ describe("formatGb", () => {
   it("renders unknown values as a question mark", () => {
     assertEquals(formatGb(null), "?");
     assertEquals(formatGb(undefined), "?");
+  });
+});
+
+describe("round8", () => {
+  it("rounds to the nearest 8", () => {
+    assertEquals(round8(96), 96);
+    assertEquals(round8(100), 104);
+  });
+  it("floors at 8", () => {
+    assertEquals(round8(1), 8);
+  });
+});
+
+describe("computeImageSize", () => {
+  it("keeps the short edge at the base for landscape ratios", () => {
+    assertEquals(computeImageSize("16:9", 1024), { width: 1824, height: 1024 });
+    assertEquals(computeImageSize("3:2", 1024), { width: 1536, height: 1024 });
+    assertEquals(computeImageSize("21:9", 512), { width: 1192, height: 512 });
+  });
+
+  it("keeps the short edge at the base for portrait ratios", () => {
+    assertEquals(computeImageSize("9:16", 1024), { width: 1024, height: 1824 });
+    assertEquals(computeImageSize("2:3", 1024), { width: 1024, height: 1536 });
+    assertEquals(computeImageSize("3:4", 768), { width: 768, height: 1024 });
+  });
+
+  it("returns the base square for 1:1", () => {
+    assertEquals(computeImageSize("1:1", 512), { width: 512, height: 512 });
+    assertEquals(computeImageSize("1:1", 2048), { width: 2048, height: 2048 });
+  });
+
+  it("accepts a string base edge from a select", () => {
+    assertEquals(computeImageSize("16:9", "1024"), { width: 1824, height: 1024 });
+  });
+
+  it("returns undefined without a base or with a bad ratio", () => {
+    assertEquals(computeImageSize("", 1024), undefined);
+    assertEquals(computeImageSize("16:9", ""), undefined);
+    assertEquals(computeImageSize("16:9", null), undefined);
+    assertEquals(computeImageSize("nope", 1024), undefined);
+    assertEquals(computeImageSize("16:9:1", 1024), undefined);
+  });
+});
+
+describe("sizeFieldsFromForm", () => {
+  it("omits both fields when both are Auto", () => {
+    assertEquals(sizeFieldsFromForm({ aspect_ratio: "", resolution: "" }), {});
+    assertEquals(sizeFieldsFromForm({}), {});
+  });
+
+  it("includes the aspect and coerces the resolution string to a number", () => {
+    assertEquals(sizeFieldsFromForm({ aspect_ratio: "16:9", resolution: "1024" }), {
+      aspect_ratio: "16:9",
+      resolution: 1024,
+    });
+  });
+
+  it("sends each field independently", () => {
+    assertEquals(sizeFieldsFromForm({ aspect_ratio: "9:16", resolution: "" }), {
+      aspect_ratio: "9:16",
+    });
+    assertEquals(sizeFieldsFromForm({ aspect_ratio: "", resolution: "1536" }), {
+      resolution: 1536,
+    });
+  });
+
+  it("ignores a non-numeric resolution", () => {
+    assertEquals(sizeFieldsFromForm({ aspect_ratio: "1:1", resolution: "abc" }), {
+      aspect_ratio: "1:1",
+    });
+  });
+});
+
+describe("sizePreview", () => {
+  it("renders the WxH string for a concrete size", () => {
+    assertEquals(sizePreview("16:9", 1024), "1824×1024");
+    assertEquals(sizePreview("1:1", 512), "512×512");
+  });
+  it("returns null for Auto", () => {
+    assertEquals(sizePreview("", ""), null);
+    assertEquals(sizePreview("16:9", ""), null);
   });
 });

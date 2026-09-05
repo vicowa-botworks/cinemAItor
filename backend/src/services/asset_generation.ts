@@ -63,6 +63,69 @@ export type GenerationDevice = (typeof GENERATION_DEVICES)[number];
 export const GENERATION_PROFILES = ["draft", "production"] as const;
 export type GenerationProfile = (typeof GENERATION_PROFILES)[number];
 
+/**
+ * Output aspect ratio / resolution for prompt-based image generation (image
+ * kind only). `aspect_ratio` is a "w:h" string (e.g. "16:9"); `resolution` is
+ * the base edge — the short edge — in pixels. Together they yield a concrete
+ * width/height (the long edge scaled by the ratio, rounded to a multiple of 8
+ * so diffusion samers tile cleanly) that the runner exposes to the model.
+ * Both are optional: "auto" (unset) means the model's own default settings
+ * decide the size, so nothing is sent.
+ */
+export const MIN_IMAGE_EDGE = 64;
+export const MAX_IMAGE_EDGE = 8192;
+const ASPECT_RATIO_RE = /^(\d{1,4}):(\d{1,4})$/;
+
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+export function resolveAspectRatio(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || !ASPECT_RATIO_RE.test(value)) {
+    throw badRequest(
+      `aspect_ratio must be a "w:h" ratio like "16:9" (got ${JSON.stringify(value)})`,
+    );
+  }
+  return value.trim();
+}
+
+export function resolveResolution(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw badRequest(
+      `resolution must be an integer number of pixels (got ${JSON.stringify(value)})`,
+    );
+  }
+  if (value < MIN_IMAGE_EDGE || value > MAX_IMAGE_EDGE) {
+    throw badRequest(
+      `resolution must be between ${MIN_IMAGE_EDGE} and ${MAX_IMAGE_EDGE} pixels`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Concrete pixel size for an ("w:h" aspect ratio, base edge). The short edge
+ * equals the base; the long edge scales by the ratio and rounds to the nearest
+ * multiple of 8 (diffusion models tile in 8px blocks). Returns undefined when
+ * either input is absent — i.e. "auto", the model decides.
+ */
+export function computeImageSize(
+  aspectRatio: string | undefined,
+  base: number | undefined,
+): ImageSize | undefined {
+  if (aspectRatio === undefined || base === undefined) return undefined;
+  const m = ASPECT_RATIO_RE.exec(aspectRatio);
+  if (!m) return undefined;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  const round8 = (n: number): number => Math.max(8, Math.round(n / 8) * 8);
+  if (w >= h) return { width: round8((base * w) / h), height: base };
+  return { width: base, height: round8((base * h) / w) };
+}
+
 export interface AssetReferenceInput {
   asset_id: string;
   version_number?: number;
@@ -82,6 +145,8 @@ export interface GenerateNewAssetOptions {
   references?: AssetReferenceInput[];
   device?: unknown;
   profile?: unknown;
+  aspect_ratio?: unknown;
+  resolution?: unknown;
 }
 
 export interface GenerateIntoAssetOptions {
@@ -94,6 +159,8 @@ export interface GenerateIntoAssetOptions {
   references?: AssetReferenceInput[];
   device?: unknown;
   profile?: unknown;
+  aspect_ratio?: unknown;
+  resolution?: unknown;
 }
 
 export interface AssetGenerateResult {
@@ -246,9 +313,16 @@ function enqueueGeneration(
   target: { asset_id: string; project_id: string | null },
   device: GenerationDevice | undefined,
   profile: GenerationProfile | undefined,
+  aspectRatio: string | undefined,
+  resolution: number | undefined,
 ) {
   const taskType = inputs.length > 0 ? KIND_TASK_TYPES[kind].input : KIND_TASK_TYPES[kind].text;
   const model = pickModel(taskType, modelId);
+  // Output size (image kind only): concrete width/height from the aspect ratio
+  // + base edge. The runner exposes these to the model (RUNNER_WIDTH/RUNNER_
+  // HEIGHT env, {width}/{height} CLI args, {{width}}/{{height}} ComfyUI slots).
+  // "auto" (both unset) omits them so the model's own settings decide.
+  const size = kind === "image" ? computeImageSize(aspectRatio, resolution) : undefined;
   const job = createJob(userId, {
     job_type: taskType,
     model_id: model.id,
@@ -262,6 +336,11 @@ function enqueueGeneration(
       // Quality profile (draft/production): the runner merges the model's
       // matching settings profile over default_settings (under job settings).
       ...(profile ? { profile } : {}),
+      // Requested output aspect / resolution (image kind): the raw hints, plus
+      // the concrete width/height computed from them when both are present.
+      ...(kind === "image" && aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+      ...(kind === "image" && resolution !== undefined ? { resolution } : {}),
+      ...(size ? { width: size.width, height: size.height } : {}),
       // The model's declared VRAM requirement, so the runner's auto-fallback
       // threshold matches the UI's pre-generation VRAM check (both read
       // vram_requirement_mb). local_cli only — other backends ignore it.
@@ -332,6 +411,8 @@ export function generateNewAsset(
     { asset_id: asset.id, project_id: projectId ?? null },
     resolveDevice(options.device),
     resolveProfile(options.profile),
+    resolveAspectRatio(options.aspect_ratio),
+    resolveResolution(options.resolution),
   );
 }
 
@@ -392,5 +473,7 @@ export function generateIntoAsset(
     { asset_id: asset.id, project_id: asset.project_id },
     resolveDevice(options.device),
     resolveProfile(options.profile),
+    resolveAspectRatio(options.aspect_ratio),
+    resolveResolution(options.resolution),
   );
 }

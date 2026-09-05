@@ -129,6 +129,14 @@ itself is created synchronously in the new-asset case, with no versions yet):
   `vram_requirement_mb`), and re-checks — sending no `device` — once enough VRAM is free. The value
   reaches the runner as the `RUNNER_DEVICE` env var; the model's `vram_requirement_mb` is passed as
   `RUNNER_MIN_FREE_VRAM_MB` so the runner's own fallback threshold matches the UI check.
+- `aspect_ratio` (optional, `w:h` string, e.g. `16:9`) + `resolution` (optional, base-edge pixels,
+  64–8192): image-kind output sizing. When either is set the server computes a target `width` ×
+  `height` (short edge = the chosen base, long edge = base × ratio rounded to 8 px; both left on
+  Auto → the model decides) and stores it in the job settings as `width` / `height` plus an
+  `aspect_ratio` hint. The values reach the runner as `RUNNER_WIDTH` / `RUNNER_HEIGHT` env vars and
+  the `{width}` / `{height}` `local_cli` placeholders (or `{{width}}` / `{{height}}` in a ComfyUI
+  workflow) — whether a specific model honors them depends on its runner script / workflow, like the
+  quality-profile knobs. Image kind only; video requests ignore both (400 for malformed values).
 - New-asset only: `unique_slug`, `display_name`, `asset_type` (image kind: `image` / `character` /
   `location` / `prop`; video kind: `video`), `library_scope` + `project_id` (same rules as
   `POST /api/v1/assets`).

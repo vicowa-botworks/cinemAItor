@@ -3,11 +3,15 @@ import { api } from "../api.js";
 import "./ref-input.js";
 import "./ai-assist-dialog.js";
 import {
+  ASPECT_RATIO_PRESETS,
   generationKindForAsset,
   generationTaskType,
   IMAGE_ASSET_TYPES,
   normalizeCandidates,
   normalizeSeed,
+  RESOLUTION_PRESETS,
+  sizeFieldsFromForm,
+  sizePreview,
   slugify,
   validateGenerationForm,
   VIDEO_ASSET_TYPES,
@@ -213,6 +217,8 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this.seed = "";
     this.candidates = 2;
     this.profile = "";
+    this.aspectRatio = "";
+    this.resolution = "";
     this.references = [];
     this.includeCurrent = false;
     this.models = [];
@@ -324,6 +330,15 @@ export class AssetGenerate extends VramGuard(LitElement) {
     payload.candidates = normalizeCandidates(this.candidates);
     if (this.modelId) payload.model_id = this.modelId;
     if (this.profile) payload.profile = this.profile;
+    const kind = this._isEdit() ? this._editKind() : this.kind;
+    if (kind === "image") {
+      const sizeFields = sizeFieldsFromForm({
+        aspect_ratio: this.aspectRatio,
+        resolution: this.resolution,
+      });
+      if (sizeFields.aspect_ratio) payload.aspect_ratio = sizeFields.aspect_ratio;
+      if (sizeFields.resolution) payload.resolution = sizeFields.resolution;
+    }
     if (this.references.length > 0) payload.references = this.references;
     if (this._isEdit()) {
       if (this.includeCurrent && this.editAsset.active_version_id) {
@@ -418,6 +433,11 @@ export class AssetGenerate extends VramGuard(LitElement) {
     // Matches the backend's pickModel auto-pick (first enabled model for the
     // task, ordered by name, version).
     return this.models[0] ?? null;
+  }
+
+  /** Live "W×H" for the current aspect/resolution picks, or "model default". */
+  _sizePreviewText() {
+    return sizePreview(this.aspectRatio, this.resolution) ?? "model default";
   }
 
   _onAssistInsert(e) {
@@ -625,6 +645,45 @@ export class AssetGenerate extends VramGuard(LitElement) {
             </select>
           </div>
         </div>
+
+        ${kind === "image"
+          ? html`
+            <div class="row-3">
+              <div>
+                <label for="gen-aspect">Aspect ratio</label>
+                <select
+                  id="gen-aspect"
+                  .value=${this.aspectRatio}
+                  @change=${(e) => {
+                    this.aspectRatio = e.target.value;
+                  }}
+                  ?disabled=${this.busy}>
+                  ${ASPECT_RATIO_PRESETS.map(
+                    (p) => html`<option value=${p.value}>${p.label}</option>`,
+                  )}
+                </select>
+              </div>
+              <div>
+                <label for="gen-resolution">Resolution (base edge)</label>
+                <select
+                  id="gen-resolution"
+                  .value=${this.resolution}
+                  @change=${(e) => {
+                    this.resolution = e.target.value;
+                  }}
+                  ?disabled=${this.busy}>
+                  ${RESOLUTION_PRESETS.map(
+                    (p) => html`<option value=${p.value}>${p.label}</option>`,
+                  )}
+                </select>
+              </div>
+              <div>
+                <label>Output size</label>
+                <div class="note">${this._sizePreviewText()}</div>
+              </div>
+            </div>
+          `
+          : ""}
 
         ${this._isEdit() && this.editAsset?.active_version_id
           ? html`

@@ -865,6 +865,20 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
       device: deviceProperty(),
       profile: profileProperty(),
+      aspect_ratio: {
+        type: "string",
+        pattern: "^[0-9]{1,4}:[0-9]{1,4}$",
+        description: 'Image output aspect ratio "w:h" (e.g. "16:9"). Image kind only; omit ' +
+          "for auto (the model's default size).",
+      },
+      resolution: {
+        type: "integer",
+        minimum: 64,
+        maximum: 8192,
+        description: "Image output base edge (the short edge) in pixels, 64-8192. Image kind " +
+          "only; omit for auto. The long edge is scaled by the aspect ratio and " +
+          "rounded to a multiple of 8.",
+      },
     },
   },
 
@@ -898,6 +912,20 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
       device: deviceProperty(),
       profile: profileProperty(),
+      aspect_ratio: {
+        type: "string",
+        pattern: "^[0-9]{1,4}:[0-9]{1,4}$",
+        description: 'Image output aspect ratio "w:h" (e.g. "16:9"). Image kind only; omit ' +
+          "for auto (the model's default size).",
+      },
+      resolution: {
+        type: "integer",
+        minimum: 64,
+        maximum: 8192,
+        description: "Image output base edge (the short edge) in pixels, 64-8192. Image kind " +
+          "only; omit for auto. The long edge is scaled by the aspect ratio and " +
+          "rounded to a multiple of 8.",
+      },
     },
   },
 

@@ -141,19 +141,46 @@ export function outputForTask(jobType: string): { extension: string; mime_type: 
 }
 
 /**
+ * Resolve the effective output size a runner should pass to the model: the
+ * job's computed width/height (from the requested aspect ratio + base edge),
+ * falling back to the model's baked `default_width`/`default_height`, plus the
+ * raw aspect hint. Fields are undefined for "auto" (the model decides).
+ */
+export function resolveOutputSize(settings: Record<string, unknown>): {
+  width: number | undefined;
+  height: number | undefined;
+  aspect: string | undefined;
+} {
+  const asPositiveInt = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? Math.round(value)
+      : undefined;
+  const aspect = typeof settings.aspect_ratio === "string" && settings.aspect_ratio !== ""
+    ? settings.aspect_ratio
+    : undefined;
+  const width = asPositiveInt(settings.width) ?? asPositiveInt(settings.default_width);
+  const height = asPositiveInt(settings.height) ?? asPositiveInt(settings.default_height);
+  return { width, height, aspect };
+}
+
+/**
  * Extra environment for local_cli spawns: the string values of
  * `settings.env`, the HF hub token (so runners can fetch gated-repo files —
  * an explicit settings.env entry wins), RUNNER_DEVICE when the job settings
  * carry a user-chosen device (the runner must honour it instead of its own
- * auto fallback), and RUNNER_MIN_FREE_VRAM_MB when the job settings carry a
+ * auto fallback), RUNNER_MIN_FREE_VRAM_MB when the job settings carry a
  * VRAM requirement (the runner's auto-fallback threshold, so it matches the
- * UI's pre-generation VRAM check). Returns undefined when nothing is added.
+ * UI's pre-generation VRAM check), and RUNNER_WIDTH / RUNNER_HEIGHT /
+ * RUNNER_ASPECT_RATIO when an output size was requested (image generation —
+ * the runner can size the model from them; absent = the model's default).
+ * Returns undefined when nothing is added.
  */
 export function cliExtraEnv(
   settingsEnv: Record<string, string> | undefined,
   hfToken: string,
   device: "cpu" | "cuda" | undefined,
   minFreeVramMb: number | undefined,
+  size?: { width: number | undefined; height: number | undefined; aspect: string | undefined },
 ): Record<string, string> | undefined {
   const env: Record<string, string> = { ...(settingsEnv ?? {}) };
   if (hfToken) {
@@ -170,6 +197,17 @@ export function cliExtraEnv(
     env.RUNNER_MIN_FREE_VRAM_MB === undefined
   ) {
     env.RUNNER_MIN_FREE_VRAM_MB = String(Math.round(minFreeVramMb));
+  }
+  if (size) {
+    if (size.width !== undefined && env.RUNNER_WIDTH === undefined) {
+      env.RUNNER_WIDTH = String(size.width);
+    }
+    if (size.height !== undefined && env.RUNNER_HEIGHT === undefined) {
+      env.RUNNER_HEIGHT = String(size.height);
+    }
+    if (size.aspect !== undefined && env.RUNNER_ASPECT_RATIO === undefined) {
+      env.RUNNER_ASPECT_RATIO = size.aspect;
+    }
   }
   return Object.keys(env).length > 0 ? env : undefined;
 }
@@ -336,6 +374,11 @@ export interface CliArgContext {
   count: number;
   inputPaths: string[];
   output: string;
+  // Optional output size (image generation). When a model's args reference
+  // {width}/{height} but the job has no resolved size (auto aspect/resolution
+  // with no default_width/height), rendering throws a clear error.
+  width?: number;
+  height?: number;
 }
 
 export function renderCliArgs(args: string[], ctx: CliArgContext): string[] {
@@ -346,6 +389,22 @@ export function renderCliArgs(args: string[], ctx: CliArgContext): string[] {
       if (key === "candidate") return String(ctx.candidate);
       if (key === "count") return String(ctx.count);
       if (key === "output") return ctx.output;
+      if (key === "width") {
+        if (ctx.width === undefined) {
+          throw new Error(
+            `Argument '${arg}' references '{width}' but no output width is set — choose a non-Auto aspect ratio/resolution or add a default_width to the model`,
+          );
+        }
+        return String(ctx.width);
+      }
+      if (key === "height") {
+        if (ctx.height === undefined) {
+          throw new Error(
+            `Argument '${arg}' references '{height}' but no output height is set — choose a non-Auto aspect ratio/resolution or add a default_height to the model`,
+          );
+        }
+        return String(ctx.height);
+      }
       if (key.startsWith("input:")) {
         const i = Number(key.slice("input:".length));
         const path = ctx.inputPaths[i];
@@ -569,7 +628,8 @@ export class LocalCliAdapter implements ModelAdapter {
       typeof rawMinFree === "number" && Number.isFinite(rawMinFree) && rawMinFree > 0
         ? rawMinFree
         : undefined;
-    const extraEnv = cliExtraEnv(settingsEnv, hfToken, device, minFreeVramMb);
+    const size = resolveOutputSize(settings);
+    const extraEnv = cliExtraEnv(settingsEnv, hfToken, device, minFreeVramMb, size);
     const seedUsed = input.seed && input.seed !== "random" ? input.seed : randomSeed();
     const count = candidateCount(settings);
     const def = outputForTask(input.jobType);
@@ -591,6 +651,8 @@ export class LocalCliAdapter implements ModelAdapter {
           count,
           inputPaths: input.inputs.map((ref) => ref.file_path),
           output: outPath,
+          width: size.width,
+          height: size.height,
         });
         hooks.onProgress(
           5 + (i / count) * 90,
@@ -644,16 +706,28 @@ function fetchWithTimeout(url: string, init: RequestInit = {}, ms = 20000): Prom
 
 function substituteWorkflow(
   workflow: Record<string, unknown>,
-  ctx: { prompt: string; seed: string; uploads: Map<number, string> },
+  ctx: {
+    prompt: string;
+    seed: string;
+    uploads: Map<number, string>;
+    width?: number;
+    height?: number;
+  },
 ): Record<string, unknown> {
   const walk = (value: unknown): unknown => {
     if (typeof value === "string") {
       if (value.trim() === "{{seed}}") {
         return comfySeedToInt(ctx.seed);
       }
+      // A bare size placeholder in a numeric field renders as the NUMBER so
+      // ComfyUI's input validation accepts it (mirrors {{seed}}).
+      if (value.trim() === "{{width}}") return ctx.width;
+      if (value.trim() === "{{height}}") return ctx.height;
       return value
         .replace(/\{\{\s*prompt\s*\}\}/g, ctx.prompt)
         .replace(/\{\{\s*seed\s*\}\}/g, ctx.seed)
+        .replace(/\{\{\s*width\s*\}\}/g, () => String(ctx.width ?? ""))
+        .replace(/\{\{\s*height\s*\}\}/g, () => String(ctx.height ?? ""))
         .replace(/\{\{\s*input:(\d+)\s*\}\}/g, (_m, i: string) => ctx.uploads.get(Number(i)) ?? _m);
     }
     if (Array.isArray(value)) return value.map(walk);
@@ -695,8 +769,21 @@ export class ComfyUIAdapter implements ModelAdapter {
     const timeoutSeconds = settingNumber(settings, "timeout_seconds", 600, 1, 6 * 3600);
     const seedUsed = input.seed && input.seed !== "random" ? input.seed : randomSeed();
     const clientId = crypto.randomUUID();
+    const size = resolveOutputSize(settings);
 
     const workflowJson = JSON.stringify(workflow);
+    // Fail early when the workflow references a size placeholder the job can't
+    // resolve (auto aspect/resolution with no default_width/height).
+    if (/\{\{\s*width\s*\}\}/.test(workflowJson) && size.width === undefined) {
+      throw new Error(
+        "Workflow references {{width}} but no output width is set — choose a non-Auto aspect ratio/resolution or add a default_width to the model",
+      );
+    }
+    if (/\{\{\s*height\s*\}\}/.test(workflowJson) && size.height === undefined) {
+      throw new Error(
+        "Workflow references {{height}} but no output height is set — choose a non-Auto aspect ratio/resolution or add a default_height to the model",
+      );
+    }
     const referencedInputs = [
       ...new Set(
         [...workflowJson.matchAll(/\{\{\s*input:(\d+)\s*\}\}/g)].map((m) => Number(m[1])),
@@ -745,6 +832,8 @@ export class ComfyUIAdapter implements ModelAdapter {
       prompt: input.promptText ?? "",
       seed: seedUsed,
       uploads,
+      width: size.width,
+      height: size.height,
     });
 
     hooks.onProgress(30, "Submitting workflow");
