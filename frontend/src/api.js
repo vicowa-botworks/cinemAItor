@@ -695,6 +695,31 @@ class ApiClient {
     return this.request(`/models/hardware${qs}`);
   }
 
+  // --- v1 models: VRAM auto-unload (local GPU services) ---
+
+  getVramUnloadSettings() {
+    return this.request("/models/vram-unload");
+  }
+
+  saveVramUnloadSettings(patch) {
+    return this.request("/models/vram-unload", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  getVramUnloadServices(options = {}) {
+    const qs = options.refresh ? "?refresh=1" : "";
+    return this.request(`/models/vram-unload/services${qs}`);
+  }
+
+  freeVramUnload(options = {}) {
+    return this.request("/models/vram-unload/free", {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
   // --- v1 llm ---
 
   getLlmSettings() {

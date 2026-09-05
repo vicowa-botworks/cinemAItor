@@ -39,7 +39,7 @@ async function readFull(path: string): Promise<string | null> {
   }
 }
 
-async function runCommand(cmd: string, args: string[]): Promise<string | null> {
+export async function runCommand(cmd: string, args: string[]): Promise<string | null> {
   try {
     const child = new Deno.Command(cmd, {
       args,

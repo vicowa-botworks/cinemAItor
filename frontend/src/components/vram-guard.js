@@ -75,6 +75,9 @@ export const VramGuard = (superClass) =>
       }
       const check = vramPreCheck(model, hardwareOf(hw));
       if (!check.needed) return null;
+      // If VRAM auto-unload is enabled, free the local GPU services once and
+      // re-probe — if that's enough, continue on the GPU without a dialog.
+      if (await this._tryAutoFreeVram(model)) return "cuda";
       this._vram = {
         open: true,
         requirementGb: formatGb(check.requirementMb),
@@ -87,6 +90,29 @@ export const VramGuard = (superClass) =>
       return new Promise((resolve) => {
         this._vramResolve = resolve;
       });
+    }
+
+    /**
+     * When VRAM auto-unload is enabled, ask the backend to free the detected
+     * local GPU services (ComfyUI / llama router) once, then re-probe live.
+     * Best-effort: any failure (settings read, free call, re-probe) returns
+     * false so the caller falls through to the dialog.
+     * @param {{backend?: string, vram_requirement_mb?: number|null}} model
+     * @returns {Promise<boolean>} true if VRAM is now sufficient after freeing
+     */
+    async _tryAutoFreeVram(model) {
+      try {
+        const settings = await api.getVramUnloadSettings();
+        if (!settings?.enabled) return false;
+        const freed = await api.freeVramUnload();
+        if (!Array.isArray(freed?.results) || !freed.results.some((r) => r.ok)) {
+          return false; // nothing was actually freed — no point re-probing
+        }
+        const hw = await api.getModelsHardware({ refresh: true });
+        return vramSufficient(model, hardwareOf(hw));
+      } catch {
+        return false;
+      }
     }
 
     settleVram(value) {
