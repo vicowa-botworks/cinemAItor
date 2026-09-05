@@ -71,6 +71,88 @@ export function normalizeCandidates(value) {
   return Math.min(8, Math.max(1, n));
 }
 
+// ---- image output size (aspect ratio + resolution) ----
+// Mirrors the backend's sizing (asset_generation.ts): the shorter edge equals
+// the chosen base edge; the longer edge is base × ratio rounded to 8px. Auto
+// (empty) omits the field so the model picks its own size.
+
+/** Aspect-ratio choices for the generate form ("w:h" or "" for Auto). */
+export const ASPECT_RATIO_PRESETS = [
+  { value: "", label: "Auto (model default)" },
+  { value: "1:1", label: "1:1 square" },
+  { value: "4:3", label: "4:3 classic" },
+  { value: "3:4", label: "3:4 portrait" },
+  { value: "16:9", label: "16:9 widescreen" },
+  { value: "9:16", label: "9:16 vertical" },
+  { value: "3:2", label: "3:2 photo" },
+  { value: "2:3", label: "2:3 portrait" },
+  { value: "21:9", label: "21:9 cinematic" },
+];
+
+/** Base-edge (px) choices for the generate form (number or "" for Auto). */
+export const RESOLUTION_PRESETS = [
+  { value: "", label: "Auto (model default)" },
+  { value: 512, label: "512 px" },
+  { value: 768, label: "768 px" },
+  { value: 1024, label: "1024 px" },
+  { value: 1536, label: "1536 px" },
+  { value: 2048, label: "2048 px" },
+];
+
+export const MIN_IMAGE_EDGE = 64;
+export const MAX_IMAGE_EDGE = 8192;
+
+/** Round to the nearest 8, floored at 8 — matches the backend's round8. */
+export function round8(n) {
+  return Math.max(8, Math.round(n / 8) * 8);
+}
+
+/**
+ * Compute output width/height from an aspect ratio ("w:h") and a base edge in
+ * px. The shorter edge equals the base; the longer edge is the base scaled by
+ * the ratio and rounded to 8px. Returns undefined when either input is absent
+ * or the ratio is malformed (the model then decides its own size).
+ * @param {string|number|null|undefined} aspect
+ * @param {string|number|null|undefined} baseEdge
+ * @returns {{width: number, height: number} | undefined}
+ */
+export function computeImageSize(aspect, baseEdge) {
+  const base = Number(baseEdge);
+  const ratio = typeof aspect === "string" ? aspect.trim() : "";
+  if (!ratio || !Number.isFinite(base) || base <= 0) return undefined;
+  const m = ratio.match(/^(\d{1,4}):(\d{1,4})$/);
+  if (!m) return undefined;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (w >= h) return { width: round8(base * (w / h)), height: Math.round(base) };
+  return { width: Math.round(base), height: round8(base * (h / w)) };
+}
+
+/**
+ * The size fields to send from the form's aspect/resolution selects. Auto
+ * (empty) omits the field. `resolution` arrives as a string from a <select>;
+ * it is coerced to an integer.
+ * @param {object} form
+ * @returns {{aspect_ratio?: string, resolution?: number}}
+ */
+export function sizeFieldsFromForm(form) {
+  const fields = {};
+  const aspect = String(form?.aspect_ratio ?? "").trim();
+  if (aspect) fields.aspect_ratio = aspect;
+  const resRaw = form?.resolution ?? "";
+  if (resRaw !== "" && resRaw !== null && resRaw !== undefined) {
+    const res = Number(resRaw);
+    if (Number.isFinite(res) && res > 0) fields.resolution = Math.round(res);
+  }
+  return fields;
+}
+
+/** Human "WxH" preview of the chosen size, or null when Auto. */
+export function sizePreview(aspect, resolution) {
+  const size = computeImageSize(aspect, resolution);
+  return size ? `${size.width}×${size.height}` : null;
+}
+
 /**
  * Unwrap the GET /models/hardware response envelope to its inner `hardware`
  * object (the shape `vramPreCheck`/`vramSufficient` expect). The endpoint

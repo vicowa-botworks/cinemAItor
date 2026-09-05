@@ -23,9 +23,9 @@ job settings  >  profile settings  >  default_settings
 ```
 
 The profile can tune quality knobs but can never break the invocation: job-level keys (`candidates`,
-`device`, `min_free_vram_mb`, …) always win, and a profile must not be able to drop `command` /
-`endpoint` / `workflow`. An empty (`{}`) or absent profile changes nothing — models without profiles
-behave exactly as before.
+`device`, `min_free_vram_mb`, `width` / `height`, …) always win, and a profile must not be able to
+drop `command` / `endpoint` / `workflow`. An empty (`{}`) or absent profile changes nothing — models
+without profiles behave exactly as before.
 
 The profile is chosen per generation request (`profile: "draft" | "production"`), recorded in the
 job's `settings.profile`, and therefore visible in job details and carried in the produced version's

@@ -272,6 +272,8 @@ export const assetRouter = new Router()
       references: parseReferences(body.references),
       device: body.device,
       profile: body.profile,
+      aspect_ratio: body.aspect_ratio,
+      resolution: body.resolution,
     });
     ctx.response.status = 202;
     ctx.response.body = result;
@@ -290,6 +292,8 @@ export const assetRouter = new Router()
       references: parseReferences(body.references),
       device: body.device,
       profile: body.profile,
+      aspect_ratio: body.aspect_ratio,
+      resolution: body.resolution,
     });
     ctx.response.status = 202;
     ctx.response.body = result;

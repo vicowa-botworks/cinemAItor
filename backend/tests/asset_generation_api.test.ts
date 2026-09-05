@@ -314,6 +314,130 @@ describe("asset generation api", () => {
     });
   });
 
+  it("threads the aspect ratio + resolution into the job's width/height settings", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const localModelId = registerModel(ownerId, {
+          name: "local-cli-t2i",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["text_to_image"],
+          enabled: true,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+
+        // 16:9 @ 1024 → width 1824, height 1024 (short edge = base, long edge 8px-multiple).
+        const gen = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "a lighthouse at dusk",
+            unique_slug: uniqueSlug("aspect"),
+            display_name: "Aspect check",
+            model_id: localModelId,
+            aspect_ratio: "16:9",
+            resolution: 1024,
+          },
+          ownerToken,
+        );
+        assertEquals(gen.status, 202);
+        const body = gen.json as { job_id: string };
+        const { status, json } = await req(
+          "GET",
+          `/api/v1/jobs/${body.job_id}`,
+          undefined,
+          ownerToken,
+        );
+        assertEquals(status, 200);
+        const settings = (json as { settings: Record<string, unknown> }).settings;
+        assertEquals(settings.width, 1824);
+        assertEquals(settings.height, 1024);
+        assertEquals(settings.aspect_ratio, "16:9");
+
+        // Both auto → the model decides: no width/height/aspect keys.
+        const auto = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "auto sized",
+            unique_slug: uniqueSlug("autosize"),
+            display_name: "Auto size",
+            model_id: localModelId,
+          },
+          ownerToken,
+        );
+        assertEquals(auto.status, 202);
+        const autoBody = auto.json as { job_id: string };
+        const { json: autoJson } = await req(
+          "GET",
+          `/api/v1/jobs/${autoBody.job_id}`,
+          undefined,
+          ownerToken,
+        );
+        const autoSettings = (autoJson as { settings: Record<string, unknown> }).settings;
+        assertEquals("width" in autoSettings, false);
+        assertEquals("height" in autoSettings, false);
+        assertEquals("aspect_ratio" in autoSettings, false);
+      })();
+    });
+  });
+
+  it("rejects an invalid aspect ratio or resolution with 400", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const localModelId = registerModel(ownerId, {
+          name: "local-cli-t2i",
+          version: "1.0",
+          backend: "local_cli",
+          task_types: ["text_to_image"],
+          enabled: true,
+          default_settings: {
+            command: "sh",
+            args: ["-c", "echo ok > {output}"],
+          },
+        }).id;
+
+        const badAspect = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "bad ratio",
+            unique_slug: uniqueSlug("badratio"),
+            display_name: "Bad ratio",
+            model_id: localModelId,
+            aspect_ratio: "16",
+          },
+          ownerToken,
+        );
+        assertEquals(badAspect.status, 400);
+
+        const badRes = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "bad resolution",
+            unique_slug: uniqueSlug("badres"),
+            display_name: "Bad resolution",
+            model_id: localModelId,
+            aspect_ratio: "1:1",
+            resolution: 12,
+          },
+          ownerToken,
+        );
+        assertEquals(badRes.status, 400);
+      })();
+    });
+  });
+
   it("threads the quality profile into job settings and rejects unknown profiles", async () => {
     await withServer((base) => {
       baseUrl = base;
