@@ -2723,14 +2723,15 @@ export class ModelManager extends LitElement {
     const report = this.vramServices;
     if (!report) return null;
     const gpu = report.gpu;
-    const holders = (report.holders ?? []).filter((h) => (h.used_mb ?? 0) > 0);
+    const holders = (report.holders ?? []).filter((h) => (h.vram_mb ?? 0) > 0);
     if (!gpu?.model && holders.length === 0) return null;
+    const freeMb = Math.max(0, Math.round((gpu?.total_mb ?? 0) - (gpu?.used_mb ?? 0)));
     return html`
       <div class="vram-svc">
         ${gpu?.model
           ? html`<p class="admin-note">
-              ${gpu.model} — free ${this._fmtMb(Math.round((gpu.vram_free ?? 0) / 1048576))}
-              of ${this._fmtMb(Math.round((gpu.vram_total ?? 0) / 1048576))} VRAM
+              ${gpu.model} — free ${this._fmtMb(freeMb)} of
+              ${this._fmtMb(Math.round(gpu.total_mb ?? 0))} VRAM
             </p>`
           : null}
         <p class="admin-note">
@@ -2741,7 +2742,7 @@ export class ModelManager extends LitElement {
                 (h) =>
                   html`
                     <span class="chip"
-                    >${h.label} ${this._fmtMb(Math.round(h.used_mb))}</span>
+                    >${h.kind === "cinemaitor" ? "this app" : h.kind} ${this._fmtMb(Math.round(h.vram_mb))}</span>
                   `,
               )
               .join("")
