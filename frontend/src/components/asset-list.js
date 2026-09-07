@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { jobEvents } from "../job-events.js";
 
 const FILTER_TYPES = [
   "character",
@@ -13,6 +14,8 @@ const FILTER_TYPES = [
   "voiceover",
   "ambience",
 ];
+
+const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 export class AssetList extends LitElement {
   static styles = css`
@@ -158,6 +161,13 @@ export class AssetList extends LitElement {
     this.q = "";
     this._qTimer = null;
     this._loadedFor = Symbol("unloaded");
+    this._unsubscribeEvents = null;
+    this._refreshTimer = null;
+  }
+
+  connectedCallback() {
+    super.connectedCallback?.();
+    this._unsubscribeEvents = jobEvents.subscribe((ev) => this._onLiveEvent(ev));
   }
 
   disconnectedCallback() {
@@ -166,6 +176,12 @@ export class AssetList extends LitElement {
       clearTimeout(this._qTimer);
       this._qTimer = null;
     }
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+      this._refreshTimer = null;
+    }
+    this._unsubscribeEvents?.();
+    this._unsubscribeEvents = null;
   }
 
   willUpdate(changed) {
@@ -188,16 +204,20 @@ export class AssetList extends LitElement {
     return filter;
   }
 
-  async _load() {
-    this.loading = true;
-    this.error = "";
+  async _load(silent = false) {
+    if (!silent) {
+      this.loading = true;
+      this.error = "";
+    }
     try {
       this.assets = await api.listAssets(this._filter());
     } catch (err) {
-      this.error = err.message || "Failed to load assets";
-      this.assets = [];
+      if (!silent) {
+        this.error = err.message || "Failed to load assets";
+        this.assets = [];
+      }
     } finally {
-      this.loading = false;
+      if (!silent) this.loading = false;
     }
   }
 
@@ -224,6 +244,21 @@ export class AssetList extends LitElement {
     const id = e.detail?.asset?.id;
     if (!id) return;
     window.location.hash = `#/asset/${encodeURIComponent(id)}`;
+  }
+
+  _onLiveEvent(ev) {
+    if (!ev || ev.kind !== "status") return;
+    if (!ev.jobId && !ev.renderId) return;
+    if (!TERMINAL_STATUSES.has(ev.status)) return;
+    this._scheduleRefresh();
+  }
+
+  _scheduleRefresh() {
+    if (this._refreshTimer) return;
+    this._refreshTimer = setTimeout(() => {
+      this._refreshTimer = null;
+      this._load(true);
+    }, 500);
   }
 
   render() {
