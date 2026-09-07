@@ -101,6 +101,18 @@ the server composes `[system prompt, user: context]`.
 
 All three return `503 LLM_NOT_CONFIGURED` when the LLM is not configured.
 
+### UI flows
+
+- **Generate form (asset-generate)** — `enhance_prompt` runs inline, directly below the prompt
+  input: the "Enhance with AI" button (disabled while the prompt is empty or a run is in flight)
+  takes the current prompt text as context and shows the result in a read-only block with **Use as
+  prompt** / **Copy** / **Dismiss** controls. The model + model-skill pickers sit in the same block
+  (chosen generation model pre-selected; mismatch warning for a skill that doesn't fit the model).
+  There is no separate context input — the prompt box is the input.
+- **Shared dialog (ai-assist-dialog)** — `write_script` / `extend_script` (script-detail), per-panel
+  `enhance_prompt` (storyboard-detail), and audio `enhance_prompt` (audio-dialog) keep the dialog
+  flow with its own context field.
+
 ## Skills as prompt knowledge
 
 A skill definition may carry an optional `assistant` block (validated with the rest of the

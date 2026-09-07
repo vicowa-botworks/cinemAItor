@@ -1,7 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import "./ref-input.js";
-import "./ai-assist-dialog.js";
+import { buildAssistRequest, skillMatchesModel } from "../ai-assist-request.js";
 import {
   ASPECT_RATIO_PRESETS,
   generationKindForAsset,
@@ -173,6 +173,57 @@ export class AssetGenerate extends VramGuard(LitElement) {
     .check input {
       width: auto;
     }
+
+    .assist-block {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .assist-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .assist-select {
+      width: auto;
+      min-width: 190px;
+      padding: 8px 10px;
+    }
+
+    .assist-hint {
+      font-size: 13px;
+      color: var(--color-text-muted);
+    }
+
+    .assist-hint a {
+      color: var(--color-primary);
+    }
+
+    .assist-result {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .assist-result textarea {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+    }
+
+    .assist-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .warn {
+      font-size: 12px;
+      color: var(--color-warning, #d9a441);
+    }
   `;
 
   static properties = {
@@ -198,7 +249,16 @@ export class AssetGenerate extends VramGuard(LitElement) {
     error: { state: true },
     status: { state: true },
     queuedResult: { state: true },
-    assistOpen: { state: true },
+    assistMetaLoaded: { state: true },
+    assistConfigured: { state: true },
+    assistModels: { state: true },
+    assistSkills: { state: true },
+    assistModelId: { state: true },
+    assistSkillId: { state: true },
+    assistRunning: { state: true },
+    assistResult: { state: true },
+    assistError: { state: true },
+    assistCopied: { state: true },
   };
 
   constructor() {
@@ -227,7 +287,16 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this.error = "";
     this.status = "";
     this.queuedResult = null;
-    this.assistOpen = false;
+    this.assistMetaLoaded = false;
+    this.assistConfigured = false;
+    this.assistModels = [];
+    this.assistSkills = [];
+    this.assistModelId = "";
+    this.assistSkillId = "";
+    this.assistRunning = false;
+    this.assistResult = "";
+    this.assistError = "";
+    this.assistCopied = false;
     this._modelCache = new Map();
     this._mentionedRefs = [];
     this._suppressedRefs = new Set();
@@ -456,6 +525,9 @@ export class AssetGenerate extends VramGuard(LitElement) {
         this.displayName = "";
         this.seed = "";
         this.references = [];
+        this.assistResult = "";
+        this.assistError = "";
+        this.assistCopied = false;
       }
     } catch (err) {
       this.error = err.message || "Generation request failed";
@@ -484,9 +556,106 @@ export class AssetGenerate extends VramGuard(LitElement) {
     return sizePreview(this.aspectRatio, this.resolution) ?? "model default";
   }
 
-  _onAssistInsert(e) {
-    this.prompt = e.detail.content;
-    this.assistOpen = false;
+  // --- Inline "Enhance with AI" (issue #175): the prompt box is the input, the
+  // result renders below it. Mirrors the shared ai-assist-dialog flow (same
+  // request shape, pickers, and status handling) without the second input. ---
+
+  /** Lazy one-shot load of LLM status + picker lists (same calls as the dialog). */
+  async _loadAssistMeta() {
+    if (this.assistMetaLoaded) return;
+    this.assistMetaLoaded = true;
+    try {
+      const status = await api.getLlmStatus();
+      this.assistConfigured = Boolean(status?.configured);
+    } catch {
+      this.assistConfigured = false;
+    }
+    if (!this.assistConfigured) return;
+    try {
+      const [models, skills] = await Promise.all([
+        api.listModels({ enabled: true }),
+        api.listSkills({ assistant: "1" }),
+      ]);
+      this.assistModels = models ?? [];
+      // Server filters, but keep the guard: only prompt-creation skills qualify.
+      this.assistSkills = (skills ?? []).filter((s) => s.definition?.assistant);
+      // Pre-select the model the job will run on (the dialog's default-model-id).
+      if (!this.assistModelId) {
+        this.assistModelId = this._selectedModel()?.id ?? "";
+      }
+    } catch {
+      // Pickers are a convenience; assist still works without them.
+    }
+  }
+
+  async _runAssist() {
+    if (this.assistRunning) return;
+    this.assistError = "";
+    await this._loadAssistMeta();
+    if (!this.assistConfigured) return; // the hint renders from assistMetaLoaded
+    let request;
+    try {
+      request = buildAssistRequest({
+        purpose: "enhance_prompt",
+        context: this.prompt,
+        // Send the model only when it resolves to a real enabled model — a
+        // stale pick would otherwise 404 the assist call.
+        modelId: this.assistModels.find((m) => m.id === this.assistModelId)?.id ?? "",
+        skillId: this.assistSkillId,
+      });
+    } catch (err) {
+      this.assistError = err instanceof Error ? err.message : String(err);
+      return;
+    }
+    this.assistRunning = true;
+    this.assistResult = "";
+    this.assistCopied = false;
+    try {
+      const response = await api.assistLlm(request);
+      const content = typeof response?.content === "string" ? response.content : "";
+      if (content) {
+        this.assistResult = content;
+      } else {
+        this.assistError = "The model returned an empty response.";
+      }
+    } catch (err) {
+      this.assistError = err instanceof Error ? err.message : "Assist request failed.";
+    } finally {
+      this.assistRunning = false;
+    }
+  }
+
+  _assistMismatch() {
+    const model = this.assistModels.find((m) => m.id === this.assistModelId) ?? null;
+    const skill = this.assistSkills.find((s) => s.id === this.assistSkillId) ?? null;
+    return Boolean(model && skill) && !skillMatchesModel(skill, model);
+  }
+
+  /** Replace the prompt with the enhanced text (re-slug an untouched slug). */
+  _applyAssist() {
+    if (!this.assistResult) return;
+    this.prompt = this.assistResult;
+    if (!this._isEdit() && !this.slugTouched) {
+      this.slug = slugify(this.prompt);
+    }
+    this.assistResult = "";
+    this.assistCopied = false;
+  }
+
+  _dismissAssist() {
+    this.assistResult = "";
+    this.assistError = "";
+  }
+
+  async _copyAssist() {
+    if (!this.assistResult) return;
+    try {
+      await navigator.clipboard.writeText(this.assistResult);
+      this.assistCopied = true;
+      setTimeout(() => (this.assistCopied = false), 1500);
+    } catch {
+      this.assistError = "Could not copy to the clipboard.";
+    }
   }
 
   render() {
@@ -548,6 +717,94 @@ export class AssetGenerate extends VramGuard(LitElement) {
               ? " — tick “use current version” below to include it as a reference"
               : ""}
           </div>
+        </div>
+
+        <div class="assist-block">
+          <div class="assist-top">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              ?disabled=${!this.prompt.trim() || this.assistRunning}
+              title=${this.prompt.trim()
+                ? "Rewrite the prompt with the configured LLM, using the selected generation model"
+                : "Type a prompt first"}
+              @click=${this._runAssist}>
+              ${this.assistRunning ? "Enhancing…" : "Enhance with AI"}
+            </button>
+            ${this.assistMetaLoaded && this.assistConfigured
+              ? html`
+                <select
+                  class="assist-select"
+                  .value=${this.assistModelId}
+                  ?disabled=${this.assistRunning}
+                  title="Model whose metadata (task types, version, settings keys) is included in the enhance call"
+                  @change=${(e) => {
+                    this.assistModelId = e.target.value;
+                    this.assistSkillId = "";
+                    this.assistError = "";
+                  }}><option value="">— no model context —</option>
+                  ${this.assistModels.map(
+                    (m) => html`<option value=${m.id}>${m.display_name ?? m.name}</option>`,
+                  )}
+                </select>
+                <select
+                  class="assist-select"
+                  .value=${this.assistSkillId}
+                  ?disabled=${this.assistRunning}
+                  title="Optional model skill (prompt-writing guidance) for the enhance call"
+                  @change=${(e) => {
+                    this.assistSkillId = e.target.value;
+                    this.assistError = "";
+                  }}><option value="">— no model skill —</option>
+                  ${this.assistSkills.map(
+                    (s) => html`<option value=${s.id}>${s.definition?.name ?? s.id}</option>`,
+                  )}
+                </select>
+              `
+              : ""}
+          </div>
+          ${this.assistMetaLoaded && !this.assistConfigured
+            ? html`
+              <div class="assist-hint">
+                No LLM endpoint is configured. Add one on the
+                <a href="#/models">Models page</a> to use AI assist.
+              </div>
+            `
+            : ""}
+          ${this._assistMismatch()
+            ? html`
+              <div class="warn">
+                The selected skill does not match the selected model (different model scope or
+                task types).
+              </div>
+            `
+            : ""}
+          ${this.assistError ? html`<div class="error">${this.assistError}</div>` : ""}
+          ${this.assistRunning ? html`<div class="status">Enhancing prompt…</div>` : ""}
+          ${this.assistResult
+            ? html`
+              <div class="assist-result">
+                <textarea readonly .value=${this.assistResult} rows="6"></textarea>
+                <div class="assist-actions">
+                  <button type="button" class="btn" @click=${this._applyAssist}>
+                    Use as prompt
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    @click=${this._copyAssist}>
+                    ${this.assistCopied ? "Copied" : "Copy"}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    @click=${this._dismissAssist}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            `
+            : ""}
         </div>
 
         ${this._isEdit() ? "" : html`
@@ -783,16 +1040,6 @@ export class AssetGenerate extends VramGuard(LitElement) {
           : ""}
 
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-          <button
-            type="button"
-            class="btn btn-secondary"
-            ?disabled=${!this.prompt.trim()}
-            title=${this.prompt.trim()
-              ? "Rewrite the prompt with the configured LLM, using the selected generation model"
-              : "Type a prompt first"}
-            @click=${() => (this.assistOpen = true)}>
-            Enhance with AI
-          </button>
           <button type="submit" class="btn" ?disabled=${this.busy}>
             ${this.busy
               ? "Queueing..."
@@ -803,17 +1050,6 @@ export class AssetGenerate extends VramGuard(LitElement) {
         </div>
       </form>
       ${this.vramDialog}
-      ${this.assistOpen
-        ? html`
-          <ai-assist-dialog
-            purpose="enhance_prompt"
-            default-model-id=${this._selectedModel()?.id ?? ""}
-            .initial-context=${this.prompt}
-            insert-label="Use as prompt"
-            @insert=${this._onAssistInsert}
-            @close=${() => (this.assistOpen = false)}></ai-assist-dialog>
-        `
-        : ""}
     `;
   }
 }
