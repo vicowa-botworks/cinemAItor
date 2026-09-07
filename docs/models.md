@@ -15,31 +15,32 @@ task mapping, hardware detection, and requirement warnings.
 
 ## Endpoints
 
-| Method | Endpoint                                   | Description                                                                  |
-| ------ | ------------------------------------------ | ---------------------------------------------------------------------------- |
-| GET    | `/api/v1/models`                           | List (filter: `enabled`, `task_type`, `query`)                               |
-| POST   | `/api/v1/models`                           | Register metadata (admin)                                                    |
-| GET    | `/api/v1/models/hardware`                  | Detected hardware + requirement warnings (`?refresh=1` re-probes)            |
-| GET    | `/api/v1/models/vram-unload/services`      | Local GPU services that could free VRAM (`?refresh=1` re-probes)             |
-| GET    | `/api/v1/models/vram-unload`               | Auto-unload settings view (`enabled` + per-target toggles)                   |
-| PATCH  | `/api/v1/models/vram-unload`               | Update auto-unload settings (admin)                                          |
-| POST   | `/api/v1/models/vram-unload/free`          | Free VRAM now; optional `{targets}` to pick which services (admin)           |
-| GET    | `/api/v1/models/huggingface/search`        | Search the public HuggingFace catalog (`?q=&filter=&limit=`)                 |
-| GET    | `/api/v1/models/huggingface/:repoId`       | Repo metadata + recursive file listing + README (`:repoId` = `owner%2Fname`) |
-| GET    | `/api/v1/models/huggingface/settings`      | HF token status, masked (`{tokenSet, tokenSource}`) (admin)                  |
-| PATCH  | `/api/v1/models/huggingface/settings`      | Store or clear the HF token (`{token}`) (admin)                              |
-| POST   | `/api/v1/models/huggingface/settings/test` | Validate the effective token via HF `/whoami-v2` (admin)                     |
-| POST   | `/api/v1/models/from-huggingface`          | Register a model straight from an HF repo (admin)                            |
-| GET    | `/api/v1/models/:id`                       | One model                                                                    |
-| PATCH  | `/api/v1/models/:id`                       | Update metadata / enable / disable (admin)                                   |
-| DELETE | `/api/v1/models/:id`                       | Remove model + installed files (admin)                                       |
-| POST   | `/api/v1/models/:id/install`               | Install artifact (admin); network sources need `consent: true`               |
-| GET    | `/api/v1/models/:id/install-progress`      | Live download progress for this model (`in_progress` + byte counts)          |
-| GET    | `/api/v1/models/install-progress`          | All in-progress installs (re-attach after a page reload)                     |
-| POST   | `/api/v1/models/:id/verify`                | SHA-256 checksum of installed file vs stored hash                            |
-| POST   | `/api/v1/models/:id/health-check`          | Install state, checksum, runtime availability                                |
-| POST   | `/api/v1/models/:id/benchmark`             | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)                    |
-| GET    | `/api/v1/models/:id/benchmarks`            | Benchmark results, newest first (latest 20)                                  |
+| Method | Endpoint                                   | Description                                                                   |
+| ------ | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| GET    | `/api/v1/models`                           | List (filter: `enabled`, `task_type`, `query`)                                |
+| POST   | `/api/v1/models`                           | Register metadata (admin)                                                     |
+| GET    | `/api/v1/models/hardware`                  | Detected hardware + requirement warnings (`?refresh=1` re-probes)             |
+| GET    | `/api/v1/models/vram-held`                 | Who is holding free VRAM right now — own/other split (`?refresh=1` re-probes) |
+| GET    | `/api/v1/models/vram-unload/services`      | Local GPU services that could free VRAM (`?refresh=1` re-probes)              |
+| GET    | `/api/v1/models/vram-unload`               | Auto-unload settings view (`enabled` + per-target toggles)                    |
+| PATCH  | `/api/v1/models/vram-unload`               | Update auto-unload settings (admin)                                           |
+| POST   | `/api/v1/models/vram-unload/free`          | Free VRAM now; optional `{targets}` to pick which services (admin)            |
+| GET    | `/api/v1/models/huggingface/search`        | Search the public HuggingFace catalog (`?q=&filter=&limit=`)                  |
+| GET    | `/api/v1/models/huggingface/:repoId`       | Repo metadata + recursive file listing + README (`:repoId` = `owner%2Fname`)  |
+| GET    | `/api/v1/models/huggingface/settings`      | HF token status, masked (`{tokenSet, tokenSource}`) (admin)                   |
+| PATCH  | `/api/v1/models/huggingface/settings`      | Store or clear the HF token (`{token}`) (admin)                               |
+| POST   | `/api/v1/models/huggingface/settings/test` | Validate the effective token via HF `/whoami-v2` (admin)                      |
+| POST   | `/api/v1/models/from-huggingface`          | Register a model straight from an HF repo (admin)                             |
+| GET    | `/api/v1/models/:id`                       | One model                                                                     |
+| PATCH  | `/api/v1/models/:id`                       | Update metadata / enable / disable (admin)                                    |
+| DELETE | `/api/v1/models/:id`                       | Remove model + installed files (admin)                                        |
+| POST   | `/api/v1/models/:id/install`               | Install artifact (admin); network sources need `consent: true`                |
+| GET    | `/api/v1/models/:id/install-progress`      | Live download progress for this model (`in_progress` + byte counts)           |
+| GET    | `/api/v1/models/install-progress`          | All in-progress installs (re-attach after a page reload)                      |
+| POST   | `/api/v1/models/:id/verify`                | SHA-256 checksum of installed file vs stored hash                             |
+| POST   | `/api/v1/models/:id/health-check`          | Install state, checksum, runtime availability                                 |
+| POST   | `/api/v1/models/:id/benchmark`             | Enqueue a benchmark job (202 → `{ job_id, tasks, seed }`)                     |
+| GET    | `/api/v1/models/:id/benchmarks`            | Benchmark results, newest first (latest 20)                                   |
 
 Read endpoints and benchmarks accept any authenticated user (both are measurements only, no assets
 are written); mutations (register/patch/delete/install) require the admin role. Everything is
@@ -170,6 +171,15 @@ job instead of always forcing a CPU fallback.
   **router** parent, whose port becomes the `llama` endpoint. Only local processes are ever
   candidates — a remote LLM/ComfyUI is a different host and never appears. `?refresh=1` re-probes
   (the results are otherwise cached ~60 s).
+
+  Beyond the unloadable targets, the report carries a `holders` array — a named breakdown of _who_
+  is holding the free VRAM, aggregated from every `nvidia-smi` compute-app process:
+  `{label, used_mb}` rows for `cinemaitor` (this app's own generation runner — its PID is known
+  because the local_cli adapter registers the spawned child into an in-memory registry, see
+  `services/runner_registry.ts`), `llama`, `comfyui`, and `other` (anything else, e.g. a browser
+  with GPU compositing or another app). A row's `used_mb` is the summed per-PID `nvidia-smi` memory;
+  a holder that holds VRAM but has no running process (e.g. a freshly exited runner) is absent, so
+  `holders` reflects only live holders.
 - **Freeing** (`POST .../vram-unload/free`): `comfyui` → `POST /free {"unload_models": true}`;
   `llama` → `GET /v1/models` (loaded models) then `POST /models/unload` per loaded model. An
   optional `{targets}` body restricts which services are freed. Each target reports `{ok, error?}`
@@ -177,13 +187,26 @@ job instead of always forcing a CPU fallback.
 - **Settings** (`GET`/`PATCH .../vram-unload`, admin for the write): the `vram_unload.` settings
   rows — `enabled` (master, **off** by default) plus per-target `comfyui`/`llama` toggles (on by
   default). No migration is needed (the settings table is key/value).
+- **VRAM holders / queue-aware guard** (`GET .../vram-held`): a read-only view of the `holders`
+  breakdown, `{platform, gpu, own, other, holders}`, where `own` is the summed VRAM held by this
+  app's generation runner and `other` is everything else. The vram-guard uses it to stay
+  _queue-aware_: when a local_cli job's free VRAM is below its `vram_requirement_mb` but the deficit
+  is held **entirely by this app's own VRAM** (`other === 0` and `own` covers the gap), the guard
+  suppresses the OOM dialog and starts the job on the GPU anyway — the runner's GPU slot
+  (`JOB_CONCURRENCY_GPU`, default 1) already serializes GPU generations, so the new job simply
+  queues behind the running one and gets full VRAM when it starts. If any of the deficit is held by
+  _another_ process, the dialog still appears (freeing VRAM or starting on CPU is the only safe
+  option). A failed `vram-held` probe degrades to the old dialog behavior.
 - **Trigger**: the vram-guard's live low-VRAM probe, when a local_cli job's free VRAM is below its
   `vram_requirement_mb`, silently calls the free endpoint (only if `enabled`) and re-probes; if the
   model now fits it starts on the GPU, otherwise the existing VRAM dialog appears. Disabled = the
   previous behavior, unchanged.
 - **UI**: the Model Manager's **VRAM auto-unload** panel (admin) lists the detected local services
   with their live VRAM/loaded models, per-target toggles, a master switch, and a "Free now" button.
-  It renders only when at least one local service is detected, with a Refresh to re-probe.
+  It renders only when at least one local service is detected, with a Refresh to re-probe. A
+  non-admin **VRAM holders** panel (always visible when a GPU is present) shows the live own/other
+  split as chips (e.g. `cinemaitor 3.2GB · other 1.0GB · free 8.0GB / 24.0GB`), so the user can see
+  whether the app's own running job or some external process is holding the VRAM.
 
 ## Behavior
 

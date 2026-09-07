@@ -250,13 +250,14 @@ describe("vram_free routes", () => {
     invalidateVramServicesCache();
   });
 
-  it("all four routes require authentication", async () => {
+  it("all five routes require authentication", async () => {
     await withServer(async (base) => {
       baseUrl = base;
       assertEquals((await get("/api/v1/models/vram-unload")).status, 401);
       assertEquals((await patch("/api/v1/models/vram-unload", {})).status, 401);
       assertEquals((await get("/api/v1/models/vram-unload/services")).status, 401);
       assertEquals((await post("/api/v1/models/vram-unload/free", {})).status, 401);
+      assertEquals((await get("/api/v1/models/vram-held")).status, 401);
     });
   });
 
@@ -269,6 +270,27 @@ describe("vram_free routes", () => {
         enabled: false,
         targets: { comfyui: true, llama: true },
       });
+    });
+  });
+
+  it("the vram-held split is readable by any authenticated user", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      const res = await get("/api/v1/models/vram-held", userToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        platform: string | null;
+        gpu: unknown;
+        cinemaitor_mb: number;
+        other_mb: number;
+        detected_at: string;
+      };
+      assert(typeof body.detected_at === "string");
+      assert(typeof body.cinemaitor_mb === "number");
+      assert(typeof body.other_mb === "number");
+      // No local_cli job is in flight in the test env, so none of the used
+      // VRAM is ours.
+      assertEquals(body.cinemaitor_mb, 0);
     });
   });
 
@@ -313,6 +335,7 @@ describe("vram_free routes", () => {
       const body = (await res.json()) as {
         platform: string;
         services: Array<{ kind: string; endpoint: string; unloadable: boolean }>;
+        holders: Array<{ kind: string; pids: number[]; vram_mb: number }>;
         detected_at: string;
       };
       assert(typeof body.platform === "string");
@@ -321,6 +344,12 @@ describe("vram_free routes", () => {
       for (const svc of body.services) {
         assert(svc.kind === "comfyui" || svc.kind === "llama-server");
         assert(typeof svc.unloadable === "boolean");
+      }
+      assert(Array.isArray(body.holders));
+      for (const holder of body.holders) {
+        assert(holder.kind === "cinemaitor" || holder.kind === "other");
+        assert(Array.isArray(holder.pids));
+        assert(typeof holder.vram_mb === "number");
       }
     });
   });

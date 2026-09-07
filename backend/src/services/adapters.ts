@@ -1,4 +1,5 @@
 import { mediaTypeFor } from "../storage/media_types.ts";
+import { registerRunnerPid, unregisterRunnerPid } from "./runner_registry.ts";
 
 /**
  * Adapter interface (GEN-007): every model runtime exposes the same
@@ -486,6 +487,17 @@ async function runCli(
       `Failed to start CLI '${command}': ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+  // Attribute this runner's GPU VRAM to our own job while it runs: record the
+  // child pid so vram_free can classify its `nvidia-smi` compute-app entry as
+  // "cinemaitor". The pre-submit VRAM guard then sees the deficit is held by
+  // one of our own (in-flight, serially-queued) jobs and queues behind it
+  // instead of warning. `child.status` resolves on exit — normal completion,
+  // or SIGKILL on cancel/timeout — so the pid is dropped on every path.
+  registerRunnerPid(child.pid);
+  void child.status.then(
+    () => unregisterRunnerPid(child.pid),
+    () => unregisterRunnerPid(child.pid),
+  );
   const startedAt = Date.now();
   // Stdout is streamed line by line so RUNNER_STATUS lines (e.g. the device
   // a generation is running on) reach the job card while the CLI is still

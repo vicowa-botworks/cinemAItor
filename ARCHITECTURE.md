@@ -343,8 +343,14 @@ server.ts (entry point)
      │   ├── VRAM auto-unload (services/vram_free.ts): /vram-unload/services detects LOCAL GPU
      │   │   services holding VRAM (nvidia-smi compute-apps → per-PID cmdline via `ps` — `/proc`
      │   │   is gated behind `--allow-all`; ComfyUI main.py → /free, a llama-server child is traced
-     │   │   up to its `--models-preset` router → /models/unload; remote endpoints never appear),
-     │   │   /vram-unload (GET settings / PATCH admin), /vram-unload/free (POST, free one or all);
+     │   │   up to its `--models-preset` router → /models/unload; remote endpoints never appear).
+     │   │   The report also carries a `holders` breakdown (services/runner_registry.ts names this
+     │   │   app's own generation-runner PIDs, registered by the local_cli adapter) — named
+     │   │   cinemaitor / llama / comfyui / other rows with summed used_mb; GET /vram-held projects
+     │   │   it as {own, other, holders[]}, which the vram-guard uses to suppress the OOM dialog
+     │   │   when the deficit is held entirely by this app's own in-flight/queued GPU job (the
+     │   │   runner serializes GPU jobs anyway). /vram-unload (GET settings / PATCH admin),
+     │   │   /vram-unload/free (POST, free one or all);
      │   │   vram_unload.* settings rows (master enabled default OFF + per-target toggles)
      │   ├── Task-type normalization: the canonical task types use underscores, but every
     │   │   validation boundary (model register/update, skill `model_task_types`, job

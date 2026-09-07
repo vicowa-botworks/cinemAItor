@@ -2638,7 +2638,6 @@ export class ModelManager extends LitElement {
     const settings = this.vramSettings;
     const services = this.vramServices?.services ?? [];
     const enabled = !!settings?.enabled;
-    const gpu = this.vramServices?.gpu;
     return html`
       <div class="panel">
         <div class="llm-head">
@@ -2649,6 +2648,7 @@ export class ModelManager extends LitElement {
             </span>`
             : null}
         </div>
+        ${this._renderVramHolders()}
         ${this.isAdmin
           ? html`
             <p>
@@ -2670,14 +2670,6 @@ export class ModelManager extends LitElement {
                 <div class="vram-svc-list">
                   ${services.map((s) => this._renderVramService(s))}
                 </div>
-                ${gpu?.model
-                  ? html`<p class="admin-note">
-                    GPU ${gpu.model}: free
-                    ${this._fmtMb(Math.round((gpu.vram_free ?? 0) / 1048576))}
-                    of
-                    ${this._fmtMb(Math.round((gpu.vram_total ?? 0) / 1048576))}
-                  </p>`
-                  : null}
               `
               : html`
                 <div class="empty">
@@ -2717,6 +2709,44 @@ export class ModelManager extends LitElement {
                 : "Auto-unload is disabled. "}Manage it on this page as an admin.
             </p>
           `}
+      </div>
+    `;
+  }
+
+  /**
+   * Read-only VRAM-holder breakdown for the panel: who is holding GPU VRAM right
+   * now — this app's in-flight generation jobs, ComfyUI, the llama router, or
+   * other apps — plus the free/total. Answers "is VRAM in use by the app or by
+   * something else?" without leaving the model manager.
+   */
+  _renderVramHolders() {
+    const report = this.vramServices;
+    if (!report) return null;
+    const gpu = report.gpu;
+    const holders = (report.holders ?? []).filter((h) => (h.used_mb ?? 0) > 0);
+    if (!gpu?.model && holders.length === 0) return null;
+    return html`
+      <div class="vram-svc">
+        ${gpu?.model
+          ? html`<p class="admin-note">
+              ${gpu.model} — free ${this._fmtMb(Math.round((gpu.vram_free ?? 0) / 1048576))}
+              of ${this._fmtMb(Math.round((gpu.vram_total ?? 0) / 1048576))} VRAM
+            </p>`
+          : null}
+        <p class="admin-note">
+          In use:
+          ${holders.length
+            ? holders
+              .map(
+                (h) =>
+                  html`
+                    <span class="chip"
+                    >${h.label} ${this._fmtMb(Math.round(h.used_mb))}</span>
+                  `,
+              )
+              .join("")
+            : "none"}
+        </p>
       </div>
     `;
   }

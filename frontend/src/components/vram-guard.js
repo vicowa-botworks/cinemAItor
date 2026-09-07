@@ -75,6 +75,12 @@ export const VramGuard = (superClass) =>
       }
       const check = vramPreCheck(model, hardwareOf(hw));
       if (!check.needed) return null;
+      // Queue-aware: if the deficit is held by this backend's own in-flight
+      // local_cli job(s), the runner frees that VRAM as they finish and runs
+      // this job behind them with full VRAM — so queue it (no device) rather
+      // than alarming the user. Checked before auto-free: our own VRAM needs
+      // no freeing, only patience.
+      if (await this._isVramHeldByOurs(model, check)) return null;
       // If VRAM auto-unload is enabled, free the local GPU services once and
       // re-probe — if that's enough, continue on the GPU without a dialog.
       if (await this._tryAutoFreeVram(model)) return "cuda";
@@ -90,6 +96,29 @@ export const VramGuard = (superClass) =>
       return new Promise((resolve) => {
         this._vramResolve = resolve;
       });
+    }
+
+    /**
+     * Queue-aware suppression: true when the model's VRAM deficit is covered by
+     * this backend's own in-flight local_cli job(s). The runner frees that VRAM
+     * as each job finishes and runs the new job behind them with full VRAM, so a
+     * dialog here would be a false alarm. Best-effort — any failure (endpoint
+     * error, no GPU holders reported) returns false so the caller falls through
+     * to the dialog, the safe default.
+     * @param {{backend?: string, vram_requirement_mb?: number|null}} model
+     * @param {{freeMb?: number|null, requirementMb?: number|null}} check
+     * @returns {Promise<boolean>}
+     */
+    async _isVramHeldByOurs(model, check) {
+      try {
+        const held = await api.getModelsVramHeld();
+        const cineMb = held?.cinemaitor_mb ?? 0;
+        const freeMb = check.freeMb ?? 0;
+        const requirementMb = model?.vram_requirement_mb ?? 0;
+        return cineMb > 0 && freeMb + cineMb >= requirementMb;
+      } catch {
+        return false;
+      }
     }
 
     /**
