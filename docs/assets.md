@@ -52,6 +52,24 @@ permission; 404 for an unknown version or a version belonging to another asset):
   best-effort.
 - The response reports the removed version number; the UI re-fetches the asset and its version list.
 
+### Version generation info (UI)
+
+Generated versions carry their full provenance in `technical_metadata_json` (written by the job
+runner when it stores each candidate): `job_id`, `job_type`, `model_id`/`model_name`/
+`model_version`/`backend`, `prompt_text`, `negative_prompt`, `seed_used`, `settings` (the merged
+adapter settings), `input_asset_versions`, request ids, `candidate_index`/`candidate_count`, and
+`generated_at`. The version list and detail endpoints return it verbatim; the UI parses it with the
+pure helper `versionGenerationInfo` (`frontend/src/compare.js`, unit-tested — returns null for
+uploads/proxies/exports or metadata without a `job_id`):
+
+- **Version rows** — every generated version in the Asset Detail **Versions** section shows a
+  **Details** toggle. Expanded, the row lists the prompt (full text, wrapped), negative prompt,
+  model (name + version + backend), seed, candidate position ("1 of 2" when the job produced
+  several), and the settings as formatted JSON. Non-generated versions show no toggle.
+- **A/B comparison** — the compare table gains **Model / Seed / Prompt / Settings** rows built from
+  each side's provenance ("—" for non-generated versions); `differs` highlighting makes
+  settings-driven differences between two candidates stand out.
+
 ### Version comparison (UI)
 
 The Asset Detail **Versions** section supports picking two versions for an A/B comparison:
@@ -60,12 +78,12 @@ The Asset Detail **Versions** section supports picking two versions for an A/B c
   oldest selection — `toggleComparePair` in `frontend/src/compare.js`).
 - With two selected, an **A/B versions** pane appears below the list: a side-by-side preview of both
   versions (per-version preview endpoint; images/video/audio, lazy blob URLs revoked on
-  change/disconnect), a metadata diff table (format, size, proxy, created, notes — differing rows
-  highlighted), and, for video/audio assets, synced transport: **Play both / Pause both / Stop
-  both** plus seek mirroring (`CompareSync`, drift threshold 0.25 s) so the two timelines stay
-  locked together while scrubbing.
-- The shared compare utilities (pair selection, pair resolution, row differ, `CompareSync`, time
-  media check) live in `frontend/src/compare.js` and are unit-tested in
+  change/disconnect), a metadata diff table (format, size, proxy, created, generation provenance,
+  notes — differing rows highlighted), and, for video/audio assets, synced transport: **Play both /
+  Pause both / Stop both** plus seek mirroring (`CompareSync`, drift threshold 0.25 s) so the two
+  timelines stay locked together while scrubbing.
+- The shared compare utilities (pair selection, pair resolution, row differ, provenance parsing,
+  `CompareSync`, time media check) live in `frontend/src/compare.js` and are unit-tested in
   `frontend/tests/compare.test.js`; the review board's candidate A/B mode reuses the same module.
 
 ## Proxies

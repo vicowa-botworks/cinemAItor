@@ -7,6 +7,7 @@ import {
   resolveComparePair,
   toggleComparePair,
   versionCompareRows,
+  versionGenerationInfo,
 } from "../src/compare.js";
 
 describe("toggleComparePair", () => {
@@ -115,7 +116,21 @@ describe("versionCompareRows", () => {
     });
     assertEquals(
       rows.map((r) => r.label),
-      ["Version", "Format", "Size", "Created", "Proxy", "Duration", "Gain", "Trim", "Notes"],
+      [
+        "Version",
+        "Format",
+        "Size",
+        "Created",
+        "Proxy",
+        "Model",
+        "Seed",
+        "Prompt",
+        "Settings",
+        "Duration",
+        "Gain",
+        "Trim",
+        "Notes",
+      ],
     );
     const byLabel = Object.fromEntries(rows.map((r) => [r.label, r]));
     assertEquals(byLabel.Format.differs, false);
@@ -188,6 +203,126 @@ describe("versionCompareRows", () => {
     }
     assertEquals(rows.find((r) => r.label === "Duration").a, "—");
     assertEquals(rows.find((r) => r.label === "Version").a, "v1");
+  });
+
+  it("shows generation provenance and flags settings differences", () => {
+    const gen = (over = {}) =>
+      JSON.stringify({
+        job_id: "job1",
+        model_name: "HunyuanVideo",
+        model_version: "1.0",
+        backend: "local_cli",
+        prompt_text: "a quiet harbor at dawn",
+        seed_used: "42",
+        settings: { steps: 20, cfg: 6 },
+        candidate_index: 0,
+        candidate_count: 2,
+        ...over,
+      });
+    const rows = versionCompareRows(
+      { ...base, version_number: 1, technical_metadata_json: gen() },
+      {
+        ...base,
+        version_number: 2,
+        technical_metadata_json: gen({ seed_used: "7", settings: { steps: 50, cfg: 7 } }),
+      },
+    );
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r]));
+    assertEquals(byLabel.Model.a, "HunyuanVideo v1.0 local_cli");
+    assertEquals(byLabel.Model.differs, false);
+    assertEquals(byLabel.Seed.a, "42");
+    assertEquals(byLabel.Seed.b, "7");
+    assertEquals(byLabel.Seed.differs, true);
+    assertEquals(byLabel.Prompt.a, "a quiet harbor at dawn");
+    assertEquals(byLabel.Settings.differs, true);
+  });
+
+  it("renders non-generated versions as dashes in the provenance rows", () => {
+    const rows = versionCompareRows(
+      base,
+      {
+        ...base,
+        version_number: 2,
+        technical_metadata_json: JSON.stringify({
+          job_id: "job1",
+          model_name: "M",
+          prompt_text: "p",
+        }),
+      },
+    );
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r]));
+    for (const label of ["Model", "Seed", "Prompt", "Settings"]) {
+      assertEquals(byLabel[label].a, "—");
+    }
+    assertEquals(byLabel.Model.b, "M");
+    assertEquals(byLabel.Prompt.b, "p");
+    assertEquals(byLabel.Seed.b, "—");
+  });
+});
+
+describe("versionGenerationInfo", () => {
+  it("returns null without metadata, on uploads, and on malformed JSON", () => {
+    assertEquals(versionGenerationInfo(null), null);
+    assertEquals(versionGenerationInfo({}), null);
+    assertEquals(versionGenerationInfo({ technical_metadata_json: "{broken" }), null);
+    // audio-analysis metadata has no job_id
+    assertEquals(
+      versionGenerationInfo({
+        technical_metadata_json: JSON.stringify({ audio: { duration: 3 } }),
+      }),
+      null,
+    );
+  });
+
+  it("parses full provenance from a generated version", () => {
+    const info = versionGenerationInfo({
+      technical_metadata_json: JSON.stringify({
+        job_id: "job9",
+        job_type: "text-to-image",
+        model_id: "m1",
+        model_name: "SD3",
+        model_version: "2.1",
+        backend: "comfyui",
+        prompt_text: "mountain landscape",
+        negative_prompt: "blurry",
+        seed_used: "1234",
+        settings: { steps: 30 },
+        candidate_index: 1,
+        candidate_count: 4,
+        generated_at: "2026-09-07T00:00:00Z",
+      }),
+    });
+    assertEquals(info, {
+      model: "SD3 v2.1 comfyui",
+      model_version: "2.1",
+      backend: "comfyui",
+      prompt: "mountain landscape",
+      negative_prompt: "blurry",
+      seed: "1234",
+      settings: { steps: 30 },
+      candidate_index: 1,
+      candidate_count: 4,
+      job_id: "job9",
+      generated_at: "2026-09-07T00:00:00Z",
+    });
+  });
+
+  it("skips missing parts and tolerates odd shapes", () => {
+    const info = versionGenerationInfo({
+      technical_metadata_json: JSON.stringify({
+        job_id: "job2",
+        settings: "not-an-object",
+        candidate_count: "three",
+        seed_used: 99,
+      }),
+    });
+    assertEquals(info.model, null);
+    assertEquals(info.prompt, null);
+    assertEquals(info.settings, null);
+    assertEquals(info.candidate_index, null);
+    assertEquals(info.candidate_count, null);
+    assertEquals(info.seed, "99");
+    assertEquals(info.job_id, "job2");
   });
 });
 

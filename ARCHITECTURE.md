@@ -107,8 +107,10 @@ app-root (main router)
  │   └── asset-reference-picker (pick existing image/video assets as generation references,
  │   │                           active version by default, max 8)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore/delete,
-  │   │              version A/B compare (two versions side by side: synced play + metadata diff,
-  │   │              see compare.js),
+  │   │              per-version generation Details (prompt/model/seed/settings parsed from the
+  │   │              version's provenance metadata),
+  │   │              version A/B compare (two versions side by side: synced play + metadata diff
+  │   │              incl. generation provenance rows, see compare.js),
   │   │              prompt generation/edit section (asset-generate in edit mode → new versions),
   │   │              audio adjustments (waveform + trim/gain for audio assets),
   │   │              audio cleanup (denoise/normalize → new version, AUD-012),

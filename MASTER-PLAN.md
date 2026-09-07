@@ -1643,19 +1643,19 @@ Scope:
 
 - No backend changes: the job runner already writes full provenance into each generated version's
   `technical_metadata_json` (job id/type, model id/name/version/backend, prompt_text,
-  negative_prompt, seed_used, settings, input_asset_versions, request ids, candidate
-  index/count, generated_at); the version list/detail endpoints already return it
+  negative_prompt, seed_used, settings, input_asset_versions, request ids, candidate index/count,
+  generated_at); the version list/detail endpoints already return it
 - Pure helper `versionGenerationInfo(version)` in the shared `compare.js` (unit-tested, DOM-free):
   parses `technical_metadata_json` into a flat provenance view, returns null for uploaded or
   non-generated versions
 - Asset-detail Versions section: each generated version row gets a **Details** toggle expanding an
   inline block (prompt, model, seed, settings; candidate index/count when the job produced several)
-- A/B version compare: `versionCompareRows` gains Model / Seed / Prompt / Settings rows (parsed
-  from each side's provenance), so the diff table flags which candidate came from which settings
+- A/B version compare: `versionCompareRows` gains Model / Seed / Prompt / Settings rows (parsed from
+  each side's provenance), so the diff table flags which candidate came from which settings
 
-Non-goals (v1): provenance display in the review-board candidate cards (its job header already
-shows prompt/seed/settings), per-version re-generation from the displayed settings, storing provenance
-on uploaded versions.
+Non-goals (v1): provenance display in the review-board candidate cards (its job header already shows
+prompt/seed/settings), per-version re-generation from the displayed settings, storing provenance on
+uploaded versions.
 
 Detailed design: section 40.
 
@@ -2399,12 +2399,12 @@ Post-MVP, JSON/YAML first.
 
 ## 11.23 Version Generation Info (Workstream 20)
 
-| ID     | Feature             | Acceptance criteria                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| VG-001 | Provenance helper   | `versionGenerationInfo(version)` (compare.js, pure + unit-tested) parses a version's `technical_metadata_json` into `{ model, model_version, prompt, negative_prompt, seed, settings, candidate_index, candidate_count, job_id, generated_at }` when present; returns null for uploaded/non-generated versions and for corrupt JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| VG-002 | Version row details | Every generated version row in the asset-detail Versions section shows a **Details** toggle; expanded, it lists prompt (full text, wrapped), model (name + version + backend), seed, and settings (formatted JSON); non-generated versions show no toggle                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| VG-003 | A/B compare rows    | `versionCompareRows` includes Model, Seed, Prompt, and Settings rows built from each side's provenance; "—" marks versions without provenance; `differs` flags mismatches so settings-driven differences stand out in the diff table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| VG-004 | Docs + contract     | `docs/assets.md` (Versions section) documents the provenance shape + UI, `ARCHITECTURE.md` asset-detail entry updated; full gate green (frontend compare tests + parse check)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ID     | Feature             | Acceptance criteria                                                                                                                                                                                                                                                                                                                 |
+| ------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VG-001 | Provenance helper   | `versionGenerationInfo(version)` (compare.js, pure + unit-tested) parses a version's `technical_metadata_json` into `{ model, model_version, prompt, negative_prompt, seed, settings, candidate_index, candidate_count, job_id, generated_at }` when present; returns null for uploaded/non-generated versions and for corrupt JSON |
+| VG-002 | Version row details | Every generated version row in the asset-detail Versions section shows a **Details** toggle; expanded, it lists prompt (full text, wrapped), model (name + version + backend), seed, and settings (formatted JSON); non-generated versions show no toggle                                                                           |
+| VG-003 | A/B compare rows    | `versionCompareRows` includes Model, Seed, Prompt, and Settings rows built from each side's provenance; "—" marks versions without provenance; `differs` flags mismatches so settings-driven differences stand out in the diff table                                                                                                |
+| VG-004 | Docs + contract     | `docs/assets.md` (Versions section) documents the provenance shape + UI, `ARCHITECTURE.md` asset-detail entry updated; full gate green (frontend compare tests + parse check)                                                                                                                                                       |
 
 ---
 
@@ -4220,8 +4220,7 @@ draft→production loop in one click, prompt and references untouched.
 
 Issue #174: the UI shows generation settings while a job is queued, but once the job finishes and
 the versions are stored, there is no way to see which prompt, seed, and settings produced which
-version. A/B comparison then degenerates — you can compare pixels, not the settings that drove
-them.
+version. A/B comparison then degenerates — you can compare pixels, not the settings that drove them.
 
 ## Design
 
@@ -4232,18 +4231,27 @@ The job runner writes each candidate version's provenance into
 
 ```json
 {
-  "job_id": "…", "job_type": "text-to-video", "model_id": "…",
-  "model_name": "…", "model_version": "…", "backend": "local_cli",
-  "prompt_text": "…", "negative_prompt": "…", "seed_used": "…",
+  "job_id": "…",
+  "job_type": "text-to-video",
+  "model_id": "…",
+  "model_name": "…",
+  "model_version": "…",
+  "backend": "local_cli",
+  "prompt_text": "…",
+  "negative_prompt": "…",
+  "seed_used": "…",
   "settings": { "…": "… merged adapter settings …" },
-  "input_asset_versions": ["…"], "request": { "project_id": "…", "…": "…" },
-  "candidate_index": 0, "candidate_count": 2, "generated_at": "…ISO…"
+  "input_asset_versions": ["…"],
+  "request": { "project_id": "…", "…": "…" },
+  "candidate_index": 0,
+  "candidate_count": 2,
+  "generated_at": "…ISO…"
 }
 ```
 
-The version list and detail endpoints already return `technical_metadata_json` verbatim, so this
-is a frontend-only workstream. Non-generated versions (raw upload, proxy, export) have no
-generation provenance — the helper must treat them as null, not an error.
+The version list and detail endpoints already return `technical_metadata_json` verbatim, so this is
+a frontend-only workstream. Non-generated versions (raw upload, proxy, export) have no generation
+provenance — the helper must treat them as null, not an error.
 
 ### Pure helper (`frontend/src/compare.js`)
 
@@ -4263,32 +4271,32 @@ generation provenance — the helper must treat them as null, not an error.
 }
 ```
 
-Rules: malformed or missing JSON → null; `technical_metadata_json` present but without
-`job_id` (e.g. the audio-analysis block) → null. Unit-tested alongside the existing compare tests
-(DOM-free, no DOM).
+Rules: malformed or missing JSON → null; `technical_metadata_json` present but without `job_id`
+(e.g. the audio-analysis block) → null. Unit-tested alongside the existing compare tests (DOM-free,
+no DOM).
 
 ### Version rows (asset-detail.js, Versions section)
 
 - State: `expandedVersionIds: string[]` (constructor field + `static properties` `{state: true}` —
   the Lit-observation rule from the MCP panel fix).
 - A version whose `versionGenerationInfo` is non-null gets a **Details** button (chevron text
-  "Details"/"Hide") next to the A/B button. Toggling appends an inline `.version-gen` block
-  (full width, like `.version-notes`) listing: Prompt (wrapped, full text), Model, Seed,
-  Candidate "1 of 2" when `candidate_count > 1`, Settings (formatted JSON, `<pre>`).
+  "Details"/"Hide") next to the A/B button. Toggling appends an inline `.version-gen` block (full
+  width, like `.version-notes`) listing: Prompt (wrapped, full text), Model, Seed, Candidate "1 of
+  2" when `candidate_count > 1`, Settings (formatted JSON, `<pre>`).
 - Non-generated versions: no button, no block.
-- Deleting a version also clears it from `expandedVersionIds` (the existing delete handler
-  already re-fetches the list).
+- Deleting a version also clears it from `expandedVersionIds` (the existing delete handler already
+  re-fetches the list).
 
 ### A/B compare (compare.js `versionCompareRows`)
 
 New rows after "Proxy" (audio rows keep their position):
 
-| Label     | Value source                                |
-| --------- | ------------------------------------------- |
-| Model     | `info.model` (dash when absent)             |
-| Seed      | `info.seed`                                 |
-| Prompt    | `info.prompt`                               |
-| Settings  | `JSON.stringify(info.settings, null, 2)`    |
+| Label    | Value source                             |
+| -------- | ---------------------------------------- |
+| Model    | `info.model` (dash when absent)          |
+| Seed     | `info.seed`                              |
+| Prompt   | `info.prompt`                            |
+| Settings | `JSON.stringify(info.settings, null, 2)` |
 
 Both sides parsed independently; a non-generated side renders "—". The existing `differs` flagging
 highlights the rows where the two candidates diverge — exactly the comparison #174 asks for.
