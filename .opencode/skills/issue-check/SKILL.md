@@ -6,8 +6,8 @@ description: Check the project's open GitHub issues and address them one by one 
 # Issue Check Loop
 
 Work the project's open GitHub issues end to end without supervision: for each issue, triage it,
-implement the fix on its own feature branch, verify, open a PR, drive it through the review loop
-to merge, sync main, delete the merged local branch, and move to the next issue. Stop when the
+implement the fix on its own feature branch, verify, open a PR, drive it through the review loop to
+merge, sync main, delete the merged local branch, and move to the next issue. Stop when the
 open-issue queue is empty — or stop and report on any hard-stop condition below.
 
 ## 0. Setup
@@ -28,8 +28,8 @@ open-issue queue is empty — or stop and report on any hard-stop condition belo
    If none: report "no open issues" and stop.
 3. Make a todo list with one entry per issue (plus a final "queue drained" entry) so progress
    survives context loss.
-4. If `gh issue view <N>` fails with a `projects (classic)` deprecation error, read issue bodies
-   via the REST API instead:
+4. If `gh issue view <N>` fails with a `projects (classic)` deprecation error, read issue bodies via
+   the REST API instead:
 
    ```bash
    gh api repos/<owner>/<repo>/issues/<N> --jq '{title, body, labels: [.labels[].name]}'
@@ -37,27 +37,26 @@ open-issue queue is empty — or stop and report on any hard-stop condition belo
 
 ## 1. Per-issue cycle (repeat for each issue, oldest first)
 
-Re-fetch the open-issue list before starting each issue (new issues may have appeared); keep
-working oldest first until the list is empty.
+Re-fetch the open-issue list before starting each issue (new issues may have appeared); keep working
+oldest first until the list is empty.
 
 ### 1.1 Triage
 
 - Read the issue body in full and reproduce/trace it against the current code.
 - **Bug that reproduces** → proceed to 1.2.
-- **Feature request** → follow the repo's plan-first workflow before coding: draft the plan, add
-  the workstream + design section to the master plan, write the implementation contract doc, then
+- **Feature request** → follow the repo's plan-first workflow before coding: draft the plan, add the
+  workstream + design section to the master plan, write the implementation contract doc, then
   implement.
-- **Invalid / duplicate / not reproducible** → make no branch; post a comment on the issue with
-  the reproduction attempt and reasoning, and close it (`gh issue close <N>`) with that comment.
-  Mark the todo done and go to the next issue.
+- **Invalid / duplicate / not reproducible** → make no branch; post a comment on the issue with the
+  reproduction attempt and reasoning, and close it (`gh issue close <N>`) with that comment. Mark
+  the todo done and go to the next issue.
 
 ### 1.2 Branch + implement
 
-- Cut a branch from current main: `fix/<short-slug>` for bugs, `feature/<short-slug>` for
-  features. One issue per branch — never bundle two issues in one branch or PR.
+- Cut a branch from current main: `fix/<short-slug>` for bugs, `feature/<short-slug>` for features.
+  One issue per branch — never bundle two issues in one branch or PR.
 - Implement following the conventions of the surrounding code. In this repo specifically:
-  - a new backend route needs its `openApiOps` entry in the same file (spec build throws on
-    drift);
+  - a new backend route needs its `openApiOps` entry in the same file (spec build throws on drift);
   - a new migration gets the next free `NNNN` (re-check after merging main — concurrent PRs claim
     numbers) and must update the expected-filename list **and** the count assertion in
     `backend/tests/migrations.test.ts`;
@@ -71,16 +70,16 @@ Run the full gate from the repo root and get it green before committing:
 deno task lint && deno task check && deno fmt --check && deno task test
 ```
 
-Always the tree-walk `deno fmt` form — explicit file paths ignore the project config in this
-Deno version and falsely flag clean files.
+Always the tree-walk `deno fmt` form — explicit file paths ignore the project config in this Deno
+version and falsely flag clean files.
 
 ### 1.4 PR + review loop
 
-- Commit (message naming the issue, e.g. `Fix <thing> (issue #N)`), push, and
-  `gh pr create` with `Closes #N` in the body.
-- Immediately run the **review-loop** skill on the new PR (CI → team review → merge). It handles
-  CI fixes, conflict resolution (merge `origin/main` into the branch, never rebase), reviewer
-  feedback (verify every claim against the source before changing code), and the merge gate.
+- Commit (message naming the issue, e.g. `Fix <thing> (issue #N)`), push, and `gh pr create` with
+  `Closes #N` in the body.
+- Immediately run the **review-loop** skill on the new PR (CI → team review → merge). It handles CI
+  fixes, conflict resolution (merge `origin/main` into the branch, never rebase), reviewer feedback
+  (verify every claim against the source before changing code), and the merge gate.
 
 ### 1.5 Post-merge cleanup
 
@@ -88,10 +87,9 @@ Deno version and falsely flag clean files.
 git checkout main && git pull --ff-only && git branch -d <branch>
 ```
 
-- Branch cleanup is **local only**: `git branch -d` (safe delete — it refuses if unmerged).
-  Remote branches are auto-deleted by GitHub on merge; never `git push origin --delete`.
-- Mark the todo done, report a one-line status (issue, PR number, merged), and go to the next
-  issue.
+- Branch cleanup is **local only**: `git branch -d` (safe delete — it refuses if unmerged). Remote
+  branches are auto-deleted by GitHub on merge; never `git push origin --delete`.
+- Mark the todo done, report a one-line status (issue, PR number, merged), and go to the next issue.
 
 ## 2. Hard rules
 
@@ -99,9 +97,9 @@ git checkout main && git pull --ff-only && git branch -d <branch>
 - Never force-push or rebase in-flight PR branches; resolve conflicts by merging `origin/main`,
   re-run the gate, push, re-request review.
 - Never merge a PR that is not approved with green checks (the review-loop skill enforces this).
-- If the review loop hits a hard stop (1-hour poll budget exhausted, >5 fix iterations, recurring
-  CI failure, merge blocked), stop the loop and report the PR URL and the failing output — do not
+- If the review loop hits a hard stop (1-hour poll budget exhausted, >5 fix iterations, recurring CI
+  failure, merge blocked), stop the loop and report the PR URL and the failing output — do not
   silently move on to the next issue with one left dangling.
 - A dirty working tree at the start of an iteration is a stop-and-report condition.
-- Keep the user informed: one short line per issue at triage, PR creation, merge, and cleanup;
-  a final summary when the queue is drained (issues closed, PRs merged, branches cleaned up).
+- Keep the user informed: one short line per issue at triage, PR creation, merge, and cleanup; a
+  final summary when the queue is drained (issues closed, PRs merged, branches cleaned up).

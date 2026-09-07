@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { closeDb, getDb } from "../src/db/database.ts";
 import * as schema from "../src/db/schema.ts";
+import { createAssetVersion } from "../src/db/assets.ts";
+import { createProject } from "../src/db/projects.ts";
+import { createItem, createTimeline, createTrack } from "../src/db/timelines.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 
@@ -109,6 +112,7 @@ function upload(
 describe("assets api", () => {
   let ownerToken: string;
   let ownerEmail: string;
+  let ownerUserId: number;
 
   beforeEach(async () => {
     freshMemoryDb();
@@ -118,6 +122,7 @@ describe("assets api", () => {
       ownerEmail = `owner.${Math.random().toString(36).slice(2)}@example.com`;
       const user = await bootstrap(ownerEmail, "password123");
       ownerToken = user.token;
+      ownerUserId = user.user.id;
     });
   });
 
@@ -516,6 +521,166 @@ describe("assets api", () => {
           ownerToken,
         );
         assertEquals(delAlias.status, 200);
+      })();
+    });
+  });
+
+  it("deletes versions and guards the active version and permissions", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            {
+              unique_slug: uniqueSlug("hero"),
+              display_name: "Hero",
+              asset_type: "character",
+            },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        await upload(created.id, ownerToken, randomImageBytes(100), "hero_v1.png");
+        await upload(created.id, ownerToken, randomImageBytes(200), "hero_v2.png");
+
+        const list = (await (
+          await get(`/api/v1/assets/${created.id}/versions`, ownerToken)
+        ).json()) as { id: string; version_number: number }[];
+        const v1 = list.find((v) => v.version_number === 1);
+        const v2 = list.find((v) => v.version_number === 2);
+        assert(v1 && v2);
+
+        // The active version cannot be deleted.
+        const active = await del(
+          `/api/v1/assets/${created.id}/versions/${v2.id}`,
+          ownerToken,
+        );
+        assertEquals(active.status, 409);
+        const activeBody = (await active.json()) as {
+          error: { details?: string };
+        };
+        assertEquals(activeBody.error.details, "active_version");
+
+        // A non-owner (no permission on the asset) cannot delete either.
+        const viewerToken = await createViewer("viewer-password-1");
+        const denied = await del(
+          `/api/v1/assets/${created.id}/versions/${v1.id}`,
+          viewerToken,
+        );
+        assertEquals(denied.status, 403);
+
+        // The older version deletes cleanly.
+        const removed = await del(
+          `/api/v1/assets/${created.id}/versions/${v1.id}`,
+          ownerToken,
+        );
+        assertEquals(removed.status, 200);
+        const removedBody = (await removed.json()) as {
+          message: string;
+          id: string;
+          version_number: number;
+        };
+        assertEquals(removedBody.id, v1.id);
+        assertEquals(removedBody.version_number, 1);
+
+        const after = (await (
+          await get(`/api/v1/assets/${created.id}/versions`, ownerToken)
+        ).json()) as { id: string }[];
+        assertEquals(after.map((v) => v.id), [v2.id]);
+
+        // Unknown versions and versions of another asset 404.
+        const unknown = await del(
+          `/api/v1/assets/${created.id}/versions/${crypto.randomUUID()}`,
+          ownerToken,
+        );
+        assertEquals(unknown.status, 404);
+
+        const foreign = (await (
+          await post(
+            "/api/v1/assets",
+            {
+              unique_slug: uniqueSlug("side"),
+              display_name: "Side",
+              asset_type: "prop",
+            },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+        const foreignVersion = (await (
+          await upload(
+            foreign.id,
+            ownerToken,
+            randomImageBytes(300),
+            "side_v1.png",
+          )
+        ).json()) as { version: { id: string } };
+        const cross = await del(
+          `/api/v1/assets/${created.id}/versions/${foreignVersion.version.id}`,
+          ownerToken,
+        );
+        assertEquals(cross.status, 404);
+      })();
+    });
+  });
+
+  it("refuses to delete a version that a timeline item points at", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        const project = createProject({ name: "P" }, ownerUserId);
+        const created = (await (
+          await post(
+            "/api/v1/assets",
+            {
+              unique_slug: uniqueSlug("clip"),
+              display_name: "Clip",
+              asset_type: "video",
+            },
+            ownerToken,
+          )
+        ).json()) as { id: string };
+
+        const old = createAssetVersion(created.id, ownerUserId, {
+          content_hash: "1".repeat(64),
+          file_path: "media/old.mp4",
+          format: "mp4",
+          mime_type: "video/mp4",
+          file_size: 10,
+        });
+        createAssetVersion(created.id, ownerUserId, {
+          content_hash: "2".repeat(64),
+          file_path: "media/new.mp4",
+          format: "mp4",
+          mime_type: "video/mp4",
+          file_size: 10,
+        });
+
+        const timeline = createTimeline(ownerUserId, {
+          project_id: project.id,
+          name: "Cut",
+        });
+        const track = createTrack(ownerUserId, timeline.id, {
+          track_type: "video",
+          name: "V1",
+        });
+        createItem(ownerUserId, timeline.id, {
+          track_id: track.id,
+          asset_version_id: old.id,
+          start_time: 0,
+          end_time: 5,
+        });
+
+        const blocked = await del(
+          `/api/v1/assets/${created.id}/versions/${old.id}`,
+          ownerToken,
+        );
+        assertEquals(blocked.status, 409);
+        const blockedBody = (await blocked.json()) as {
+          error: { message: string; details?: string };
+        };
+        assertEquals(blockedBody.error.details, "version_in_use");
+        assert(blockedBody.error.message.includes("timeline item"));
       })();
     });
   });

@@ -1016,6 +1016,17 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
     },
   },
 
+  /** DELETE /api/v1/assets/{id}/versions/{versionId} response. */
+  AssetVersionDeleted: {
+    type: "object",
+    required: ["message", "id", "version_number"],
+    properties: {
+      message: { type: "string" },
+      id: { type: "string" },
+      version_number: { type: "integer" },
+    },
+  },
+
   /** DELETE /api/v1/assets/{id} response. */
   AssetDeleted: {
     type: "object",

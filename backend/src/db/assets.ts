@@ -1,5 +1,7 @@
+import { join } from "@std/path";
 import { getDb } from "./database.ts";
 import { getUserById } from "./schema.ts";
+import { loadConfig } from "../config.ts";
 import {
   hasProjectPermission,
   PERMISSION_RANK,
@@ -598,4 +600,127 @@ export function restoreAssetVersion(
     version_number: version.version_number,
   });
   return version;
+}
+
+export interface AssetVersionDeleteResult {
+  id: string;
+  version_number: number;
+}
+
+/** Live-usage counts for one version — the same pointer set the "Used in"
+ * dependency view reports (AST-015). Job/review/proxy rows are operational
+ * provenance and intentionally excluded. */
+function versionUsageCounts(versionId: string): {
+  timeline_items: number;
+  panels: number;
+  shots: number;
+  prompt_references: number;
+  total: number;
+} {
+  const db = getDb();
+  const count = (sql: string, ...params: string[]): number => {
+    const row = db.prepare(sql).get(...params) as unknown as { n: number };
+    return row.n;
+  };
+  const timeline_items = count(
+    "SELECT COUNT(*) AS n FROM timeline_items WHERE asset_version_id = ?",
+    versionId,
+  );
+  const panels = count(
+    "SELECT COUNT(*) AS n FROM storyboard_panels WHERE preview_asset_version_id = ? " +
+      "OR generated_clip_asset_version_id = ?",
+    versionId,
+    versionId,
+  );
+  const shots = count(
+    "SELECT COUNT(*) AS n FROM shots WHERE generated_asset_version_id = ?",
+    versionId,
+  );
+  const prompt_references = count(
+    "SELECT COUNT(*) AS n FROM asset_references WHERE asset_version_id = ?",
+    versionId,
+  );
+  return {
+    timeline_items,
+    panels,
+    shots,
+    prompt_references,
+    total: timeline_items + panels + shots + prompt_references,
+  };
+}
+
+/** Remove the version's cached thumbnail files (best-effort). */
+async function removeVersionThumbnails(versionId: string): Promise<void> {
+  const dir = join(loadConfig().appDataDir, "assets", "thumbnails");
+  try {
+    for await (const entry of Deno.readDir(dir)) {
+      if (
+        entry.isFile && entry.name.startsWith(`${versionId}-`) &&
+        entry.name.endsWith(".jpg")
+      ) {
+        await Deno.remove(join(dir, entry.name)).catch(() => {});
+      }
+    }
+  } catch {
+    // No thumbnail cache yet — nothing to clean up.
+  }
+}
+
+/**
+ * Hard-delete a single asset version (issue #173).
+ *
+ * Guards: the asset's active version can never be deleted (the asset must
+ * keep a resolvable active pointer), and neither can a version still pointed
+ * at by live creative pointers (409, listing what uses it). An asset may be
+ * left with zero versions.
+ *
+ * Content-store blobs (master + proxy) are content-addressed and
+ * deduplicated, so they are never unlinked here; with the version row gone
+ * they are simply unreferenced and the storage cleanup reclaims them.
+ */
+export async function deleteAssetVersion(
+  assetId: string,
+  versionId: string,
+  userId: number,
+): Promise<AssetVersionDeleteResult> {
+  if (!hasAssetPermission(userId, assetId, "write")) throw forbidden();
+  const version = getAssetVersion(versionId);
+  if (!version || version.asset_id !== assetId) {
+    throw notFound("Version not found");
+  }
+
+  const asset = getAssetById(assetId);
+  if (asset?.active_version_id === versionId) {
+    throw conflict(
+      "Cannot delete the active version — activate another version first",
+      "active_version",
+    );
+  }
+
+  const usage = versionUsageCounts(versionId);
+  if (usage.total > 0) {
+    const parts: string[] = [];
+    if (usage.timeline_items) {
+      parts.push(`${usage.timeline_items} timeline item(s)`);
+    }
+    if (usage.panels) parts.push(`${usage.panels} storyboard panel pointer(s)`);
+    if (usage.shots) parts.push(`${usage.shots} shot clip(s)`);
+    if (usage.prompt_references) {
+      parts.push(`${usage.prompt_references} prompt reference(s)`);
+    }
+    throw conflict(
+      `Version v${version.version_number} is in use by ${parts.join(", ")} — ` +
+        "remove those first",
+      "version_in_use",
+    );
+  }
+
+  await removeVersionThumbnails(versionId);
+  const db = getDb();
+  db.prepare("DELETE FROM asset_versions WHERE id = ?").run(versionId);
+  logAudit(userId, "asset.version.delete", assetId, {
+    version_id: versionId,
+    version_number: version.version_number,
+  });
+  return { id: versionId, version_number: version.version_number };
 }

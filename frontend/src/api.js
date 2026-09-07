@@ -457,6 +457,13 @@ class ApiClient {
     );
   }
 
+  deleteAssetVersion(id, versionId) {
+    return this.request(
+      `/assets/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}`,
+      { method: "DELETE" },
+    );
+  }
+
   addAssetAlias(id, aliasSlug) {
     return this.request(`/assets/${encodeURIComponent(id)}/aliases`, {
       method: "POST",

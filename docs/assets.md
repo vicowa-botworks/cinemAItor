@@ -31,7 +31,26 @@ and audit logs.
 - Uploading or registering a new version makes it active and preview by default.
 - `restore` re-points the active/preview pointers at an older version; stored files are never
   mutated.
-- Versions are immutable.
+- Versions are immutable while they exist — `delete` (below) is the only removal path.
+
+### Version deletion
+
+`DELETE /api/v1/assets/:id/versions/:versionId` removes a single version (asset **write**
+permission; 404 for an unknown version or a version belonging to another asset):
+
+- **Active guard** — the asset's active version cannot be deleted (409); activate another version
+  first. An asset may be left with zero versions.
+- **In-use guard** — a version still pointed at by a timeline item, storyboard panel pointer, shot
+  clip, or prompt `@reference` is rejected with 409 and a message listing what uses it. This is
+  exactly the pointer set the "Used in" dependency view reports (AST-015). Job, review, and proxy
+  rows are operational provenance and never block deletion — like the dependency view, they are
+  history, not live usage.
+- **Media lifecycle** — the version's content-store blobs (master and proxy) are content-addressed
+  and deduplicated, so they are never unlinked directly; once the version row is gone they are
+  simply unreferenced and the storage cleanup (STO-012) reclaims them along with any other orphans.
+  The version's cached thumbnails (`appDataDir/assets/thumbnails/<versionId>-*.jpg`) are removed
+  best-effort.
+- The response reports the removed version number; the UI re-fetches the asset and its version list.
 
 ### Version comparison (UI)
 
@@ -95,6 +114,7 @@ The Asset Detail **Versions** section supports picking two versions for an A/B c
 | POST   | `/api/v1/assets/:id/versions`                      | Register a version from a stored hash                                    |
 | GET    | `/api/v1/assets/:id/versions/:versionId`           | Get one version                                                          |
 | POST   | `/api/v1/assets/:id/versions/:versionId/restore`   | Restore an older version                                                 |
+| DELETE | `/api/v1/assets/:id/versions/:versionId`           | Delete a version (active/in-use versions are rejected, 409)              |
 | GET    | `/api/v1/assets/:id/versions/:versionId/proxy`     | Stream the version's proxy file                                          |
 | GET    | `/api/v1/assets/:id/versions/:versionId/thumbnail` | Cached JPEG thumbnail (`?at=`, `?w=`) for video frames / images          |
 | POST   | `/api/v1/assets/:id/versions/:versionId/proxy`     | Regenerate the version's proxy (fresh job)                               |
