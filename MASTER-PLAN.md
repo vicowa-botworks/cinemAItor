@@ -1135,6 +1135,7 @@ GET    /api/v1/assets/:id/versions
 POST   /api/v1/assets/:id/versions
 GET    /api/v1/assets/:id/versions/:versionId
 POST   /api/v1/assets/:id/versions/:versionId/restore
+DELETE /api/v1/assets/:id/versions/:versionId
 POST   /api/v1/assets/:id/aliases
 GET    /api/v1/assets/:id/dependencies
 GET    /api/v1/assets/:id/preview
@@ -2342,6 +2343,17 @@ Post-MVP, JSON/YAML first.
 | VP-004 | Model manager UI    | Per-model settings editor covers all three fields (default / draft / production) with individual edit buttons + single-field PATCH (admin only)                                                                           |
 | VP-005 | Draft→production UX | Asset generate form (create + edit) offers a Quality profile select; edit mode for video assets with an active version offers "Produce from current draft" (profile=production + include_current, same prompt/references) |
 | VP-006 | Docs + contract     | `docs/generation_profiles.md` contract, MASTER-PLAN workstream 18 + section 39, ARCHITECTURE.md + docs/assets.md + docs/models.md mentions, OpenAPI schemas updated; full gate green                                      |
+
+## 11.22 Version Deletion (issue #173)
+
+| ID     | Feature         | Acceptance criteria                                                                                                                                                                                                                                                                                                                                                   |
+| ------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VD-001 | Delete endpoint | `DELETE /api/v1/assets/:id/versions/:versionId` (asset write permission): removes the version row and its cached thumbnails; 404 for unknown versions or versions of another asset, 403 without write permission                                                                                                                                                      |
+| VD-002 | Active guard    | Deleting the active version is rejected with 409 — the asset must keep a resolvable active pointer (activate another version first)                                                                                                                                                                                                                                   |
+| VD-003 | In-use guard    | A version pointed at by a timeline item, storyboard panel pointer, shot clip, or prompt `@reference` is rejected with 409 listing what uses it — the same pointer set the "Used in" dependency view reports; job/review/proxy provenance never blocks (operational history, like AST-015)                                                                             |
+| VD-004 | Media lifecycle | Content-store blobs (master + proxy) are never unlinked on version delete (deduplicated, possibly shared); they become reclaimable orphans for the existing storage cleanup; the version's thumbnail cache files (`<versionId>-*.jpg`) are removed best-effort                                                                                                        |
+| VD-005 | Asset detail UI | Every non-active version row in the Versions section offers a **Delete** button (confirm dialog; the active row shows the existing chip instead); a successful delete re-fetches the asset + versions, clears the version from any A/B pair, and falls back to the active preview when the deleted version was being viewed; 409 messages surface in the error banner |
+| VD-006 | Docs + contract | `docs/assets.md` Versions + Endpoints updated, OpenAPI op + `AssetVersionDeleted` schema, `ARCHITECTURE.md` asset-routes entry; full gate green                                                                                                                                                                                                                       |
 
 ---
 

@@ -11,6 +11,7 @@ import {
   createAsset,
   createAssetVersion,
   deleteAsset,
+  deleteAssetVersion,
   getAssetAccessible,
   getAssetById,
   getAssetVersion,
@@ -449,6 +450,19 @@ export const assetRouter = new Router()
       };
     },
   )
+  .delete(
+    "/api/v1/assets/:id/versions/:versionId",
+    authMiddleware,
+    async (ctx, _next) => {
+      const userId = requireUserId(ctx);
+      const asset = requireAsset(ctx);
+      const result = await deleteAssetVersion(asset.id, ctx.params.versionId, userId);
+      ctx.response.body = {
+        message: `Version v${result.version_number} deleted`,
+        ...result,
+      };
+    },
+  )
   .post("/api/v1/assets/:id/aliases", authMiddleware, async (ctx, _next) => {
     const userId = requireUserId(ctx);
     const asset = requireAsset(ctx);
@@ -852,6 +866,21 @@ export const openApiOps: Record<string, OperationMeta> = {
         schema: ref("AssetVersionRestored"),
       },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  "DELETE /api/v1/assets/{id}/versions/{versionId}": {
+    summary: "Delete an asset version",
+    description: "Removes a single version (asset write permission). The asset's active " +
+      "version and versions still pointed at by timeline items, storyboard " +
+      "panel pointers, shot clips, or prompt references are rejected with 409. " +
+      "Content-store blobs are left in place and become reclaimable orphans " +
+      "for the storage cleanup.",
+    responses: {
+      200: {
+        description: "Deletion result",
+        schema: ref("AssetVersionDeleted"),
+      },
+      ...errorResponses(401, 403, 404, 409),
     },
   },
   "POST /api/v1/assets/{id}/aliases": {

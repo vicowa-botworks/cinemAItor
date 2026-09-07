@@ -285,6 +285,11 @@ export class AssetDetail extends LitElement {
       min-width: 160px;
     }
 
+    .version-delete {
+      color: var(--color-error);
+      border-color: var(--color-error);
+    }
+
     .version-notes {
       width: 100%;
       color: var(--color-text-muted);
@@ -1341,6 +1346,37 @@ export class AssetDetail extends LitElement {
     }
   }
 
+  async _deleteVersion(version) {
+    const message = `Delete version v${version.version_number}? This cannot be undone.` +
+      (this.compareIds.includes(version.id)
+        ? " The version is selected for A/B compare — the comparison will close."
+        : "") +
+      (this.previewVersionId === version.id
+        ? " The version is being previewed — the preview will fall back to the active version."
+        : "");
+    if (!window.confirm(message)) {
+      return;
+    }
+    this.error = "";
+    this.notice = "";
+    try {
+      const result = await api.deleteAssetVersion(this.assetId, version.id);
+      const wasViewed = this.previewVersionId === version.id;
+      this.asset = await api.getAsset(this.assetId);
+      this.versions = await api.listAssetVersions(this.assetId);
+      if (this.compareIds.includes(version.id)) {
+        this._toggleCompare(version.id);
+      }
+      if (wasViewed) {
+        this.previewVersionId = null;
+        await this._loadPreview();
+      }
+      this.notice = `Deleted version v${result.version_number}.`;
+    } catch (err) {
+      this.error = err.message || "Delete failed";
+    }
+  }
+
   async _deleteAsset() {
     const deps = (await api.getAssetDependencies(this.assetId).catch(() => null)) ??
       this.dependencies;
@@ -1956,6 +1992,9 @@ export class AssetDetail extends LitElement {
                         ${version?.id === v.id ? html`<span class="chip">active</span>` : html`
                           <button class="btn btn-secondary"
                             @click=${() => this._activateVersion(v)}>Activate</button>
+                          <button class="btn btn-secondary version-delete"
+                            title="Delete this version (the active version cannot be deleted)"
+                            @click=${() => this._deleteVersion(v)}>Delete</button>
                         `}
                         ${v.notes ? html`<div class="version-notes">${v.notes}</div>` : ""}
                       </div>

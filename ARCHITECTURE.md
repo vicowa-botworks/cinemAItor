@@ -106,7 +106,7 @@ app-root (main router)
  │   │   │               pre-selects the chosen model))
  │   └── asset-reference-picker (pick existing image/video assets as generation references,
  │   │                           active version by default, max 8)
-  ├── asset-detail (preview, master/proxy switch, metadata, versions/restore,
+  ├── asset-detail (preview, master/proxy switch, metadata, versions/restore/delete,
   │   │              version A/B compare (two versions side by side: synced play + metadata diff,
   │   │              see compare.js),
   │   │              prompt generation/edit section (asset-generate in edit mode → new versions),
@@ -291,7 +291,9 @@ server.ts (entry point)
 │   └── (see docs/projects.md "Project templates")
 ├── Asset routes (/api/v1/assets/*, auth middleware)
  │   ├── CRUD + upload (raw bytes; optional `X-Technical-Metadata` JSON header) + versions
- │   │   + restore + aliases + tags + preview
+ │   │   + restore + delete (409 for the active version or versions in use by
+ │   │   timeline items / panel pointers / shot clips / prompt references; blobs
+ │   │   left for storage cleanup) + aliases + tags + preview
  │   │   + per-version preview (GET /:id/versions/:versionId/preview, A/B compare)
  │   │   + thumbnails (video frame / image scale, cached JPEG, 503 w/o ffmpeg)
   │   │   + dependencies (GET /:id/dependencies — timeline items, panel/shot
