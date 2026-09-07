@@ -14,6 +14,22 @@ broken-reference warnings work across the project.
 Slugs are lower-case `[a-z0-9_]` (max 64). Tokens embedded in words (`foo@hero`, emails) do not
 match.
 
+## Typing @ tokens (autocomplete)
+
+Every prompt input (`ref-input`, used by Prompt Studio, asset generate/edit, the asset reference
+picker, and storyboard panel prompts) auto-completes references as you type — no separate
+click-to-picker step needed:
+
+- Typing `@` at a token boundary (start of a word) opens a suggestion popup below the caret.
+- The popup live-filters by the typed prefix — slug-prefix matches first, then slug-substring, then
+  name matches — capped at 8, recent-first within a rank (server-side `q` filter).
+- Keyboard: `↑`/`↓` move the highlight, `Enter`/`Tab` accept, `Esc` closes; clicking a row also
+  accepts.
+- If exactly one reference's slug starts with the typed prefix, it is auto-inserted after a short
+  settle; the popup stays open when several match.
+- Accepting replaces `@prefix` with the full `@slug`, which the existing debounce then resolves to a
+  reference chip. The click-to-picker buttons remain as a fallback.
+
 ## Resolution statuses
 
 - `resolved` - slug exists, the caller has read access, and (for versioned tokens) the version

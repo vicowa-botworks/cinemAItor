@@ -2,7 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { IMAGE_ASSET_TYPES, isImageAssetType, VIDEO_ASSET_TYPES } from "./asset-generation.js";
 
-const MAX_REFERENCES = 8;
+export const MAX_REFERENCES = 8;
 
 /**
  * Pick existing image/video assets to attach as generation references.
