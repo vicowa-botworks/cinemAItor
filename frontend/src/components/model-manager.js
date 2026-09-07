@@ -2742,7 +2742,9 @@ export class ModelManager extends LitElement {
                 (h) =>
                   html`
                     <span class="chip"
-                    >${h.kind === "cinemaitor" ? "this app" : h.kind} ${this._fmtMb(Math.round(h.vram_mb))}</span>
+                    >${h.kind === "cinemaitor" ? "this app" : h.kind} ${this._fmtMb(
+                      Math.round(h.vram_mb),
+                    )}</span>
                   `,
               )
               .join("")
