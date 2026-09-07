@@ -303,6 +303,8 @@ class AiAssistDialog extends LitElement {
 
     textarea,
     select {
+      width: 100%;
+      box-sizing: border-box;
       padding: 8px 10px;
       background-color: var(--color-surface-2, var(--color-surface));
       border: 1px solid var(--color-border);

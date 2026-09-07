@@ -17,6 +17,7 @@ import {
   VIDEO_ASSET_TYPES,
 } from "./asset-generation.js";
 import { VramGuard } from "./vram-guard.js";
+import { MAX_REFERENCES } from "./asset-reference-picker.js";
 
 /**
  * Prompt-based generation form for image/video assets.
@@ -228,6 +229,8 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this.queuedResult = null;
     this.assistOpen = false;
     this._modelCache = new Map();
+    this._mentionedRefs = [];
+    this._suppressedRefs = new Set();
   }
 
   firstUpdated() {
@@ -317,7 +320,48 @@ export class AssetGenerate extends VramGuard(LitElement) {
   }
 
   _onRefsChange(e) {
-    this.references = e.detail?.references ?? [];
+    const next = e.detail?.references ?? [];
+    const nextIds = new Set(next.map((r) => r.asset_id));
+    // A ref the user removed while it is still @mentioned is suppressed so the
+    // next parse does not snap it back into the list.
+    for (const r of this.references) {
+      if (!nextIds.has(r.asset_id) && this._mentionedRefs.includes(r.asset_id)) {
+        this._suppressedRefs.add(r.asset_id);
+      }
+    }
+    this.references = next;
+  }
+
+  // Keep the reference list in sync with the prompt's @mentions: as soon as a
+  // mentioned asset resolves to an image/video reference of the current kind
+  // (with an active version), it is added to the picker so the model actually
+  // receives it — no need to re-select it from the list by hand. A ref the
+  // user removed is respected (suppressed) until the mention itself is gone.
+  _onPromptRefs(e) {
+    const tokens = e.detail?.tokens ?? [];
+    const types = this.kind === "video" ? VIDEO_ASSET_TYPES : IMAGE_ASSET_TYPES;
+    const mentioned = [];
+    for (const t of tokens) {
+      const a = t?.asset;
+      if (a && a.id && a.active_version_id && types.includes(a.asset_type)) {
+        mentioned.push(a.id);
+      }
+    }
+    const mentionedIds = [...new Set(mentioned)];
+    this._mentionedRefs = mentionedIds;
+    for (const id of [...this._suppressedRefs]) {
+      if (!mentionedIds.includes(id)) this._suppressedRefs.delete(id);
+    }
+    const next = [...this.references];
+    let changed = false;
+    for (const id of mentionedIds) {
+      if (next.length >= MAX_REFERENCES) break;
+      if (this._suppressedRefs.has(id)) continue;
+      if (next.some((r) => r.asset_id === id)) continue;
+      next.push({ asset_id: id });
+      changed = true;
+    }
+    if (changed) this.references = next;
   }
 
   _buildPayload() {
@@ -491,6 +535,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
             id="gen-prompt"
             .value=${this.prompt}
             @input=${this._onPromptInput}
+            @references=${this._onPromptRefs}
             ?disabled=${this.busy}
             placeholder="Describe the ${kind === "video"
               ? "video"

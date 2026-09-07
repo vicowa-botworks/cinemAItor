@@ -22,6 +22,7 @@ export class RefInput extends LitElement {
     _segments: { state: true },
     _thumbs: { state: true },
     _hover: { state: true },
+    _mention: { state: true },
   };
 
   static styles = css`
@@ -113,6 +114,52 @@ export class RefInput extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
+    .mention {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 4px;
+      z-index: 4;
+      background: var(--color-surface, #1a1a2e);
+      border: 1px solid var(--color-border, #2a2a4a);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+      max-height: 260px;
+      overflow-y: auto;
+      padding: 4px;
+    }
+    .mention-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--color-text, #eaeaea);
+    }
+    .mention-item.active,
+    .mention-item:hover {
+      background: color-mix(in srgb, var(--color-primary, #e94560) 22%,
+        transparent);
+    }
+    .mention-slug {
+      font-weight: 600;
+      color: var(--color-primary, #e94560);
+    }
+    .mention-name {
+      color: var(--color-muted, #888);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mention-empty {
+      padding: 8px;
+      color: var(--color-muted, #888);
+      font-size: 0.85rem;
+    }
   `;
 
   constructor() {
@@ -127,7 +174,25 @@ export class RefInput extends LitElement {
     this._inflight = new Set();
     this._ed = null;
     this._pendingCaret = null;
+    this._lastCaretOffset = -1;
+    this._lastCaretValue = null;
+    this._renderedChipSig = "[]";
+    // True right after a native keystroke committed the value. The browser has
+    // already updated the editable DOM and positioned the caret, so `updated()`
+    // must NOT rebuild innerHTML for it (a rebuild would reset the caret). A
+    // programmatic value set (host, Enter, paste, mention) leaves this false.
+    this._nativeEdit = false;
     this._focusValue = null;
+    this._mention = {
+      open: false,
+      start: -1,
+      prefix: "",
+      items: [],
+      activeIndex: 0,
+      loading: false,
+    };
+    this._mentionSeq = 0;
+    this._mentionAutoTimer = null;
   }
 
   // ---- textarea-compatible facade (used by hosts) ----
@@ -137,10 +202,12 @@ export class RefInput extends LitElement {
   get selectionEnd() {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return this.value.length;
-    return this._rangeOffset(
-      sel.getRangeAt(0).endContainer,
-      sel.getRangeAt(0).endOffset,
-    );
+    const r = sel.getRangeAt(0);
+    const ed = this._ed;
+    if (ed && ed.contains(r.endContainer)) {
+      return this._rangeOffset(r.endContainer, r.endOffset);
+    }
+    return document.activeElement === this ? this.value.length : 0;
   }
   setSelectionRange(start, end) {
     const ed = this._ed;
@@ -177,23 +244,54 @@ export class RefInput extends LitElement {
     // `value` (not `_segments`) so the resulting `_segments` update does not
     // re-trigger this and loop. Also re-schedule the (debounced) parse here so
     // a PROGRAMMATIC `el.value = …` assignment still triggers reference
-    // parsing: user typing goes through `_commitValue` (which schedules it),
+    // parsing: user typing goes through `_commitValue` (which sets `value`),
     // but a host setting `value` directly only fires `updated`, and without
     // this the parse would never run and no chips would render.
+    let nativeEdit = false;
     if (changed.has("value")) {
+      nativeEdit = this._nativeEdit;
+      this._nativeEdit = false;
       this._rebuildSegments();
       this._scheduleParse();
     }
-    if (
-      changed.has("_segments") ||
-      changed.has("_thumbs") ||
-      changed.has("value") ||
+    // Rebuild the editable DOM ONLY when it is genuinely out of sync — never on
+    // a plain native keystroke, because replacing `innerHTML` destroys the
+    // browser's live selection and makes the caret jump. Three cases need a
+    // rebuild:
+    //   structural  — thumbnails / placeholder / rows / disabled changed;
+    //   chipsChanged — a parse landed, so a reference chip appeared or
+    //                  disappeared (`_segments` changed AND its chip signature
+    //                  differs from what is rendered — plain text edits keep
+    //                  the signature the same and skip);
+    //   staleDom    — the value was set PROGRAMMATICALLY (a host `el.value = …`,
+    //                  the Enter / Paste handlers, or a mention insertion), not
+    //                  by a native keystroke. A native keystroke already
+    //                  rewrote the editable in place (DOM + caret), so a rebuild
+    //                  would only reset the caret. We track this with a flag set
+    //                  in the input handlers rather than comparing live DOM text,
+    //                  because real-browser contenteditable DOM can drift
+    //                  between the input read and this microtask read.
+    const structural = changed.has("_thumbs") ||
       changed.has("placeholder") ||
       changed.has("rows") ||
-      changed.has("disabled")
-    ) {
+      changed.has("disabled");
+    const chipsChanged = changed.has("_segments") && this._chipsChanged();
+    const staleDom = changed.has("value") && !nativeEdit && this._ed != null;
+    if (structural || chipsChanged || staleDom) {
       this._renderEditable();
     }
+  }
+
+  _chipSig(segs) {
+    return JSON.stringify(
+      (segs || []).filter((s) => s.type === "ref").map((
+        s,
+      ) => [s.index, s.label]),
+    );
+  }
+
+  _chipsChanged() {
+    return this._chipSig(this._segments) !== this._renderedChipSig;
   }
 
   disconnectedCallback() {
@@ -232,11 +330,13 @@ export class RefInput extends LitElement {
     return val === "\n" && !hasRealText ? "" : val;
   }
 
-  _commitValue(ed, caret) {
-    this._pendingCaret = caret;
+  _commitValue(ed) {
+    // Only push the value; `updated()` handles the segment rebuild + the
+    // debounced parse. The editable DOM itself is NOT rebuilt here — the
+    // browser already holds the freshly-typed text and its caret, and we only
+    // replace `innerHTML` when a reference chip actually appears/disappears
+    // (see `updated` + `_chipsChanged`).
     this.value = this._extractValue(ed);
-    this._rebuildSegments();
-    this._scheduleParse();
   }
 
   _emit(type) {
@@ -245,28 +345,70 @@ export class RefInput extends LitElement {
 
   _onInput(e) {
     if (this.disabled || e.isComposing) return;
-    const ed = e.target;
-    this._commitValue(ed, this._selectionOffset());
+    this._commitValue(e.target);
+    // This came from a native keystroke: the browser already rewrote the
+    // editable (DOM + caret), so `updated()` must not rebuild it.
+    this._nativeEdit = true;
+    // Capture the caret now, while the browser's selection is trustworthy
+    // (immediately after the native edit). A later chip rebuild restores from
+    // this instead of the live selection, which is unreliable once innerHTML
+    // is swapped in the same tick.
+    this._lastCaretOffset = this._selectionOffset();
+    this._lastCaretValue = this.value;
     this._emit("input");
+    this._detectMention();
   }
 
   _onCompositionend(e) {
     if (this.disabled) return;
-    this._commitValue(e.target, this._selectionOffset());
+    this._commitValue(e.target);
+    this._nativeEdit = true;
+    this._lastCaretOffset = this._selectionOffset();
+    this._lastCaretValue = this.value;
     this._emit("input");
   }
 
   _onKeydown(e) {
     if (this.disabled) return;
+    const m = this._mention;
+    if (m?.open) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (m.items.length) {
+          const n = m.items.length;
+          this._mention = { ...m, activeIndex: (m.activeIndex + 1) % n };
+        }
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (m.items.length) {
+          const n = m.items.length;
+          this._mention = { ...m, activeIndex: (m.activeIndex - 1 + n) % n };
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this._closeMention();
+        return;
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && m.items.length) {
+        e.preventDefault();
+        this._acceptMention(m.activeIndex);
+        return;
+      }
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       const start = this.selectionStart;
       const end = this.selectionEnd;
       const val = this.value;
+      // The inserted newline shifts the caret target past the current
+      // selection, so carry the desired offset explicitly; `updated()`
+      // rebuilds the DOM (its text no longer matches) and restores it there.
       this._pendingCaret = start + 1;
       this.value = val.slice(0, start) + "\n" + val.slice(end);
-      this._rebuildSegments();
-      this._scheduleParse();
       this._emit("input");
     }
   }
@@ -282,20 +424,165 @@ export class RefInput extends LitElement {
     const start = this.selectionStart;
     const end = this.selectionEnd;
     const val = this.value;
+    // Carry the caret target (after the pasted text); `updated()` rebuilds
+    // the DOM and restores the caret there.
     this._pendingCaret = start + text.length;
     this.value = val.slice(0, start) + text + val.slice(end);
-    this._rebuildSegments();
-    this._scheduleParse();
     this._emit("input");
   }
 
   _onFocus() {
     this._focusValue = this.value;
+    this._lastCaretOffset = this._selectionOffset();
+    this._lastCaretValue = this.value;
   }
 
   _onBlur() {
     if (this.value !== this._focusValue) this._emit("change");
     if (this._hover) this._hover = null;
+    this._closeMention();
+  }
+
+  // ---- @-mention autocomplete ----
+
+  // Detect an active `@prefix` fragment at the caret and open/refresh the
+  // suggestion popup. Runs on input so a plain `@` (or `@part`) shows matches
+  // as the user types, with no separate click-to-picker step.
+  _detectMention() {
+    if (this.disabled) return this._closeMention();
+    const val = this.value ?? "";
+    const caret = this._selectionOffset();
+    const lo = Math.max(0, caret - 64);
+    const atRel = val.slice(lo, caret).lastIndexOf("@");
+    if (atRel === -1) return this._closeMention();
+    const at = lo + atRel;
+    // A mention starts only at a token boundary — the char before `@` must not
+    // be a word char (keeps `user@domain` and existing chip slugs inert).
+    if (at > 0 && /[a-z0-9_@]/i.test(val[at - 1])) return this._closeMention();
+    if (this._lastTokens.some((t) => t.start === at)) {
+      return this._closeMention();
+    }
+    const prefix = val.slice(at + 1, caret);
+    if (!/^[a-z0-9_]*$/.test(prefix)) return this._closeMention();
+    if (
+      this._mention.open &&
+      this._mention.start === at &&
+      this._mention.prefix === prefix
+    ) {
+      return; // already showing this exact fragment
+    }
+    this._mention = {
+      ...this._mention,
+      open: true,
+      start: at,
+      prefix,
+      activeIndex: 0,
+      loading: true,
+    };
+    this._fetchMention(prefix);
+  }
+
+  async _fetchMention(prefix) {
+    const seq = ++this._mentionSeq;
+    this._clearMentionAuto();
+    try {
+      const assets = await api.listAssets({
+        q: prefix || undefined,
+        limit: 15,
+      });
+      if (seq !== this._mentionSeq) return;
+      const p = prefix.toLowerCase();
+      const scored = (Array.isArray(assets) ? assets : []).map((a) => {
+        const slug = (a.unique_slug || "").toLowerCase();
+        return {
+          slug: a.unique_slug,
+          name: a.display_name || "",
+          assetId: a.id,
+          rank: slug.startsWith(p) ? 0 : slug.includes(p) ? 1 : 2,
+        };
+      });
+      // Stable rank sort: slug-prefix matches first, then slug-substring, then
+      // name/description matches; recent-first order kept within a rank.
+      const items = scored
+        .map((it, i) => ({ it, i }))
+        .sort((a, b) => a.it.rank - b.it.rank || a.i - b.i)
+        .map((x) => x.it)
+        .slice(0, 8);
+      if (seq !== this._mentionSeq) return;
+      this._mention = {
+        ...this._mention,
+        items,
+        activeIndex: 0,
+        loading: false,
+      };
+      this._maybeAutoInsert(prefix, items, seq);
+    } catch {
+      if (seq !== this._mentionSeq) return;
+      this._mention = {
+        ...this._mention,
+        items: [],
+        activeIndex: 0,
+        loading: false,
+      };
+    }
+  }
+
+  // "Auto single-match": when exactly one reference's slug starts with the
+  // typed prefix, insert it without a key or click (after a short settle).
+  _maybeAutoInsert(prefix, items, seq) {
+    this._clearMentionAuto();
+    if (prefix === "") return;
+    const exact = items.filter((it) => it.rank === 0);
+    if (exact.length !== 1) return;
+    this._mentionAutoTimer = setTimeout(() => {
+      this._mentionAutoTimer = null;
+      if (seq !== this._mentionSeq) return;
+      const m = this._mention;
+      if (!m.open || m.prefix !== prefix) return;
+      const val = this.value ?? "";
+      const caret = this._selectionOffset();
+      if (val.slice(m.start + 1, caret) !== prefix) return;
+      this._acceptMention(0);
+    }, 250);
+  }
+
+  _acceptMention(index) {
+    const m = this._mention;
+    if (!m.open) return;
+    const it = m.items[index] ?? m.items[0];
+    if (!it) {
+      this._closeMention();
+      return;
+    }
+    const val = this.value ?? "";
+    const caret = this._selectionOffset();
+    const token = `@${it.slug}`;
+    const before = val.slice(0, m.start);
+    const after = val.slice(caret);
+    this._pendingCaret = m.start + token.length;
+    this.value = before + token + after;
+    this._closeMention();
+    this._emit("input");
+  }
+
+  _closeMention() {
+    this._clearMentionAuto();
+    if (this._mention?.open) {
+      this._mentionSeq++;
+      this._mention = {
+        ...this._mention,
+        open: false,
+        items: [],
+        loading: false,
+      };
+    }
+  }
+
+  _clearMentionAuto() {
+    if (this._mentionAutoTimer) {
+      clearTimeout(this._mentionAutoTimer);
+      this._mentionAutoTimer = null;
+    }
   }
 
   // ---- caret <-> offset mapping ----
@@ -318,7 +605,16 @@ export class RefInput extends LitElement {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return this.value.length;
     const r = sel.getRangeAt(0);
-    return this._rangeOffset(r.startContainer, r.startOffset);
+    const ed = this._ed;
+    if (ed && ed.contains(r.startContainer)) {
+      return this._rangeOffset(r.startContainer, r.startOffset);
+    }
+    // Some engines (notably Chromium with a shadow-DOM contenteditable) report
+    // the caret on a light-DOM ancestor (e.g. <body>) after a native edit, so
+    // the in-node offset is unreadable. The dominant case is end-of-text
+    // editing, so fall back there — 0 (the start) would yank the caret to the
+    // beginning of the line on the next rebuild, which is always wrong.
+    return this.value.length;
   }
 
   // Find the (text node, in-node offset) that corresponds to a char position.
@@ -524,14 +820,40 @@ export class RefInput extends LitElement {
   }
 
   // Re-render the editable DOM from the segments, preserving the caret.
+  // Called only when the DOM is genuinely out of sync (a programmatic value
+  // set) or the chip structure changed — never on plain native keystrokes —
+  // so the browser's live caret survives typing.
   _renderEditable() {
     const ed = this._ed;
     if (!ed) return;
     const explicit = this._pendingCaret;
     this._pendingCaret = null;
-    const hadFocus = document.activeElement === ed;
-    const restoreTo = explicit != null ? explicit : hadFocus ? this._selectionOffset() : null;
+    // For a shadow-DOM contenteditable the focus is on the HOST; `ed` is only
+    // the shadowRoot's activeElement. (Comparing against the light-DOM
+    // `document.activeElement` is always false here.)
+    const hadFocus = this.shadowRoot.activeElement === ed;
+    // Where the caret goes after the rebuild. An explicit target (Enter /
+    // Paste / mention shifted the caret) wins. Otherwise prefer the caret we
+    // captured at the last input/focus — reading the LIVE selection here is
+    // unreliable, because it is taken in the same tick as the innerHTML swap
+    // that resets it, so the caret jumps to the start in real browsers. Only
+    // trust that capture while the value is unchanged: a chip landing keeps the
+    // value (the offset stays valid), but a programmatic value replace
+    // invalidates it, so we fall back to the live selection in that case.
+    let restoreTo;
+    if (explicit != null) {
+      restoreTo = explicit;
+    } else if (
+      this._lastCaretOffset >= 0 && this._lastCaretValue === this.value
+    ) {
+      restoreTo = Math.min(this._lastCaretOffset, this.value.length);
+    } else if (hadFocus) {
+      restoreTo = this._selectionOffset();
+    } else {
+      restoreTo = null;
+    }
     ed.innerHTML = this._editableHtml();
+    this._renderedChipSig = this._chipSig(this._segments);
     if (restoreTo != null && !this.disabled) {
       this._setCaretRange(restoreTo, restoreTo);
     }
@@ -565,6 +887,35 @@ export class RefInput extends LitElement {
           @paste=${this._onPaste}
           @focus=${this._onFocus}
           @blur=${this._onBlur}></div>
+        ${this._mention?.open
+          ? html`
+            <div class="mention" role="listbox">
+              ${this._mention.items.length === 0
+                ? html`
+                  <div class="mention-empty">
+                    ${this._mention.loading ? "Loading…" : "No references"}
+                  </div>
+                `
+                : this._mention.items.map(
+                  (it, i) =>
+                    html`
+                      <div
+                        class="mention-item${i === this._mention.activeIndex ? " active" : ""}"
+                        role="option"
+                        aria-selected=${i === this._mention.activeIndex}
+                        data-i=${i}
+                        @mousedown=${(e) => {
+                          e.preventDefault();
+                          this._acceptMention(i);
+                        }}>
+                        <span class="mention-slug">@${it.slug}</span>
+                        ${it.name ? html`<span class="mention-name">${it.name}</span>` : nothing}
+                      </div>
+                    `,
+                )}
+            </div>
+          `
+          : nothing}
         ${hoverSeg
           ? html`
             <div
