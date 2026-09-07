@@ -47,6 +47,7 @@ import {
 import {
   detectVramServices,
   freeVram,
+  vramHeldStatus,
   type VramServiceKind,
 } from "@cinemaItor/services/vram_free.ts";
 import { logAudit } from "@cinemaItor/services/audit.ts";
@@ -320,6 +321,14 @@ export const modelRouter = new Router()
     requireAdmin(ctx);
     const params = (ctx.request.url as unknown as URL).searchParams;
     ctx.response.body = await detectVramServices(params.get("refresh") === "1");
+  })
+  .get("/api/v1/models/vram-held", authMiddleware, async (ctx, _next) => {
+    requireUserId(ctx);
+    // Always re-probes (no 30s cache): the pre-submit VRAM guard calls this
+    // right before enqueuing and needs the snapshot to match the runner's own
+    // auto-fallback. Reports free VRAM plus how much of the rest is held by
+    // this backend's own in-flight generation jobs vs unrelated apps.
+    ctx.response.body = await vramHeldStatus(true);
   })
   .post("/api/v1/models/vram-unload/free", authMiddleware, async (ctx, _next) => {
     const adminId = requireAdmin(ctx);
@@ -716,6 +725,32 @@ export const openApiOps: Record<string, OperationMeta> = {
         },
       },
       ...errorResponses(401, 403),
+    },
+  },
+  "GET /api/v1/models/vram-held": {
+    summary: "VRAM holder split (auth)",
+    description:
+      "Live (always re-probed) VRAM split for the pre-submit guard: the GPU summary plus " +
+      "`cinemaitor_mb` — VRAM held by this backend's own in-flight local_cli generation jobs — " +
+      "and `other_mb` — VRAM held by unrelated processes. Lets the frontend suppress the " +
+      "out-of-VRAM dialog when the deficit is our own queued/running job (which will free the " +
+      "VRAM and run the new job) rather than a foreign process the runner cannot reclaim.",
+    responses: {
+      200: {
+        description: "VRAM holder split",
+        schema: {
+          type: "object",
+          required: ["platform", "gpu", "cinemaitor_mb", "other_mb", "detected_at"],
+          properties: {
+            platform: { type: "string", nullable: true },
+            gpu: { type: "object", nullable: true },
+            cinemaitor_mb: { type: "integer" },
+            other_mb: { type: "integer" },
+            detected_at: { type: "string" },
+          },
+        },
+      },
+      ...errorResponses(401),
     },
   },
   "POST /api/v1/models/vram-unload/free": {

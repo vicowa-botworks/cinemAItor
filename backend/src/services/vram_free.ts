@@ -1,4 +1,5 @@
 import { detectHardware, parseNvidiaSmiMemory, runCommand } from "./hardware.ts";
+import { isRunnerPid, runnerPidList } from "./runner_registry.ts";
 import { getVramUnloadSettings } from "../db/vram_unload_settings.ts";
 
 /**
@@ -38,10 +39,28 @@ export interface VramServiceInfo {
   unloadable: boolean;
 }
 
+/**
+ * Per-group VRAM breakdown of the GPU compute-app PIDs that are neither local
+ * ComfyUI nor llama services. Lets the UI (and the pre-submit VRAM guard) tell
+ * "VRAM is held by one of our own in-flight/queued generation jobs" apart from
+ * "held by an unrelated app":
+ *   - `cinemaitor` — local_cli runner children this backend spawned
+ *     (runner_registry); the VRAM a queued job inherits when the running one
+ *     finishes (generation jobs run serially at gpuConcurrency=1).
+ *   - `other` — everything else (browsers, games, other apps).
+ */
+export interface VramHolderInfo {
+  kind: "cinemaitor" | "other";
+  pids: number[];
+  vram_mb: number;
+}
+
 export interface VramServicesReport {
   platform: string;
   gpu: { model: string | null; total_mb: number | null; used_mb: number | null } | null;
   services: VramServiceInfo[];
+  /** GPU PIDs that are neither ComfyUI nor llama, grouped by ownership. */
+  holders: VramHolderInfo[];
   detected_at: string;
 }
 
@@ -120,6 +139,29 @@ async function gpuProcesses(): Promise<GpuProc[]> {
   return procs;
 }
 
+/** Total VRAM (MB) the given PIDs use, summed over the detected GPU procs. */
+function sumVram(procs: GpuProc[], pids: number[]): number {
+  const set = new Set(pids);
+  return procs.filter((p) => set.has(p.pid)).reduce((s, p) => s + p.vram_mb, 0);
+}
+
+/**
+ * True if `pid` is a registered local_cli runner child, or a descendant of one
+ * within `depth` hops (covers `bash -c "python runner.py"` — the runner is the
+ * parent of the CUDA-holding python process). Each hop shells out to `ps`, so
+ * callers gate this on the registry being non-empty.
+ */
+async function isRunnerAncestor(pid: number, depth = 3): Promise<boolean> {
+  let current = pid;
+  for (let hop = 0; hop <= depth && current > 1; hop++) {
+    if (isRunnerPid(current)) return true;
+    const info = await procInfo(current);
+    if (!info || info.ppid === null) break;
+    current = info.ppid;
+  }
+  return false;
+}
+
 /** Find the `--models-preset` router that owns the given llama child PIDs (walk ppid, max 3). */
 async function findLlamaRouter(
   childPids: number[],
@@ -194,6 +236,32 @@ async function detectVramServicesFresh(): Promise<VramServicesReport> {
     });
   }
 
+  // Attribute every remaining compute-app PID to either our own in-flight
+  // generation jobs (the registered local_cli runner children, or their
+  // descendants) or to unrelated processes. This is what lets the pre-submit
+  // VRAM guard queue behind our own job instead of warning. The ancestor walk
+  // only runs when a runner is actually live, so the common no-job case costs
+  // no extra `ps` calls.
+  const knownPids = new Set<number>([...comfyPids, ...llamaPids].map((p) => p.pid));
+  const hasRunners = runnerPidList().length > 0;
+  const cinePids: number[] = [];
+  const otherPids: number[] = [];
+  for (const proc of procs) {
+    if (knownPids.has(proc.pid)) continue;
+    if (hasRunners && (isRunnerPid(proc.pid) || (await isRunnerAncestor(proc.pid)))) {
+      cinePids.push(proc.pid);
+    } else {
+      otherPids.push(proc.pid);
+    }
+  }
+  const holders: VramHolderInfo[] = [];
+  if (cinePids.length > 0) {
+    holders.push({ kind: "cinemaitor", pids: cinePids, vram_mb: sumVram(procs, cinePids) });
+  }
+  if (otherPids.length > 0) {
+    holders.push({ kind: "other", pids: otherPids, vram_mb: sumVram(procs, otherPids) });
+  }
+
   return {
     platform: Deno.build.os,
     gpu: hardware.gpu
@@ -204,6 +272,7 @@ async function detectVramServicesFresh(): Promise<VramServicesReport> {
       }
       : null,
     services,
+    holders,
     detected_at: new Date().toISOString(),
   };
 }
@@ -220,6 +289,36 @@ export async function detectVramServices(force = false): Promise<VramServicesRep
   const report = await detectVramServicesFresh();
   servicesCache = { at: Date.now(), report };
   return report;
+}
+
+/**
+ * Lightweight projection of the services report for the pre-submit VRAM guard:
+ * the GPU summary plus how much of the used VRAM is held by this backend's own
+ * in-flight/queued generation jobs (`cinemaitor_mb`) versus unrelated apps
+ * (`other_mb`). Lets the guard decide "the deficit is our own job — queue
+ * behind it" without the admin-gated services report.
+ */
+export interface VramHeldStatus {
+  platform: string;
+  gpu: { model: string | null; total_mb: number | null; used_mb: number | null } | null;
+  /** VRAM held by this backend's own local_cli runner children (MB). */
+  cinemaitor_mb: number;
+  /** VRAM held by unrelated processes (MB). */
+  other_mb: number;
+  detected_at: string;
+}
+
+export async function vramHeldStatus(force = false): Promise<VramHeldStatus> {
+  const report = await detectVramServices(force);
+  const sum = (kind: VramHolderInfo["kind"]): number =>
+    report.holders.filter((h) => h.kind === kind).reduce((a, h) => a + h.vram_mb, 0);
+  return {
+    platform: report.platform,
+    gpu: report.gpu,
+    cinemaitor_mb: sum("cinemaitor"),
+    other_mb: sum("other"),
+    detected_at: report.detected_at,
+  };
 }
 
 /** Ask a local ComfyUI to unload all models (`POST /free`). */

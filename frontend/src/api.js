@@ -727,6 +727,17 @@ class ApiClient {
     });
   }
 
+  /**
+   * How much of the used GPU VRAM this backend's own in-flight local_cli
+   * job(s) hold versus other apps, in MB. Lets the pre-submit VRAM guard tell
+   * "a job we queued is holding it" (safe to queue behind) from "another app
+   * holds it" (needs the dialog). Live probe, never cached.
+   * @returns {Promise<{cinemaitor_mb: number, other_mb: number}>}
+   */
+  getModelsVramHeld() {
+    return this.request("/models/vram-held");
+  }
+
   // --- v1 llm ---
 
   getLlmSettings() {
