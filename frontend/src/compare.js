@@ -150,6 +150,53 @@ function trimOf(adjustments) {
 }
 
 /**
+ * Parse a version's generation provenance out of `technical_metadata_json`
+ * (written by the job runner for generated versions). Returns a flat view:
+ *
+ *   { model, model_version, backend, prompt, negative_prompt, seed,
+ *     settings, candidate_index, candidate_count, job_id, generated_at }
+ *
+ * or null when the version was not produced by a generation job (uploads,
+ * proxies, exports) or the metadata is missing/malformed. Pure + DOM-free.
+ */
+export function versionGenerationInfo(version) {
+  if (!version || !version.technical_metadata_json) return null;
+  let meta;
+  try {
+    meta = JSON.parse(version.technical_metadata_json);
+  } catch {
+    return null;
+  }
+  if (!meta || typeof meta !== "object" || !meta.job_id) return null;
+  const name = meta.model_name ?? null;
+  const modelParts = [
+    name,
+    meta.model_version ? `v${meta.model_version}` : null,
+    meta.backend ?? null,
+  ]
+    .filter(Boolean);
+  const settings =
+    meta.settings && typeof meta.settings === "object" && !Array.isArray(meta.settings)
+      ? meta.settings
+      : null;
+  return {
+    model: modelParts.length ? modelParts.join(" ") : null,
+    model_version: meta.model_version ?? null,
+    backend: meta.backend ?? null,
+    prompt: typeof meta.prompt_text === "string" && meta.prompt_text ? meta.prompt_text : null,
+    negative_prompt: typeof meta.negative_prompt === "string" && meta.negative_prompt
+      ? meta.negative_prompt
+      : null,
+    seed: meta.seed_used != null ? String(meta.seed_used) : null,
+    settings,
+    candidate_index: Number.isInteger(meta.candidate_index) ? meta.candidate_index : null,
+    candidate_count: Number.isInteger(meta.candidate_count) ? meta.candidate_count : null,
+    job_id: String(meta.job_id),
+    generated_at: typeof meta.generated_at === "string" ? meta.generated_at : null,
+  };
+}
+
+/**
  * Build the side-by-side comparison table for two asset version rows (the
  * full rows returned by listAssetVersions). Returns
  * `[{ label, a, b, differs }]` with display-ready strings; "—" marks absent
@@ -172,6 +219,17 @@ export function versionCompareRows(va, vb) {
     (s) => s === "" ? "—" : new Date(s).toLocaleDateString() || "—",
   );
   push("Proxy", va?.proxy_path ? "ready" : "none", vb?.proxy_path ? "ready" : "none");
+  const genA = versionGenerationInfo(va);
+  const genB = versionGenerationInfo(vb);
+  push("Model", genA?.model ?? "", genB?.model ?? "", dash);
+  push("Seed", genA?.seed ?? "", genB?.seed ?? "", dash);
+  push("Prompt", genA?.prompt ?? "", genB?.prompt ?? "", dash);
+  push(
+    "Settings",
+    genA?.settings ? JSON.stringify(genA.settings) : "",
+    genB?.settings ? JSON.stringify(genB.settings) : "",
+    dash,
+  );
   const audioA = audioMetaOf(va);
   const audioB = audioMetaOf(vb);
   push(

@@ -12,6 +12,7 @@ import {
   resolveComparePair,
   toggleComparePair,
   versionCompareRows,
+  versionGenerationInfo,
 } from "../compare.js";
 import { modelFormatForFile } from "../model-views.js";
 import { generationKindForAsset } from "./asset-generation.js";
@@ -294,6 +295,43 @@ export class AssetDetail extends LitElement {
       width: 100%;
       color: var(--color-text-muted);
       font-style: italic;
+    }
+
+    .version-gen {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 10px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 12px;
+    }
+
+    .version-gen .gen-row {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+    }
+
+    .version-gen .gen-label {
+      color: var(--color-text-muted);
+      min-width: 80px;
+      flex-shrink: 0;
+    }
+
+    .version-gen .gen-row > span:not(.gen-label) {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .version-gen pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 11px;
+      color: var(--color-text-muted);
     }
 
     .tag-chip {
@@ -579,6 +617,7 @@ export class AssetDetail extends LitElement {
     compareIds: { state: true },
     comparePreviews: { state: true },
     genJobId: { state: true },
+    expandedVersionIds: { state: true },
   };
 
   constructor() {
@@ -603,6 +642,7 @@ export class AssetDetail extends LitElement {
     this.subtitleResult = null;
     this.compareIds = [];
     this.comparePreviews = new Map();
+    this.expandedVersionIds = [];
     this._compareSync = new CompareSync();
     this.dependencies = null;
     this.viewerError = "";
@@ -642,6 +682,7 @@ export class AssetDetail extends LitElement {
     this.subtitleResult = null;
     this.compareIds = [];
     this.comparePreviews = new Map();
+    this.expandedVersionIds = [];
     this._compareSync?.clear();
     this.dependencies = null;
     this.viewerError = "";
@@ -678,6 +719,12 @@ export class AssetDetail extends LitElement {
       }
     }
     this._loadComparePreviews();
+  }
+
+  _toggleVersionDetails(versionId) {
+    this.expandedVersionIds = this.expandedVersionIds.includes(versionId)
+      ? this.expandedVersionIds.filter((id) => id !== versionId)
+      : [...this.expandedVersionIds, versionId];
   }
 
   _clearCompare() {
@@ -1367,6 +1414,9 @@ export class AssetDetail extends LitElement {
       if (this.compareIds.includes(version.id)) {
         this._toggleCompare(version.id);
       }
+      if (this.expandedVersionIds.includes(version.id)) {
+        this.expandedVersionIds = this.expandedVersionIds.filter((id) => id !== version.id);
+      }
       if (wasViewed) {
         this.previewVersionId = null;
         await this._loadPreview();
@@ -1968,8 +2018,10 @@ export class AssetDetail extends LitElement {
             ${this.versions.length === 0 ? html`<div class="message">No versions yet.</div>` : html`
               <div class="versions">
                 ${this.versions.map(
-                  (v) =>
-                    html`
+                  (v) => {
+                    const gen = versionGenerationInfo(v);
+                    const expanded = this.expandedVersionIds.includes(v.id);
+                    return html`
                       <div
                         class="version ${version?.id === v.id
                           ? "active "
@@ -1989,6 +2041,17 @@ export class AssetDetail extends LitElement {
                         >
                           ${this.compareIds.includes(v.id) ? "In A/B" : "A/B"}
                         </button>
+                        ${gen
+                          ? html`
+                            <button class="btn btn-secondary gen-toggle"
+                              aria-expanded=${expanded ? "true" : "false"}
+                              title="Show the prompt, model, seed and settings used to generate this version"
+                              @click=${() => this._toggleVersionDetails(v.id)}
+                            >
+                              ${expanded ? "Hide details" : "Details"}
+                            </button>
+                          `
+                          : ""}
                         ${version?.id === v.id ? html`<span class="chip">active</span>` : html`
                           <button class="btn btn-secondary"
                             @click=${() => this._activateVersion(v)}>Activate</button>
@@ -1997,8 +2060,64 @@ export class AssetDetail extends LitElement {
                             @click=${() => this._deleteVersion(v)}>Delete</button>
                         `}
                         ${v.notes ? html`<div class="version-notes">${v.notes}</div>` : ""}
+                        ${gen && expanded
+                          ? html`
+                            <div class="version-gen">
+                              ${gen.prompt
+                                ? html`
+                                  <div class="gen-row">
+                                    <span class="gen-label">Prompt</span>
+                                    <span>${gen.prompt}</span>
+                                  </div>
+                                `
+                                : ""}
+                              ${gen.negative_prompt
+                                ? html`
+                                  <div class="gen-row">
+                                    <span class="gen-label">Negative</span>
+                                    <span>${gen.negative_prompt}</span>
+                                  </div>
+                                `
+                                : ""}
+                              ${gen.model
+                                ? html`
+                                  <div class="gen-row">
+                                    <span class="gen-label">Model</span>
+                                    <span>${gen.model}</span>
+                                  </div>
+                                `
+                                : ""}
+                              ${gen.seed
+                                ? html`
+                                  <div class="gen-row">
+                                    <span class="gen-label">Seed</span>
+                                    <span>${gen.seed}</span>
+                                  </div>
+                                `
+                                : ""}
+                              ${gen.candidate_count && gen.candidate_count > 1
+                                ? html`
+                                  <div class="gen-row">
+                                    <span class="gen-label">Candidate</span>
+                                    <span>${(gen.candidate_index ?? 0) + 1} of ${gen
+                                      .candidate_count}</span>
+                                  </div>
+                                `
+                                : ""}
+                              ${gen.settings
+                                ? html`
+                                  <div class="gen-row">
+                                    <span class="gen-label">Settings</span>
+                                    <pre>${JSON.stringify(gen.settings, null, 2)}</pre>
+                                  </div>
+                                `
+                                : ""}
+                            </div>
+                          `
+                          : ""}
                       </div>
-                    `,
+                    `;
+                  },
                 )}
               </div>
             `}
