@@ -101,9 +101,11 @@ app-root (main router)
   │   │   │               kind, live W×H preview), quality-profile picker (draft/production,
  │   │   │               docs/generation_profiles.md), "use current version" toggle in edit mode +
  │   │   │               one-click "produce final from current version" (production profile)
- │   │   │               draft→production button, pre-generation VRAM check → vram-choice-dialog
- │   │   │               for local_cli models, Enhance with AI button (shared ai-assist-dialog,
- │   │   │               pre-selects the chosen model))
+  │   │   │               draft→production button, pre-generation VRAM check → vram-choice-dialog
+  │   │   │               for local_cli models, inline "Enhance with AI" below the prompt input —
+  │   │   │               the prompt box is the input; the run's result renders in place with
+  │   │   │               Use as prompt / Copy / Dismiss + model & model-skill pickers (chosen
+  │   │   │               generation model pre-selected; docs/llm.md))
  │   └── asset-reference-picker (pick existing image/video assets as generation references,
  │   │                           active version by default, max 8)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore/delete,

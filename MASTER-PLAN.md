@@ -1339,6 +1339,15 @@ Frontend only: parse the provenance (pure helper in `compare.js`) and render it 
 (expandable Details block) and in the A/B version compare table (model / seed / prompt / settings
 rows), so candidates generated with different settings can be meaningfully compared.
 
+## 8.18 Inline Prompt Enhance (Workstream 21)
+
+No API change: `POST /api/v1/llm/assist` with `purpose: "enhance_prompt"` already exists and already
+post-checks `@reference` survival. The change is UI flow in `asset-generate.js`: the "Enhance with
+AI" button moves below the prompt input, runs the assist call on the current prompt directly (no
+dialog, no second input), and renders the enhanced result + its controls inline below the button.
+The model/skill pickers and LLM-status handling move with it; the shared `ai-assist-dialog` is
+unchanged for its other consumers.
+
 ---
 
 # 9. Core Workstreams
@@ -2405,6 +2414,17 @@ Post-MVP, JSON/YAML first.
 | VG-002 | Version row details | Every generated version row in the asset-detail Versions section shows a **Details** toggle; expanded, it lists prompt (full text, wrapped), model (name + version + backend), seed, and settings (formatted JSON); non-generated versions show no toggle                                                                           |
 | VG-003 | A/B compare rows    | `versionCompareRows` includes Model, Seed, Prompt, and Settings rows built from each side's provenance; "—" marks versions without provenance; `differs` flags mismatches so settings-driven differences stand out in the diff table                                                                                                |
 | VG-004 | Docs + contract     | `docs/assets.md` (Versions section) documents the provenance shape + UI, `ARCHITECTURE.md` asset-detail entry updated; full gate green (frontend compare tests + parse check)                                                                                                                                                       |
+
+## 11.24 Inline Prompt Enhance (Workstream 21)
+
+| ID      | Feature                 | Acceptance criteria                                                                                                                                                                                                                                                                                  |
+| ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ENH-001 | Button placement + gate | In `asset-generate` the "Enhance with AI" button renders directly below the prompt input (after the task note); it is disabled exactly when the prompt is empty or a run is in flight; there is no separate context input anywhere in the enhance flow                                               |
+| ENH-002 | Enhance in place        | Clicking runs `enhance_prompt` with the current prompt text as context (button shows a working state); the result appears inline below the button as a read-only textarea with **Use as prompt**, **Copy**, and **Dismiss** controls; `@reference` tokens survive via the existing server post-check |
+| ENH-003 | Apply result            | **Use as prompt** replaces the prompt text, re-slugs when the slug is untouched, and clears the result block; **Copy** copies the result to the clipboard with a "Copied" flash; a new run replaces the previous result                                                                              |
+| ENH-004 | Pickers preserved       | The model + model-skill pickers keep the dialog's semantics: same lists (enabled models / assistant skills), the chosen generation model pre-selected when the list loads, mismatch warning via `skillMatchesModel`                                                                                  |
+| ENH-005 | Unconfigured LLM        | LLM status is checked lazily on first use; an unconfigured endpoint shows the inline "no LLM configured" hint with a Models-page link and no assist request is made                                                                                                                                  |
+| ENH-006 | Scope + gate            | `asset-generate` no longer renders `ai-assist-dialog` (other consumers unchanged); enhancement state resets with the form after a successful queue in new-asset mode; full gate green                                                                                                                |
 
 ---
 
@@ -4307,3 +4327,79 @@ the rows appear there too (harmless: same job ⇒ identical values, no diff high
 
 - `docs/assets.md` — Versions section: provenance shape + the Details toggle + compare rows.
 - `ARCHITECTURE.md` — asset-detail entry mentions per-version generation details + compare rows.
+
+## Workstream 21: Inline Prompt Enhance (issue #175)
+
+The generate form's "Enhance with AI" button opens the shared `ai-assist-dialog` with its own
+context textarea — so the user types the prompt in the form, then has to re-read/re-type it into a
+second input before the LLM runs. Issue #175 asks for the obvious flow instead: the button sits
+directly below the prompt input, and clicking it enhances _that_ prompt in place — no separate
+input, with the enhanced output and its controls rendered right below the button.
+
+**Changes (frontend-only, `frontend/src/components/asset-generate.js`):**
+
+- The "Enhance with AI" button moves from the bottom action row to directly below the prompt input
+  (after the "Task: …" note). It stays disabled while the prompt is empty or a run is in flight.
+- Clicking it runs the `enhance_prompt` assist call immediately with the current prompt text as
+  context (no dialog, no second input). The pure `buildAssistRequest` / `skillMatchesModel` helpers
+  from `ai-assist-request.js` are reused; the shared `ai-assist-dialog` is unchanged and keeps
+  serving script-detail, storyboard-detail, and audio-dialog.
+- The dialog's model + model-skill pickers move into the same inline block (same lists, same
+  pre-selection of the chosen generation model, same mismatch warning) so "the rest of the flow" is
+  preserved.
+- The enhanced output renders inline below the button: a read-only textarea with **Use as prompt**
+  (replaces the prompt text; re-slugs an untouched slug), **Copy**, and **Dismiss**.
+- LLM status is checked lazily on first use; an unconfigured endpoint shows the same "no LLM
+  configured" hint with a Models-page link inline instead of failing the call.
+- Enhancement state (result/error/pickers) resets with the form after a successful queue in
+  new-asset mode.
+
+**API surface:** none — `POST /api/v1/llm/assist` (`enhance_prompt`) is unchanged.
+
+---
+
+# 41. Inline Prompt Enhance Design (Workstream 21)
+
+## Problem
+
+Issue #175: in the generate form (new asset on the Assets page, edit mode on the Asset Detail page),
+the "Enhance with AI" button lives at the bottom of the form next to the submit button and opens the
+shared `ai-assist-dialog` — which hosts its own context textarea. The prompt the user already typed
+in the form is not the thing being enhanced, so the user faces a redundant second input and the
+button's prompt-dependency looks unexplained.
+
+## Design
+
+Inline the whole enhance step in `asset-generate.js`, directly below the prompt input:
+
+```
+Prompt: [ref-input …]
+        Task: text → image
+        [Enhance with AI]   Model (optional) ▾   Model skill (optional) ▾
+        ┌──────────────────────────────────────────────┐
+        │ <enhanced prompt, read-only>                 │
+        └──────────────────────────────────────────────┘
+        [Use as prompt] [Copy] [Dismiss]        (after a run)
+```
+
+State (all `{state: true}` in `static properties`): `assistRunning`, `assistResult`, `assistError`,
+`assistConfigured`, `assistModels`, `assistSkills`, `assistModelId`, `assistSkillId`,
+`assistCopied`. The `assistOpen` flag and the `ai-assist-dialog` element are removed from this
+component.
+
+- **Run** (`_runAssist`): lazily loads LLM status + enabled models + assistant skills on first use
+  (same three calls the dialog makes). Unconfigured → inline hint, no request. Otherwise
+  `buildAssistRequest({ purpose: "enhance_prompt", context: this.prompt, modelId, skillId })` →
+  `api.assistLlm`; the button shows "Enhancing…" while in flight. `@reference` tokens survive by the
+  existing server post-check (unchanged).
+- **Model pre-selection**: when the model list loads, `assistModelId` defaults to the currently
+  chosen generation model (`_selectedModel()`), matching the dialog's `default-model-id` behavior;
+  the picker remains user-overridable, and the mismatch warning (`skillMatchesModel`) is preserved.
+- **Result block**: read-only textarea + **Use as prompt** (`this.prompt = result`, re-slug when the
+  slug is untouched, then clear the result) + **Copy** (clipboard, "Copied" flash) + **Dismiss**
+  (clears result + error). A new run replaces the previous result.
+- **Reset**: after a successful queue in new-asset mode the enhancement block resets with the rest
+  of the form (edit mode keeps state, same as the form today).
+
+The shared dialog and its other consumers (script-detail write/extend, storyboard per-panel enhance,
+audio-dialog enhance) are untouched; only their doc references in ARCHITECTURE.md stay.
