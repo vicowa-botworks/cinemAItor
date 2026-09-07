@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { jobEvents } from "../job-events.js";
 import {
   AUDIO_TYPES,
   audioFormFromMeta,
@@ -19,6 +20,7 @@ import { generationKindForAsset } from "./asset-generation.js";
 import "./asset-generate.js";
 
 const STATUS_OPTIONS = ["draft", "approved", "rejected", "archived"];
+const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 function formatBytes(size) {
   if (size === null || size === undefined) return "";
@@ -652,6 +654,11 @@ export class AssetDetail extends LitElement {
     this.genJobId = null;
   }
 
+  connectedCallback() {
+    super.connectedCallback?.();
+    this._unsubscribeEvents = jobEvents.subscribe((ev) => this._onLiveEvent(ev));
+  }
+
   willUpdate(changed) {
     if (changed.has("assetId")) {
       this._reset();
@@ -661,6 +668,11 @@ export class AssetDetail extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback?.();
+    this._unsubscribeEvents?.();
+    if (this._versionCheckTimer) {
+      clearTimeout(this._versionCheckTimer);
+      this._versionCheckTimer = null;
+    }
     this._revokePreview();
     this._revokeComparePreviews();
   }
@@ -897,6 +909,53 @@ export class AssetDetail extends LitElement {
 
   _onGenerateQueued(e) {
     this.genJobId = e.detail?.job_id ?? null;
+  }
+
+  _onLiveEvent(ev) {
+    if (!ev || ev.kind !== "status") return;
+    if (!TERMINAL_STATUSES.has(ev.status)) return;
+    if (this.genJobId && ev.jobId === this.genJobId) {
+      this._loadAll();
+      if (ev.status === "succeeded") this.genJobId = null;
+      return;
+    }
+    this._scheduleVersionCheck();
+  }
+
+  _scheduleVersionCheck() {
+    if (this._versionCheckTimer) return;
+    this._versionCheckTimer = setTimeout(() => {
+      this._versionCheckTimer = null;
+      this._checkVersionChanged();
+    }, 500);
+  }
+
+  async _checkVersionChanged() {
+    if (!this.asset) return;
+    let asset;
+    let versions;
+    try {
+      [asset, versions] = await Promise.all([
+        api.getAsset(this.assetId),
+        api.listAssetVersions(this.assetId),
+      ]);
+    } catch {
+      return;
+    }
+    if (this._versionSignature() === this._versionSigFor(asset, versions)) return;
+    this.asset = asset;
+    this.versions = versions;
+    await this._loadPreview();
+    await this._refreshAudio();
+    this._loadDependencies();
+  }
+
+  _versionSignature() {
+    return this._versionSigFor(this.asset, this.versions);
+  }
+
+  _versionSigFor(asset, versions) {
+    return `${asset?.active_version_id ?? ""}:${(versions ?? []).length}`;
   }
 
   async _loadPreview() {
