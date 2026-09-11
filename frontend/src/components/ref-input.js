@@ -1,5 +1,6 @@
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
+import { reanchorTokens } from "../reference-reanchor.js";
 import { buildHighlightSegments } from "../reference-styles.js";
 
 // <ref-input> is a drop-in replacement for a prompt <textarea> that renders
@@ -197,7 +198,7 @@ export class RefInput extends LitElement {
 
   // ---- textarea-compatible facade (used by hosts) ----
   get selectionStart() {
-    return this._selectionOffset();
+    return this._selectionOffset() ?? this.value.length;
   }
   get selectionEnd() {
     const sel = window.getSelection();
@@ -205,7 +206,8 @@ export class RefInput extends LitElement {
     const r = sel.getRangeAt(0);
     const ed = this._ed;
     if (ed && ed.contains(r.endContainer)) {
-      return this._rangeOffset(r.endContainer, r.endOffset);
+      return this._rangeOffset(r.endContainer, r.endOffset) ??
+        this.value.length;
     }
     return document.activeElement === this ? this.value.length : 0;
   }
@@ -345,26 +347,38 @@ export class RefInput extends LitElement {
 
   _onInput(e) {
     if (this.disabled || e.isComposing) return;
+    const prev = this.value ?? "";
     this._commitValue(e.target);
+    const next = this.value;
+    // Re-anchor the parsed tokens across the edit so a plain keystroke does
+    // not invalidate the chips after it (which would force a DOM rebuild and
+    // reset the caret on every character).
+    const d = this._reanchorTokens(prev, next);
     // This came from a native keystroke: the browser already rewrote the
     // editable (DOM + caret), so `updated()` must not rebuild it.
     this._nativeEdit = true;
     // Capture the caret now, while the browser's selection is trustworthy
     // (immediately after the native edit). A later chip rebuild restores from
     // this instead of the live selection, which is unreliable once innerHTML
-    // is swapped in the same tick.
-    this._lastCaretOffset = this._selectionOffset();
-    this._lastCaretValue = this.value;
+    // is swapped in the same tick. When the live selection is unreadable (see
+    // `_selectionOffset`), fall back to the caret the edit itself implies —
+    // right after the inserted/replaced text, which for a deletion is the
+    // deletion point — instead of the end of the text.
+    this._lastCaretOffset = this._selectionOffset() ?? d.newEnd;
+    this._lastCaretValue = next;
     this._emit("input");
     this._detectMention();
   }
 
   _onCompositionend(e) {
     if (this.disabled) return;
+    const prev = this.value ?? "";
     this._commitValue(e.target);
+    const next = this.value;
+    const d = this._reanchorTokens(prev, next);
     this._nativeEdit = true;
-    this._lastCaretOffset = this._selectionOffset();
-    this._lastCaretValue = this.value;
+    this._lastCaretOffset = this._selectionOffset() ?? d.newEnd;
+    this._lastCaretValue = next;
     this._emit("input");
   }
 
@@ -404,11 +418,13 @@ export class RefInput extends LitElement {
       const start = this.selectionStart;
       const end = this.selectionEnd;
       const val = this.value;
+      const next = val.slice(0, start) + "\n" + val.slice(end);
+      this._reanchorTokens(val, next);
       // The inserted newline shifts the caret target past the current
       // selection, so carry the desired offset explicitly; `updated()`
       // rebuilds the DOM (its text no longer matches) and restores it there.
       this._pendingCaret = start + 1;
-      this.value = val.slice(0, start) + "\n" + val.slice(end);
+      this.value = next;
       this._emit("input");
     }
   }
@@ -424,16 +440,23 @@ export class RefInput extends LitElement {
     const start = this.selectionStart;
     const end = this.selectionEnd;
     const val = this.value;
+    const next = val.slice(0, start) + text + val.slice(end);
+    this._reanchorTokens(val, next);
     // Carry the caret target (after the pasted text); `updated()` rebuilds
     // the DOM and restores the caret there.
     this._pendingCaret = start + text.length;
-    this.value = val.slice(0, start) + text + val.slice(end);
+    this.value = next;
     this._emit("input");
   }
 
   _onFocus() {
     this._focusValue = this.value;
-    this._lastCaretOffset = this._selectionOffset();
+    // Refresh the caret capture only when the live selection is readable;
+    // otherwise keep the last good capture (the browser restores that
+    // position on focus, so it is still accurate) instead of the end-of-text
+    // fallback, which would yank the caret on the next rebuild.
+    const live = this._selectionOffset();
+    if (live != null) this._lastCaretOffset = live;
     this._lastCaretValue = this.value;
   }
 
@@ -451,7 +474,7 @@ export class RefInput extends LitElement {
   _detectMention() {
     if (this.disabled) return this._closeMention();
     const val = this.value ?? "";
-    const caret = this._selectionOffset();
+    const caret = this._selectionOffset() ?? this.value.length;
     const lo = Math.max(0, caret - 64);
     const atRel = val.slice(lo, caret).lastIndexOf("@");
     if (atRel === -1) return this._closeMention();
@@ -540,7 +563,7 @@ export class RefInput extends LitElement {
       const m = this._mention;
       if (!m.open || m.prefix !== prefix) return;
       const val = this.value ?? "";
-      const caret = this._selectionOffset();
+      const caret = this._selectionOffset() ?? this.value.length;
       if (val.slice(m.start + 1, caret) !== prefix) return;
       this._acceptMention(0);
     }, 250);
@@ -555,12 +578,14 @@ export class RefInput extends LitElement {
       return;
     }
     const val = this.value ?? "";
-    const caret = this._selectionOffset();
+    const caret = this._selectionOffset() ?? this.value.length;
     const token = `@${it.slug}`;
     const before = val.slice(0, m.start);
     const after = val.slice(caret);
+    const next = before + token + after;
+    this._reanchorTokens(val, next);
     this._pendingCaret = m.start + token.length;
-    this.value = before + token + after;
+    this.value = next;
     this._closeMention();
     this._emit("input");
   }
@@ -590,31 +615,46 @@ export class RefInput extends LitElement {
   // so a Range's text length equals the caret offset in the value.
   _rangeOffset(container, offset) {
     const ed = this._ed;
-    if (!ed) return 0;
+    if (!ed) return null;
     const pre = document.createRange();
     pre.selectNodeContents(ed);
     try {
       pre.setEnd(container, offset);
     } catch {
-      return this.value.length;
+      return null;
     }
     return pre.toString().length;
   }
 
+  // The caret offset in `value`, or null when the live selection is
+  // unreadable. Some engines (notably Chromium with a shadow-DOM
+  // contenteditable) report the caret on a light-DOM ancestor (e.g. <body>)
+  // after a native edit, so the in-node offset cannot be read. Callers must
+  // fall back to something they computed themselves — the edit diff in the
+  // input handlers — rather than guessing the end of the text.
   _selectionOffset() {
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return this.value.length;
+    if (!sel || sel.rangeCount === 0) return null;
     const r = sel.getRangeAt(0);
     const ed = this._ed;
     if (ed && ed.contains(r.startContainer)) {
       return this._rangeOffset(r.startContainer, r.startOffset);
     }
-    // Some engines (notably Chromium with a shadow-DOM contenteditable) report
-    // the caret on a light-DOM ancestor (e.g. <body>) after a native edit, so
-    // the in-node offset is unreadable. The dominant case is end-of-text
-    // editing, so fall back there — 0 (the start) would yank the caret to the
-    // beginning of the line on the next rebuild, which is always wrong.
-    return this.value.length;
+    return null;
+  }
+
+  // Re-anchor the last parsed tokens across a value change so plain edits do
+  // not invalidate them (the pure mapping lives in reference-reanchor.js).
+  // Without it, typing one character before a chip shifts every later token
+  // past its recorded span, fails the exact-position match in
+  // `_rebuildSegments`, and forces a DOM rebuild on every keystroke — which
+  // is what made the caret jump to the end while editing mid-text. Returns
+  // the new edit region so the input handlers can also infer the caret from
+  // the edit itself when the live selection is unreadable.
+  _reanchorTokens(prev, next) {
+    const { tokens, newEnd } = reanchorTokens(prev, next, this._lastTokens);
+    this._lastTokens = tokens;
+    return { newEnd };
   }
 
   // Find the (text node, in-node offset) that corresponds to a char position.
@@ -766,7 +806,9 @@ export class RefInput extends LitElement {
   _onMousemove(e) {
     if (this.disabled) return;
     const target = e.target;
-    const chip = target instanceof Element ? target.closest(".chip[data-index]") : null;
+    const chip = target instanceof Element
+      ? target.closest(".chip[data-index]")
+      : null;
     if (!chip) {
       if (this._hover) this._hover = null;
       return;
@@ -814,7 +856,9 @@ export class RefInput extends LitElement {
         : "";
       s += `<span class="chip${
         seg.status === "missing" ? " missing" : ""
-      }" data-index="${seg.index}" style="--ref:${seg.color}">${icon}${esc(seg.raw)}</span>`;
+      }" data-index="${seg.index}" style="--ref:${seg.color}">${icon}${
+        esc(seg.raw)
+      }</span>`;
     }
     return s;
   }
@@ -848,7 +892,7 @@ export class RefInput extends LitElement {
     ) {
       restoreTo = Math.min(this._lastCaretOffset, this.value.length);
     } else if (hadFocus) {
-      restoreTo = this._selectionOffset();
+      restoreTo = this._selectionOffset() ?? this.value.length;
     } else {
       restoreTo = null;
     }
@@ -861,7 +905,9 @@ export class RefInput extends LitElement {
 
   render() {
     const hoverSeg = this._hover
-      ? this._segments.find((s) => s.type === "ref" && s.index === this._hover.index)
+      ? this._segments.find((s) =>
+        s.type === "ref" && s.index === this._hover.index
+      )
       : null;
     const hoverThumb = hoverSeg ? this._thumbs[this._thumbKey(hoverSeg)] : null;
     const previewUrl = hoverSeg?.visual ? (hoverThumb?.preview ?? null) : null;
@@ -900,7 +946,9 @@ export class RefInput extends LitElement {
                   (it, i) =>
                     html`
                       <div
-                        class="mention-item${i === this._mention.activeIndex ? " active" : ""}"
+                        class="mention-item${i === this._mention.activeIndex
+                          ? " active"
+                          : ""}"
                         role="option"
                         aria-selected=${i === this._mention.activeIndex}
                         data-i=${i}
@@ -909,7 +957,9 @@ export class RefInput extends LitElement {
                           this._acceptMention(i);
                         }}>
                         <span class="mention-slug">@${it.slug}</span>
-                        ${it.name ? html`<span class="mention-name">${it.name}</span>` : nothing}
+                        ${it.name
+                          ? html`<span class="mention-name">${it.name}</span>`
+                          : nothing}
                       </div>
                     `,
                 )}
@@ -922,7 +972,9 @@ export class RefInput extends LitElement {
               class="preview"
               style="left:${this._hover.left}px;top:${this._hover.top}px"
             >
-              ${previewUrl ? html`<img src=${previewUrl} alt="">` : previewLoading
+              ${previewUrl
+                ? html`<img src=${previewUrl} alt="">`
+                : previewLoading
                 ? html`
                   <div
                     class="caption"
