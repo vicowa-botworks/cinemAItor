@@ -806,9 +806,7 @@ export class RefInput extends LitElement {
   _onMousemove(e) {
     if (this.disabled) return;
     const target = e.target;
-    const chip = target instanceof Element
-      ? target.closest(".chip[data-index]")
-      : null;
+    const chip = target instanceof Element ? target.closest(".chip[data-index]") : null;
     if (!chip) {
       if (this._hover) this._hover = null;
       return;
@@ -856,9 +854,7 @@ export class RefInput extends LitElement {
         : "";
       s += `<span class="chip${
         seg.status === "missing" ? " missing" : ""
-      }" data-index="${seg.index}" style="--ref:${seg.color}">${icon}${
-        esc(seg.raw)
-      }</span>`;
+      }" data-index="${seg.index}" style="--ref:${seg.color}">${icon}${esc(seg.raw)}</span>`;
     }
     return s;
   }
@@ -905,9 +901,7 @@ export class RefInput extends LitElement {
 
   render() {
     const hoverSeg = this._hover
-      ? this._segments.find((s) =>
-        s.type === "ref" && s.index === this._hover.index
-      )
+      ? this._segments.find((s) => s.type === "ref" && s.index === this._hover.index)
       : null;
     const hoverThumb = hoverSeg ? this._thumbs[this._thumbKey(hoverSeg)] : null;
     const previewUrl = hoverSeg?.visual ? (hoverThumb?.preview ?? null) : null;
@@ -946,9 +940,7 @@ export class RefInput extends LitElement {
                   (it, i) =>
                     html`
                       <div
-                        class="mention-item${i === this._mention.activeIndex
-                          ? " active"
-                          : ""}"
+                        class="mention-item${i === this._mention.activeIndex ? " active" : ""}"
                         role="option"
                         aria-selected=${i === this._mention.activeIndex}
                         data-i=${i}
@@ -957,9 +949,7 @@ export class RefInput extends LitElement {
                           this._acceptMention(i);
                         }}>
                         <span class="mention-slug">@${it.slug}</span>
-                        ${it.name
-                          ? html`<span class="mention-name">${it.name}</span>`
-                          : nothing}
+                        ${it.name ? html`<span class="mention-name">${it.name}</span>` : nothing}
                       </div>
                     `,
                 )}
@@ -972,9 +962,7 @@ export class RefInput extends LitElement {
               class="preview"
               style="left:${this._hover.left}px;top:${this._hover.top}px"
             >
-              ${previewUrl
-                ? html`<img src=${previewUrl} alt="">`
-                : previewLoading
+              ${previewUrl ? html`<img src=${previewUrl} alt="">` : previewLoading
                 ? html`
                   <div
                     class="caption"

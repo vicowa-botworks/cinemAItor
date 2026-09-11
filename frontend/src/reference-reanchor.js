@@ -63,9 +63,7 @@ export function reanchorTokens(prev, next, tokens) {
   const kept = [];
   for (const t of Array.isArray(tokens) ? tokens : []) {
     if (!t) continue;
-    const raw = typeof t.raw === "string" && t.raw !== ""
-      ? t.raw
-      : prev.slice(t.start, t.end);
+    const raw = typeof t.raw === "string" && t.raw !== "" ? t.raw : prev.slice(t.start, t.end);
     let start;
     if (t.start >= d.oldEnd) start = t.start + shift;
     else if (t.end <= d.oldStart) start = t.start;
