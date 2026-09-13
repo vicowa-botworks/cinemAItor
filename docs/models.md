@@ -354,13 +354,35 @@ Submits a workflow graph to a ComfyUI server (local or hosted):
 
 Placeholders in workflow string values: `{{prompt}}`, `{{seed}}` (always rendered as an INT —
 numeric seeds pass through, non-numeric ones such as the benchmark seed `bench-<model-id>` are
-hashed deterministically, so INT inputs like `noise_seed` always validate), and `{{input:<i>}}`.
-Referenced inputs are uploaded first via `POST /upload/image` (unique filename, `overwrite=true`)
-and the returned name is substituted. The adapter then submits `POST /prompt` with a unique
+hashed deterministically, so INT inputs like `noise_seed` always validate), and `{{input:<i>}}`
+reference slots (up to 15 — see **Reference slots** below). Referenced inputs are uploaded first via
+`POST /upload/image` (unique filename keeping the reference's extension, `overwrite=true`) and the
+returned name is substituted — the extension matters, since video/audio loaders (`VHS_LoadVideo`,
+`LoadAudio`) infer their media kind from it. The adapter then submits `POST /prompt` with a unique
 `client_id`, polls `GET /history/<prompt_id>` every second, surfaces `execution_error` details from
 the entry status, collects every `images`/`gifs`/`videos` file ref from the node outputs, and
 downloads each through `GET /view`. An unreachable server, a rejected prompt, and a run with zero
 outputs all fail the job; cancellation issues `POST /interrupt`.
+
+**Reference slots (`{{input:<i>}}`):** a slot's kind is determined by its loader node's class name —
+a class containing `audio` (e.g. `LoadAudio`, media input `audio`) is an audio slot, one containing
+`video` (e.g. `VHS_LoadVideo`, media input `video`) is a video slot, and `image` (or any unknown
+class, so legacy image-only workflows keep working) is an image slot. Each job reference is
+classified by MIME type (file extension as fallback) and routed to a slot of its own kind, picker
+order kept within a kind — so a video reference can never land in an image slot, and one
+`VHS_LoadVideo` can feed both a video slot and a soundtrack slot at once (frame output →
+`ref_video_N`, audio output → `ref_video_audio_N`). Slots are optional: when the job carries fewer
+references than the workflow's highest index, the adapter drops the placeholder node(s) for the
+missing index and reverts the inputs that consumed them to their defaults (checked against
+`GET /object_info`, including autogrow-group members such as `ref_images.ref_image_0`; a node output
+that only feeds optional inputs, or a required input with a `default`, can be unwired). This makes
+one workflow serve 0–N references per kind. A placeholder must be the _entire value_ of a single
+input (embedding it in a larger string fails the job), and a dropped node whose output feeds a
+required input without a default fails the job with a naming error. Two fail-loud guards round out
+the contract: a job carrying references of a kind the workflow has **no slot for** is rejected up
+front (the references would be silently ignored — typical for a workflow still wired to hardcoded
+`LoadImage` filenames; the error names the kind and the loader node to add), and more references of
+a kind than the workflow has slots for fail the job the same way.
 
 **Using a hosted ComfyUI** (e.g. `https://comfyui.internal.example.com`):
 
@@ -372,9 +394,11 @@ outputs all fail the job; cancellation issues `POST /interrupt`.
   `GET /history/<prompt_id>` on the server: the fragment of a ComfyUI URL is the prompt id, and the
   entry's `prompt` field is exactly the graph the adapter submits.
 - Wire the placeholders: the prompt goes into the text-encode node(s) value as `{{prompt}}`, the
-  sampler seed node value as `"{{seed}}"`, and (for image-to-video/image-to-image) the image-load
-  node value as `"{{input:0}}"` — the app uploads the job's input asset (e.g. a panel preview)
-  before submitting.
+  sampler seed node value as `"{{seed}}"`, and each reference loader's media input as
+  `"{{input:0}}"`, `"{{input:1}}"`, … — image slots on `LoadImage` (`image`), video slots on
+  `VHS_LoadVideo` (`video`), audio slots on `LoadAudio` (`audio`) — the app uploads the job's input
+  assets (e.g. a panel preview) before submitting, routes each reference to a slot of its own kind,
+  and slots the job leaves empty are dropped automatically (see **Reference slots** above).
 - The workflow must contain at least one node whose outputs include an `images`/`gifs`/`videos`
   entry (e.g. Save Image, a video-combine node) — a run with zero such outputs fails the job.
 - Each job run submits the workflow once with the job's seed; re-running a job with the same seed is

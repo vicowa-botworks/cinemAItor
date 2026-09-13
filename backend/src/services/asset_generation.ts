@@ -271,9 +271,10 @@ function resolveReference(
       `Reference version ${asset.unique_slug} v${versionNumber} has no stored file`,
     );
   }
-  if (mediaKindForMime(version.mime_type) === null) {
+  const kind = mediaKindForMime(version.mime_type);
+  if (kind === null && !(version.mime_type ?? "").toLowerCase().startsWith("audio/")) {
     throw badRequest(
-      `Reference '${asset.unique_slug}' v${versionNumber} is not an image or video`,
+      `Reference '${asset.unique_slug}' v${versionNumber} is not an image, video, or audio file`,
     );
   }
   return { asset_id: asset.id, version_number: version.version_number };

@@ -701,7 +701,14 @@ export class LocalCliAdapter implements ModelAdapter {
 // String placeholders in the workflow: {{prompt}}, {{seed}} (always rendered
 // as an INT — numeric seeds pass through, non-numeric ones like benchmark
 // seeds hash deterministically; see comfySeedToInt), {{input:<i>}} (uploaded
-// to the server first; the returned file name is substituted).
+// to the server first; the returned file name is substituted). A slot whose
+// reference is absent is OPTIONAL: the placeholder node is dropped and the
+// inputs that consumed it are reverted to their defaults (resolved via GET
+// /object_info), so one workflow serves any reference count. Slots are typed
+// by their loader node's media kind (refSlotKindForClass) and job references
+// are routed to slots of their own kind (refMediaKind), picker order kept
+// within a kind — a video reference can't land in an image slot. A kind with
+// references but no matching slot, or more references than slots, fails loud.
 // ---------------------------------------------------------------------------
 
 interface ComfyFileRef {
@@ -753,6 +760,139 @@ function substituteWorkflow(
   return walk(workflow) as Record<string, unknown>;
 }
 
+interface ComfyClassSpec {
+  input?: {
+    required?: Record<string, unknown>;
+    optional?: Record<string, unknown>;
+  };
+}
+
+async function fetchComfyObjectInfo(
+  endpoint: string,
+  hooks: AdapterHooks,
+): Promise<Record<string, ComfyClassSpec> | null> {
+  try {
+    const res = await fetchWithTimeout(`${endpoint}/object_info`, {}, 60000);
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, ComfyClassSpec>;
+  } catch {
+    hooks.onLog?.(
+      "Could not fetch ComfyUI /object_info — dropping reference nodes without resolving consumer defaults",
+    );
+    return null;
+  }
+}
+
+function comfyInputSpec(
+  spec: ComfyClassSpec | undefined,
+  inputName: string,
+): { section: "required" | "optional"; value: unknown } | null {
+  const inputs = spec?.input ?? {};
+  const required = inputs.required ?? {};
+  const optional = inputs.optional ?? {};
+  if (inputName in required) return { section: "required", value: required[inputName] };
+  if (inputName in optional) return { section: "optional", value: optional[inputName] };
+  // Dynamic/autogrow group members are keyed "<group>.<member>" (e.g.
+  // ref_images.ref_image_0) — resolve the group spec instead.
+  const dot = inputName.indexOf(".");
+  if (dot > 0) {
+    const group = inputName.slice(0, dot);
+    if (group in required) return { section: "required", value: required[group] };
+    if (group in optional) return { section: "optional", value: optional[group] };
+  }
+  return null;
+}
+
+function isOmittableComfyInput(section: "required" | "optional", value: unknown): boolean {
+  if (section === "optional") return true;
+  if (!Array.isArray(value)) return false;
+  const options = value[1];
+  if (options && typeof options === "object" && !Array.isArray(options)) {
+    if ("default" in options) return true;
+    if ("template" in options) return true; // dynamic/autogrow group
+  }
+  return false;
+}
+
+function standaloneInputIndex(value: string): number | null {
+  const m = value.match(/^\{\{\s*input:(\d+)\s*\}\}$/);
+  return m ? Number(m[1]) : null;
+}
+
+export type ReferenceKind = "image" | "video" | "audio";
+
+/**
+ * Media kind a {{input:<i>}} slot accepts, from its loader node's class_type
+ * (what the node loads, not the input's declared type): audio loaders, video
+ * loaders, image loaders — unknown classes default to image (the legacy case).
+ */
+export function refSlotKindForClass(classType: unknown): ReferenceKind {
+  const name = typeof classType === "string" ? classType.toLowerCase() : "";
+  if (name.includes("audio")) return "audio";
+  if (name.includes("video")) return "video";
+  if (name.includes("image")) return "image";
+  return "image";
+}
+
+const REF_MEDIA_EXTS: Record<ReferenceKind, string[]> = {
+  image: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "avif", "heic", "heif"],
+  video: ["mp4", "mov", "webm", "mkv", "avi", "m4v", "mpg", "mpeg", "wmv"],
+  audio: ["wav", "mp3", "flac", "ogg", "oga", "opus", "m4a", "aac", "aiff", "weba"],
+};
+
+/** Classify a job reference by media kind — mime first, extension fallback. */
+export function refMediaKind(
+  mime: string | null | undefined,
+  format: string | null | undefined,
+): ReferenceKind {
+  const m = (mime ?? "").toLowerCase();
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  const ext = (format ?? "").toLowerCase();
+  for (const kind of ["image", "video", "audio"] as const) {
+    if (REF_MEDIA_EXTS[kind].includes(ext)) return kind;
+  }
+  return "image";
+}
+
+function scanInputPlaceholders(
+  workflow: Record<string, unknown>,
+): { exact: Map<string, Set<number>>; embedded: Map<string, Set<number>> } {
+  const exact = new Map<string, Set<number>>();
+  const embedded = new Map<string, Set<number>>();
+  const add = (map: Map<string, Set<number>>, nodeId: string, index: number): void => {
+    let set = map.get(nodeId);
+    if (!set) {
+      set = new Set<number>();
+      map.set(nodeId, set);
+    }
+    set.add(index);
+  };
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    if (typeof node !== "object" || node === null) continue;
+    const inputs = (node as Record<string, unknown>).inputs;
+    if (typeof inputs !== "object" || inputs === null) continue;
+    for (const value of Object.values(inputs)) {
+      if (typeof value !== "string") continue;
+      const index = standaloneInputIndex(value);
+      if (index !== null) {
+        add(exact, nodeId, index);
+        continue;
+      }
+      for (const m of value.matchAll(/\{\{\s*input:(\d+)\s*\}\}/g)) {
+        add(embedded, nodeId, Number(m[1]));
+      }
+    }
+  }
+  return { exact, embedded };
+}
+
+function linksToDropped(value: unknown, dropped: Set<string>): boolean {
+  return Array.isArray(value) && value.length === 2 &&
+    typeof value[0] === "string" && dropped.has(value[0]);
+}
+
 export class ComfyUIAdapter implements ModelAdapter {
   readonly backend = "comfyui";
 
@@ -796,29 +936,86 @@ export class ComfyUIAdapter implements ModelAdapter {
         "Workflow references {{height}} but no output height is set — choose a non-Auto aspect ratio/resolution or add a default_height to the model",
       );
     }
+    const scan = scanInputPlaceholders(workflow as Record<string, unknown>);
     const referencedInputs = [
       ...new Set(
         [...workflowJson.matchAll(/\{\{\s*input:(\d+)\s*\}\}/g)].map((m) => Number(m[1])),
       ),
     ].sort((a, b) => a - b);
-    for (const i of referencedInputs) {
-      if (i >= input.inputs.length) {
+    // Slots are typed by the media kind their loader node loads; job
+    // references are routed to slots of their own kind (picker order kept
+    // within a kind), so a video reference can't land in an image slot.
+    const workflowMap = workflow as Record<string, Record<string, unknown>>;
+    const slotKinds = new Map<number, ReferenceKind>();
+    for (const placeholders of [scan.exact, scan.embedded]) {
+      for (const [nodeId, indices] of placeholders) {
+        const node = workflowMap[nodeId];
+        const classType = typeof node === "object" && node !== null ? node["class_type"] : null;
+        const kind = refSlotKindForClass(classType);
+        for (const i of indices) slotKinds.set(i, kind);
+      }
+    }
+    const slotsByKind: Record<ReferenceKind, number[]> = { image: [], video: [], audio: [] };
+    for (const [i, kind] of slotKinds) slotsByKind[kind].push(i);
+    for (const list of Object.values(slotsByKind)) list.sort((a, b) => a - b);
+    const refIndicesByKind: Record<ReferenceKind, number[]> = { image: [], video: [], audio: [] };
+    input.inputs.forEach((ref, i) => {
+      refIndicesByKind[refMediaKind(ref.mime_type, ref.format)].push(i);
+    });
+    const REF_SLOT_LOADER: Record<ReferenceKind, string> = {
+      image: 'LoadImage "image"',
+      video: 'VHS_LoadVideo "video"',
+      audio: 'LoadAudio "audio"',
+    };
+    const assignment = new Map<number, number>(); // slot index -> input index
+    for (const kind of ["image", "video", "audio"] as const) {
+      const slots = slotsByKind[kind];
+      const refs = refIndicesByKind[kind];
+      if (refs.length > 0 && slots.length === 0) {
         throw new Error(
-          `Workflow references input ${i} but the job has ${input.inputs.length} input(s)`,
+          `Job has ${refs.length} ${kind} reference(s) but the workflow has no ${kind} slot — they would be silently ignored. Add a ${kind} loader node (e.g. ${
+            REF_SLOT_LOADER[kind]
+          }) with the value "{{input:<i>}}" as its entire media input`,
         );
+      }
+      if (refs.length > slots.length) {
+        throw new Error(
+          `Job has ${refs.length} ${kind} reference(s) but the workflow has only ${slots.length} ${kind} slot(s) — remove ${
+            refs.length - slots.length
+          } reference(s) or add more ${kind} slot(s) to the workflow`,
+        );
+      }
+      refs.forEach((refIdx, j) => assignment.set(slots[j], refIdx));
+    }
+    const absentInputs = referencedInputs.filter((i) => !assignment.has(i));
+    if (absentInputs.length > 0) {
+      for (const i of absentInputs) {
+        for (const [nodeId, indices] of scan.embedded) {
+          if (indices.has(i)) {
+            throw new Error(
+              `Workflow node ${nodeId} has {{input:${i}}} embedded in a larger value — optional inputs must be the entire value of a single input (e.g. a LoadImage "image" field) so the node can be dropped when the reference is absent`,
+            );
+          }
+        }
       }
     }
 
     const uploads = new Map<number, string>();
-    for (const i of referencedInputs) {
+    const assignedSlots = [...assignment.keys()].sort((a, b) => a - b);
+    for (const slot of assignedSlots) {
       if (hooks.isCancelled()) throw new CancelledError();
-      const ref = input.inputs[i];
+      const refIdx = assignment.get(slot) as number;
+      const ref = input.inputs[refIdx];
+      const kind = slotKinds.get(slot) ?? "image";
       const filename = `cinemaitor-${crypto.randomUUID()}.${ref.format ?? "png"}`;
       const bytes = await Deno.readFile(ref.file_path);
       const form = new FormData();
       form.append("image", new Blob([bytes]), filename);
       form.append("overwrite", "true");
-      hooks.onProgress(10, `Uploading input ${i + 1}/${input.inputs.length} to ComfyUI`);
+      hooks.onProgress(
+        10,
+        `Uploading reference ${refIdx + 1}/${input.inputs.length} (${kind}) to ComfyUI`,
+      );
       let uploadRes: Response;
       try {
         uploadRes = await fetchWithTimeout(`${endpoint}/upload/image`, {
@@ -837,7 +1034,55 @@ export class ComfyUIAdapter implements ModelAdapter {
       if (!body.name) {
         throw new Error("ComfyUI /upload/image returned no file name");
       }
-      uploads.set(i, body.name);
+      uploads.set(slot, body.name);
+    }
+
+    // Optional inputs: drop the placeholder node(s) for references this job
+    // does not provide, reverting the inputs that consumed them to defaults.
+    if (absentInputs.length > 0) {
+      const dropped = new Set<string>();
+      for (const i of absentInputs) {
+        for (const [nodeId, indices] of scan.exact) {
+          if (indices.has(i)) dropped.add(nodeId);
+        }
+      }
+      if (dropped.size > 0) {
+        const objectInfo = await fetchComfyObjectInfo(endpoint, hooks);
+        for (const [nodeId, node] of Object.entries(workflowMap)) {
+          if (dropped.has(nodeId) || typeof node !== "object" || node === null) continue;
+          const rawInputs = node.inputs;
+          if (typeof rawInputs !== "object" || rawInputs === null) continue;
+          const nodeInputs = rawInputs as Record<string, unknown>;
+          for (const [key, value] of Object.entries(nodeInputs)) {
+            if (!linksToDropped(value, dropped)) continue;
+            const classType = node.class_type;
+            const found = typeof classType === "string" && objectInfo
+              ? comfyInputSpec(objectInfo[classType], key)
+              : null;
+            if (found && !isOmittableComfyInput(found.section, found.value)) {
+              throw new Error(
+                `Workflow node ${nodeId} (${
+                  String(classType)
+                }) input '${key}' links to a dropped reference node and has no default — provide the missing reference or make the slot optional in the workflow`,
+              );
+            }
+            delete nodeInputs[key];
+          }
+        }
+        for (const nodeId of dropped) delete workflowMap[nodeId];
+        if (Object.keys(workflowMap).length === 0) {
+          throw new Error(
+            `Workflow is empty after dropping placeholder node(s) for reference index ${
+              absentInputs.join(", ")
+            } — provide the reference(s) or patch the workflow`,
+          );
+        }
+        hooks.onLog?.(
+          `Dropped ${dropped.size} workflow node(s) for reference index ${
+            absentInputs.join(", ")
+          } not provided by this job`,
+        );
+      }
     }
 
     const rendered = substituteWorkflow(workflow as Record<string, unknown>, {

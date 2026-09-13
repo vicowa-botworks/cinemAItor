@@ -860,7 +860,9 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
       references: {
         type: "array",
-        maxItems: 8,
+        maxItems: 15,
+        description: "Reference assets (image, video, or audio files). Each maps to a " +
+          "workflow {{input:<i>}} slot of matching media kind (ComfyUI models).",
         items: ref("AssetReference"),
       },
       device: deviceProperty(),
@@ -907,7 +909,9 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       },
       references: {
         type: "array",
-        maxItems: 8,
+        maxItems: 15,
+        description: "Reference assets (image, video, or audio files). Each maps to a " +
+          "workflow {{input:<i>}} slot of matching media kind (ComfyUI models).",
         items: ref("AssetReference"),
       },
       device: deviceProperty(),

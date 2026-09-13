@@ -9,6 +9,9 @@ export const IMAGE_ASSET_TYPES = ["image", "character", "location", "prop"];
 /** Asset types that can be generated or edited as video content. */
 export const VIDEO_ASSET_TYPES = ["video"];
 
+/** Audio asset types — referenceable from video generation. */
+export const AUDIO_ASSET_TYPES = ["audio", "music", "sfx", "voiceover", "ambience"];
+
 export function isImageAssetType(assetType) {
   return IMAGE_ASSET_TYPES.includes(assetType);
 }
