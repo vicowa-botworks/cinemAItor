@@ -106,8 +106,8 @@ app-root (main router)
   │   │   │               the prompt box is the input; the run's result renders in place with
   │   │   │               Use as prompt / Copy / Dismiss + model & model-skill pickers (chosen
   │   │   │               generation model pre-selected; docs/llm.md))
- │   └── asset-reference-picker (pick existing image/video assets as generation references,
- │   │                           active version by default, max 8)
+  │   └── asset-reference-picker (pick existing image/video/audio assets as generation
+  │   │                           references, active version by default, max 15)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore/delete,
   │   │              per-version generation Details (prompt/model/seed/settings parsed from the
   │   │              version's provenance metadata),
@@ -363,8 +363,12 @@ server.ts (entry point)
   │   │   local_cli job cpu↔cuda: cancels an in-flight run, re-queues on the new
   │   │   device, all other settings intact); in-process runner with leases + recovery
    │   ├── Adapters (services/adapters.ts): mock (deterministic), local_cli (user command per
-    │   │   candidate, {prompt}/{seed}/{input:<i>}/{width}/{height}/{output} placeholders), comfyui (workflow graph
-    │   │   → /upload/image + /prompt + /history poll + /view); runner resolves inputs, merges
+     │   │   candidate, {prompt}/{seed}/{input:<i>}/{width}/{height}/{output} placeholders), comfyui (workflow graph
+     │   │   → /upload/image + /prompt + /history poll + /view; {{input:<i>}} reference slots typed by the
+     │   │   loader class (image/video/audio) — references routed to slots of their own kind, optional:
+     │   │   missing-reference placeholder nodes dropped and consumers unwired via object_info defaults
+     │   │   (autogrow-group members incl.), kind mismatch / overflow rejected up front); runner resolves
+     │   │   inputs, merges
       │   │   model default_settings (then the job's quality profile over them,
       │   │   docs/generation_profiles.md), passes per-job workDir; HF-origin models (repository_url on
       │   │   the HF base) get the effective HF token injected into the CLI env (HF_TOKEN) so

@@ -176,7 +176,7 @@ function validateAssetUpdates(
 function parseReferences(value: unknown): AssetReferenceInput[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw badRequest("references must be an array");
-  if (value.length > 8) throw badRequest("At most 8 references");
+  if (value.length > 15) throw badRequest("At most 15 references");
   return value.map((entry, index) => {
     if (typeof entry !== "object" || entry === null) {
       throw badRequest(`references[${index}] must be an object`);

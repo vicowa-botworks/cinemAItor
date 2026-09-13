@@ -1,12 +1,19 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
-import { IMAGE_ASSET_TYPES, isImageAssetType, VIDEO_ASSET_TYPES } from "./asset-generation.js";
+import {
+  AUDIO_ASSET_TYPES,
+  IMAGE_ASSET_TYPES,
+  isImageAssetType,
+  VIDEO_ASSET_TYPES,
+} from "./asset-generation.js";
 
-export const MAX_REFERENCES = 8;
+export const MAX_REFERENCES = 15;
 
 /**
- * Pick existing image/video assets to attach as generation references.
- * Selections use the ACTIVE version of each asset (the backend default).
+ * Pick existing image/video/audio assets to attach as generation references.
+ * Audio assets are offered only for video-kind generation (the models that
+ * accept audio references, e.g. MiniMax H3's ref_audios). Selections use the
+ * ACTIVE version of each asset (the backend default).
  *
  * Events: "change" → detail.references = [{ asset_id }]
  */
@@ -175,8 +182,14 @@ export class AssetReferencePicker extends LitElement {
 
   _candidateTypes() {
     if (this.kind === "image") return IMAGE_ASSET_TYPES;
-    if (this.kind === "video") return VIDEO_ASSET_TYPES;
-    return [...IMAGE_ASSET_TYPES, ...VIDEO_ASSET_TYPES];
+    if (this.kind === "video") {
+      return [...IMAGE_ASSET_TYPES, ...VIDEO_ASSET_TYPES, ...AUDIO_ASSET_TYPES];
+    }
+    return [
+      ...IMAGE_ASSET_TYPES,
+      ...VIDEO_ASSET_TYPES,
+      ...AUDIO_ASSET_TYPES,
+    ];
   }
 
   async _load() {
@@ -263,7 +276,7 @@ export class AssetReferencePicker extends LitElement {
     if (!this.isConnected) return html``;
     if (this._candidates.length === 0) {
       return html`<div class="hint">
-        No image or video assets with an active version yet.
+        No media assets with an active version yet.
       </div>`;
     }
     return html`
@@ -326,7 +339,9 @@ export class AssetReferencePicker extends LitElement {
           : html`${this._renderRows()}`}
         <div class="hint">
           Up to ${MAX_REFERENCES} references — the active version of each
-          asset is used.
+          asset is used.${this.kind === "video"
+            ? " Images, videos and audio are all accepted."
+            : ""}
         </div>
       </div>
     `;

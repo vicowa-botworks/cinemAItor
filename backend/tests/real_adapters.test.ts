@@ -17,6 +17,8 @@ import {
   comfySeedToInt,
   ComfyUIAdapter,
   LocalCliAdapter,
+  refMediaKind,
+  refSlotKindForClass,
   renderCliArgs,
 } from "../src/services/adapters.ts";
 
@@ -58,6 +60,46 @@ echo "PROMPT=$prompt SEED=$seed CAND=$cand FROM=$from HFTOKEN=\${HF_TOKEN:-} DEV
 const fakeSleepScript = `#!/bin/sh
 sleep 30
 `;
+
+// ---------------------------------------------------------------------------
+// refMediaKind / refSlotKindForClass (kind-aware reference routing)
+// ---------------------------------------------------------------------------
+
+describe("refMediaKind", () => {
+  it("prefers the mime type over the extension", () => {
+    assertEquals(refMediaKind("audio/wav", "png"), "audio");
+  });
+
+  it("falls back to the extension when no mime is known", () => {
+    assertEquals(refMediaKind(null, "mp4"), "video");
+    assertEquals(refMediaKind(undefined, "wav"), "audio");
+    assertEquals(refMediaKind(null, "jpg"), "image");
+  });
+
+  it("treats unknown media as an image", () => {
+    assertEquals(refMediaKind(null, "bin"), "image");
+    assertEquals(refMediaKind(null, null), "image");
+  });
+});
+
+describe("refSlotKindForClass", () => {
+  it("recognises audio loader nodes", () => {
+    assertEquals(refSlotKindForClass("LoadAudio"), "audio");
+    assertEquals(refSlotKindForClass("load-audio"), "audio");
+    assertEquals(refSlotKindForClass("PRIM_AudioLoader"), "audio");
+  });
+
+  it("recognises video loader nodes", () => {
+    assertEquals(refSlotKindForClass("VHS_LoadVideo"), "video");
+    assertEquals(refSlotKindForClass("LoadVideo"), "video");
+  });
+
+  it("defaults image loaders and unknown nodes to image", () => {
+    assertEquals(refSlotKindForClass("LoadImage"), "image");
+    assertEquals(refSlotKindForClass("ImageScale"), "image");
+    assertEquals(refSlotKindForClass("KSampler"), "image");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // candidateSeed
@@ -686,6 +728,7 @@ interface FakeComfyState {
   uploaded: string[];
   lastWorkflow: string | null;
   historyCalls: number;
+  objectInfo: Record<string, unknown>;
 }
 
 function startFakeComfyUi(state: FakeComfyState): { url: string; shutdown: () => void } {
@@ -758,6 +801,9 @@ function startFakeComfyUi(state: FakeComfyState): { url: string; shutdown: () =>
       if (req.method === "POST" && url.pathname === "/interrupt") {
         return Response.json({ status: "ok" });
       }
+      if (req.method === "GET" && url.pathname === "/object_info") {
+        return Response.json(state.objectInfo);
+      }
       return Response.json({ error: "not found" }, { status: 404 });
     },
   );
@@ -777,7 +823,7 @@ describe("ComfyUIAdapter", () => {
 
   beforeEach(() => {
     dir = Deno.makeTempDirSync({ prefix: "cinemaitor_comfyui_adapter_" });
-    state = { uploaded: [], lastWorkflow: null, historyCalls: 0 };
+    state = { uploaded: [], lastWorkflow: null, historyCalls: 0, objectInfo: {} };
     fake = startFakeComfyUi(state);
   });
 
@@ -960,7 +1006,7 @@ describe("ComfyUIAdapter", () => {
     );
   });
 
-  it("rejects workflows that reference missing inputs", async () => {
+  it("fails when dropping a missing reference leaves an empty workflow", async () => {
     const adapter = new ComfyUIAdapter();
     await assertRejects(
       () =>
@@ -978,7 +1024,492 @@ describe("ComfyUIAdapter", () => {
           noopHooks,
         ),
       Error,
-      "references input 1",
+      "Workflow is empty after dropping",
     );
+  });
+
+  it("drops placeholder nodes for absent references and unwires optional consumers", async () => {
+    state.objectInfo = {
+      RefToVideo: {
+        input: {
+          required: { prompt: ["STRING", {}] },
+          optional: {
+            ref_images: ["COMFY_AUTOGROW_V3", {
+              template: {},
+              prefix: "ref_image_",
+              min: 0,
+              max: 9,
+            }],
+          },
+        },
+      },
+    };
+    const adapter = new ComfyUIAdapter();
+    await adapter.generate(
+      {
+        jobType: "text_to_video",
+        seed: "7",
+        settings: comfySettings(fake.url, {
+          workflow: {
+            "137": { class_type: "LoadImage", inputs: { image: "{{input:0}}" } },
+            "140": {
+              class_type: "RefToVideo",
+              inputs: { prompt: "{{prompt}}", "ref_images.ref_image_0": ["137", 0] },
+            },
+          },
+        }),
+        inputs: [],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    assert(!("137" in submitted));
+    assertEquals(submitted["140"].inputs["ref_images.ref_image_0"], undefined);
+    assertEquals(submitted["140"].inputs.prompt, "x");
+  });
+
+  it("omits required-with-default consumer inputs when the reference is absent", async () => {
+    const input0 = `${dir}/source.png`;
+    Deno.writeTextFileSync(input0, "source-bytes");
+    state.objectInfo = {
+      RefToVideo: {
+        input: {
+          required: { prompt: ["STRING", {}], image: ["IMAGE", { default: "" }] },
+          optional: {
+            ref_images: ["COMFY_AUTOGROW_V3", {
+              template: {},
+              prefix: "ref_image_",
+              min: 0,
+              max: 9,
+            }],
+          },
+        },
+      },
+    };
+    const adapter = new ComfyUIAdapter();
+    await adapter.generate(
+      {
+        jobType: "image_to_video",
+        seed: "7",
+        settings: comfySettings(fake.url, {
+          workflow: {
+            "7": { class_type: "LoadImage", inputs: { image: "{{input:0}}" } },
+            "8": { class_type: "LoadImage", inputs: { image: "{{input:1}}" } },
+            "140": {
+              class_type: "RefToVideo",
+              inputs: {
+                prompt: "{{prompt}}",
+                image: ["8", 0],
+                "ref_images.ref_image_0": ["7", 0],
+              },
+            },
+          },
+        }),
+        inputs: [{
+          asset_id: "a1",
+          version_number: 1,
+          file_path: input0,
+          format: "png",
+          mime_type: "image/png",
+        }],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    assert(!("8" in submitted));
+    assertEquals(submitted["140"].inputs.image, undefined);
+    assertEquals(submitted["140"].inputs["ref_images.ref_image_0"], ["7", 0]);
+    assertStringIncludes(state.lastWorkflow!, state.uploaded[0]);
+  });
+
+  it("fails when a dropped reference feeds a required consumer input without a default", async () => {
+    state.objectInfo = {
+      KSampler: {
+        input: { required: { seed: ["INT", {}], image: ["IMAGE", {}] } },
+      },
+    };
+    const adapter = new ComfyUIAdapter();
+    await assertRejects(
+      () =>
+        adapter.generate(
+          {
+            jobType: "image_to_image",
+            seed: "1",
+            settings: comfySettings(fake.url, {
+              workflow: {
+                "7": { class_type: "LoadImage", inputs: { image: "{{input:0}}" } },
+                "3": {
+                  class_type: "KSampler",
+                  inputs: { seed: "{{seed}}", image: ["7", 0] },
+                },
+              },
+            }),
+            inputs: [],
+            promptText: "x",
+            workDir: dir,
+          },
+          noopHooks,
+        ),
+      Error,
+      "has no default",
+    );
+  });
+
+  it("rejects a placeholder embedded in a larger value for an absent reference", async () => {
+    const adapter = new ComfyUIAdapter();
+    await assertRejects(
+      () =>
+        adapter.generate(
+          {
+            jobType: "image_to_image",
+            seed: "1",
+            settings: comfySettings(fake.url, {
+              workflow: {
+                "3": { class_type: "KSampler", inputs: { text: "{{prompt}}" } },
+                "7": { class_type: "LoadImage", inputs: { image: "prefix_{{input:0}}.png" } },
+              },
+            }),
+            inputs: [],
+            promptText: "x",
+            workDir: dir,
+          },
+          noopHooks,
+        ),
+      Error,
+      "embedded in a larger value",
+    );
+  });
+
+  it("fails loud when references are provided but the workflow has no slot of their kind", async () => {
+    const input0 = `${dir}/source.png`;
+    Deno.writeTextFileSync(input0, "source-bytes");
+    const adapter = new ComfyUIAdapter();
+    await assertRejects(
+      () =>
+        adapter.generate(
+          {
+            jobType: "image_to_image",
+            seed: "1",
+            settings: comfySettings(fake.url, { workflow: t2iWorkflow }),
+            inputs: [{
+              asset_id: "a1",
+              version_number: 1,
+              file_path: input0,
+              format: "png",
+              mime_type: "image/png",
+            }],
+            promptText: "x",
+            workDir: dir,
+          },
+          noopHooks,
+        ),
+      Error,
+      "no image slot",
+    );
+  });
+
+  it("fails loud when the job has more references of a kind than slots", async () => {
+    const input0 = `${dir}/a.png`;
+    const input1 = `${dir}/b.png`;
+    Deno.writeTextFileSync(input0, "a");
+    Deno.writeTextFileSync(input1, "b");
+    const adapter = new ComfyUIAdapter();
+    await assertRejects(
+      () =>
+        adapter.generate(
+          {
+            jobType: "image_to_video",
+            seed: "1",
+            settings: comfySettings(fake.url),
+            inputs: [
+              {
+                asset_id: "a1",
+                version_number: 1,
+                file_path: input0,
+                format: "png",
+                mime_type: "image/png",
+              },
+              {
+                asset_id: "a2",
+                version_number: 1,
+                file_path: input1,
+                format: "png",
+                mime_type: "image/png",
+              },
+            ],
+            promptText: "x",
+            workDir: dir,
+          },
+          noopHooks,
+        ),
+      Error,
+      "has only 1 image slot(s)",
+    );
+  });
+
+  it("routes mixed-kind references to the slots of their kind (picker order)", async () => {
+    const img = `${dir}/face.png`;
+    const vid = `${dir}/walk.mp4`;
+    const aud = `${dir}/voice.wav`;
+    Deno.writeTextFileSync(img, "img");
+    Deno.writeTextFileSync(vid, "vid");
+    Deno.writeTextFileSync(aud, "aud");
+    const adapter = new ComfyUIAdapter();
+    await adapter.generate(
+      {
+        jobType: "text_to_video",
+        seed: "9",
+        settings: comfySettings(fake.url, {
+          workflow: {
+            // Slot indices deliberately out of kind order.
+            "20": { class_type: "VHS_LoadVideo", inputs: { video: "{{input:1}}" } },
+            "30": { class_type: "LoadAudio", inputs: { audio: "{{input:2}}" } },
+            "10": { class_type: "LoadImage", inputs: { image: "{{input:0}}" } },
+            "140": {
+              class_type: "RefToVideo",
+              inputs: {
+                prompt: "{{prompt}}",
+                "ref_images.ref_image_0": ["10", 0],
+                "ref_videos.ref_video_0": ["20", 0],
+                "ref_audios.ref_audio_0": ["30", 0],
+              },
+            },
+          },
+        }),
+        // Job order (video, image, audio) differs from slot order (image, video, audio).
+        inputs: [
+          {
+            asset_id: "v1",
+            version_number: 1,
+            file_path: vid,
+            format: "mp4",
+            mime_type: "video/mp4",
+          },
+          {
+            asset_id: "i1",
+            version_number: 1,
+            file_path: img,
+            format: "png",
+            mime_type: "image/png",
+          },
+          {
+            asset_id: "a1",
+            version_number: 1,
+            file_path: aud,
+            format: "wav",
+            mime_type: "audio/wav",
+          },
+        ],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    // Uploads happen in slot-index order (image, video, audio here).
+    const [imgName, vidName, audName] = state.uploaded;
+    assertMatch(imgName, /\.png$/);
+    assertMatch(vidName, /\.mp4$/);
+    assertMatch(audName, /\.wav$/);
+    // Each kind's reference landed on its own kind's slot, in picker order.
+    assertEquals(submitted["10"].inputs.image, imgName);
+    assertEquals(submitted["20"].inputs.video, vidName);
+    assertEquals(submitted["30"].inputs.audio, audName);
+  });
+
+  it("fills a kind's slots in ascending index order regardless of node order", async () => {
+    const a = `${dir}/a.png`;
+    const b = `${dir}/b.png`;
+    Deno.writeTextFileSync(a, "a");
+    Deno.writeTextFileSync(b, "b");
+    const adapter = new ComfyUIAdapter();
+    await adapter.generate(
+      {
+        jobType: "image_to_video",
+        seed: "5",
+        settings: comfySettings(fake.url, {
+          workflow: {
+            "31": { class_type: "LoadImage", inputs: { image: "{{input:3}}" } },
+            "30": { class_type: "LoadImage", inputs: { image: "{{input:0}}" } },
+            "140": {
+              class_type: "RefToVideo",
+              inputs: {
+                prompt: "{{prompt}}",
+                "ref_images.ref_image_0": ["30", 0],
+                "ref_images.ref_image_1": ["31", 0],
+              },
+            },
+          },
+        }),
+        inputs: [
+          {
+            asset_id: "a1",
+            version_number: 1,
+            file_path: a,
+            format: "png",
+            mime_type: "image/png",
+          },
+          {
+            asset_id: "a2",
+            version_number: 1,
+            file_path: b,
+            format: "png",
+            mime_type: "image/png",
+          },
+        ],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    const [first, second] = state.uploaded;
+    assertEquals(submitted["30"].inputs.image, first);
+    assertEquals(submitted["31"].inputs.image, second);
+  });
+
+  it("names the missing loader in the no-slot error", async () => {
+    const vid = `${dir}/walk.mp4`;
+    Deno.writeTextFileSync(vid, "vid");
+    const adapter = new ComfyUIAdapter();
+    await assertRejects(
+      () =>
+        adapter.generate(
+          {
+            jobType: "image_to_video",
+            seed: "1",
+            settings: comfySettings(fake.url),
+            inputs: [{
+              asset_id: "v1",
+              version_number: 1,
+              file_path: vid,
+              format: "mp4",
+              mime_type: "video/mp4",
+            }],
+            promptText: "x",
+            workDir: dir,
+          },
+          noopHooks,
+        ),
+      Error,
+      "VHS_LoadVideo",
+    );
+  });
+
+  // The MiniMax workflow shape: a VHS_LoadVideo slot carries widget values
+  // alongside its {{input:i}} media input and feeds TWO consumers (the video's
+  // frame batch and its audio track). Both the fill and the drop paths must
+  // treat it as one optional slot.
+  const vhsWorkflow = {
+    "20": {
+      class_type: "VHS_LoadVideo",
+      inputs: {
+        video: "{{input:0}}",
+        force_rate: 0,
+        custom_width: 0,
+        custom_height: 0,
+        frame_load_cap: 0,
+        skip_first_frames: 0,
+        select_every_nth: 1,
+      },
+    },
+    "140": {
+      class_type: "RefToVideo",
+      inputs: {
+        prompt: "{{prompt}}",
+        "ref_videos.ref_video_0": ["20", 0],
+        "ref_video_audios.ref_video_audio_0": ["20", 2],
+      },
+    },
+  };
+  const vhsObjectInfo = {
+    RefToVideo: {
+      input: {
+        required: { prompt: ["STRING", {}] },
+        optional: {
+          ref_videos: ["COMFY_AUTOGROW_V3", { template: {}, prefix: "ref_video_", min: 0, max: 3 }],
+          ref_video_audios: ["COMFY_AUTOGROW_V3", {
+            template: {},
+            prefix: "ref_video_audio_",
+            min: 0,
+            max: 3,
+          }],
+        },
+      },
+    },
+  };
+
+  it("fills a video slot with widget values, keeping the widgets intact", async () => {
+    const vid = `${dir}/walk.mp4`;
+    Deno.writeTextFileSync(vid, "vid");
+    const adapter = new ComfyUIAdapter();
+    await adapter.generate(
+      {
+        jobType: "image_to_video",
+        seed: "9",
+        settings: comfySettings(fake.url, { workflow: vhsWorkflow }),
+        inputs: [{
+          asset_id: "v1",
+          version_number: 1,
+          file_path: vid,
+          format: "mp4",
+          mime_type: "video/mp4",
+        }],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    assertMatch(state.uploaded[0], /\.mp4$/);
+    assertEquals(submitted["20"].inputs.video, state.uploaded[0]);
+    assertEquals(submitted["20"].inputs.frame_load_cap, 0);
+    assertEquals(submitted["20"].inputs.select_every_nth, 1);
+    assertEquals(submitted["140"].inputs["ref_videos.ref_video_0"], ["20", 0]);
+    assertEquals(submitted["140"].inputs["ref_video_audios.ref_video_audio_0"], ["20", 2]);
+  });
+
+  it("drops a video slot with widget values and unwires both consumers", async () => {
+    state.objectInfo = vhsObjectInfo;
+    const adapter = new ComfyUIAdapter();
+    await adapter.generate(
+      {
+        jobType: "text_to_video",
+        seed: "9",
+        settings: comfySettings(fake.url, { workflow: vhsWorkflow }),
+        inputs: [],
+        promptText: "x",
+        workDir: dir,
+      },
+      noopHooks,
+    );
+    assert(state.lastWorkflow !== null);
+    const submitted = JSON.parse(state.lastWorkflow!) as Record<string, {
+      inputs: Record<string, unknown>;
+    }>;
+    assert(!("20" in submitted));
+    assertEquals(submitted["140"].inputs["ref_videos.ref_video_0"], undefined);
+    assertEquals(submitted["140"].inputs["ref_video_audios.ref_video_audio_0"], undefined);
+    assertEquals(submitted["140"].inputs.prompt, "x");
+    assertEquals(state.uploaded.length, 0);
   });
 });

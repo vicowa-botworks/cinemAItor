@@ -155,9 +155,9 @@ itself is created synchronously in the new-asset case, with no versions yet):
 
 - `kind`: `image` or `video`. The task type is derived from the inputs: no references →
   `text_to_image` / `text_to_video`; with references → `image_to_image` / `image_to_video`.
-- `references` (optional, max 8): `{ asset_id, version_number? }` — existing image/video assets (the
-  active version by default) attached as job inputs. Each reference requires read permission; the
-  target asset requires write permission.
+- `references` (optional, max 15): `{ asset_id, version_number? }` — existing image/video/audio
+  assets (the active version by default) attached as job inputs. Each reference requires read
+  permission; the target asset requires write permission.
 - `include_current` (edit endpoint only): attach the asset's active version as a reference.
 - `prompt` (required), `model_id` (optional — first enabled model for the task otherwise), `seed`
   (optional integer string), `candidates` (1–8, default 2).

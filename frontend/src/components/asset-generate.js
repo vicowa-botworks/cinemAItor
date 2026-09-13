@@ -4,6 +4,7 @@ import "./ref-input.js";
 import { buildAssistRequest, skillMatchesModel } from "../ai-assist-request.js";
 import {
   ASPECT_RATIO_PRESETS,
+  AUDIO_ASSET_TYPES,
   generationKindForAsset,
   generationTaskType,
   IMAGE_ASSET_TYPES,
@@ -408,7 +409,11 @@ export class AssetGenerate extends VramGuard(LitElement) {
   // user removed is respected (suppressed) until the mention itself is gone.
   _onPromptRefs(e) {
     const tokens = e.detail?.tokens ?? [];
-    const types = this.kind === "video" ? VIDEO_ASSET_TYPES : IMAGE_ASSET_TYPES;
+    // Video-kind generation accepts image, video and audio references (the
+    // MiniMax H3 surface); image-kind takes images only.
+    const types = this.kind === "video"
+      ? [...IMAGE_ASSET_TYPES, ...VIDEO_ASSET_TYPES, ...AUDIO_ASSET_TYPES]
+      : IMAGE_ASSET_TYPES;
     const mentioned = [];
     for (const t of tokens) {
       const a = t?.asset;
