@@ -57,12 +57,16 @@ read-only (it never mutates creative objects).
   `preview_asset_version_id` + status `preview_ready` on success.
 - **Scene** → `image_to_video` when a linked panel already has a preview (the panel's image is the
   video input), otherwise `text_to_video`. With no image input and no enabled `text_to_video` model
-  the request is rejected with a clear message. Output lands on a per-scene `scene_*` asset.
+  the request is rejected with a clear message. The scene prompt's resolved `@references` are
+  appended to the job's input asset versions after any panel-preview input, in prompt order,
+  deduplicated (a reference already present as the preview input is not added twice). Output lands
+  on a per-scene `scene_*` asset.
 - **Batch** (`batch-generate`) → one job per shot, all sharing the scene's input (i2v when a linked
   panel has a preview, otherwise t2v). Each shot uses its own prompt when present, otherwise the
-  scene prompt; shots without any prompt are skipped with a reason. On success the runner links each
-  shot's `generated_asset_version_id` and status. 202 returns
-  `{job_type, model_id, jobs: [{shot_id, job_id, asset_id}], skipped: [{shot_id, reason}]}`.
+  scene prompt; shots without any prompt are skipped with a reason. The effective prompt's resolved
+  `@references` are appended to the job's inputs after the shared input, in prompt order,
+  deduplicated. On success the runner links each shot's `generated_asset_version_id` and status. 202
+  returns `{job_type, model_id, jobs: [{shot_id, job_id, asset_id}], skipped: [{shot_id, reason}]}`.
 - Model selection: explicit `model_id` must be enabled and support the task; otherwise the first
   enabled model for the task is used. A 202 response returns the job id for polling (jobs API).
 - **Device / VRAM gate**: the preview, scene, and batch endpoints accept `device` (`cpu` | `cuda`).

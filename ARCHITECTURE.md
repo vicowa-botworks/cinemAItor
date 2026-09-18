@@ -394,8 +394,11 @@ server.ts (entry point)
   ├── Storyboard/scene/shot routes (auth middleware, project-permission gated)
  │   ├── Storyboards + ordered panels; scenes + ordered shots
  │   ├── Prompt versioning + reference resolution on creative objects
- │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; runner
- │   │   links preview/clip outputs back to panels and shots
+  │   ├── generate-preview (t2i) and scene generate (i2v/t2v) -> job queue; the effective
+  │   │   prompt's resolved @references become job input asset versions (after any
+  │   │   panel-preview input, deduplicated; batch shots use the shot prompt's refs,
+  │   │   falling back to the scene prompt's); runner links preview/clip outputs back
+  │   │   to panels and shots
 │   ├── POST /projects/:id/scenes/from-script — bulk-create draft scenes from a parsed
 │   │   script (SCN-015; validated, max 200 entries, prompts attached)
 │   ├── GET /projects/:id/continuity (MS-8) — deterministic read-only continuity report over
