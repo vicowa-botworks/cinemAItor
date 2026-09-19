@@ -69,6 +69,13 @@ read-only (it never mutates creative objects).
   returns `{job_type, model_id, jobs: [{shot_id, job_id, asset_id}], skipped: [{shot_id, reason}]}`.
 - Model selection: explicit `model_id` must be enabled and support the task; otherwise the first
   enabled model for the task is used. A 202 response returns the job id for polling (jobs API).
+- **Auto-enhance (UI, frontend-only)** — the board and the scene detail expose "Auto-enhance prompt
+  on generate" + "Auto-apply model skills" checkboxes (persisted in localStorage). When enabled, the
+  UI runs the shared `enhance_prompt` assist on the panel prompt before `generate-preview` (and on
+  the scene/shot prompts before scene/batch runs), saving the result as a new prompt version, then
+  generates normally. The endpoints themselves are unchanged — a skipped/failing enhance just
+  proceeds with the raw prompt. See `docs/llm.md` (UI flows → Auto-enhance) for model/skill
+  resolution and the deterministic skill pick.
 - **Device / VRAM gate**: the preview, scene, and batch endpoints accept `device` (`cpu` | `cuda`).
   Without it a `local_cli` runner decides for itself (GPU when enough VRAM is free, CPU otherwise).
   The UI runs the same pre-generation VRAM check as asset generation (free VRAM vs the model's

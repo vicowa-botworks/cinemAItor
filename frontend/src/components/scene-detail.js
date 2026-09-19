@@ -5,6 +5,7 @@ import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js"
 import "./audio-dialog.js";
 import "./ai-assist-dialog.js";
 import { VramGuard } from "./vram-guard.js";
+import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
 
 const SCENE_STATUSES = [
   "draft",
@@ -157,6 +158,22 @@ export class SceneDetail extends VramGuard(LitElement) {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
       gap: 10px;
+    }
+
+    .check-row {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--color-text-muted);
+      cursor: pointer;
     }
 
     textarea,
@@ -318,6 +335,12 @@ export class SceneDetail extends VramGuard(LitElement) {
     this._modelChoice = "";
     this._seed = "";
     this._pollTimer = null;
+    this._enhancePrefs = loadPrefs(window.localStorage, "scene");
+  }
+
+  _setEnhancePref(key, value) {
+    this._enhancePrefs = { ...this._enhancePrefs, [key]: value };
+    savePrefs(window.localStorage, "scene", this._enhancePrefs);
   }
 
   async connectedCallback() {
@@ -481,6 +504,36 @@ export class SceneDetail extends VramGuard(LitElement) {
                     }}>
                     Design scene with AI
                   </button>
+                  <button
+                    class="btn-small"
+                    ?disabled=${this.busy}
+                    @click=${() => {
+                      this.assistPurpose = "enhance_prompt";
+                      this.assistTarget = "scene";
+                      this.assistInitial = s.prompt?.content ??
+                        `Scene: ${s.name ?? ""} (${s.status ?? ""})`;
+                      this.assistOpen = true;
+                    }}>
+                    Enhance prompt with AI
+                  </button>
+                </div>
+                <div class="check-row">
+                  <label class="check">
+                    <input type="checkbox" .checked=${this._enhancePrefs
+                      .autoEnhance}
+                      @change=${(e) =>
+                        this._setEnhancePref(
+                          "autoEnhance",
+                          e.target.checked,
+                        )} />
+                    Auto-enhance prompt on generate
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" .checked=${this._enhancePrefs
+                      .autoSkill}
+                      @change=${(e) => this._setEnhancePref("autoSkill", e.target.checked)} />
+                    Auto-apply model skills
+                  </label>
                 </div>
                 ${this.assistOpen && this.assistTarget === "scene"
                   ? html`
@@ -940,7 +993,81 @@ export class SceneDetail extends VramGuard(LitElement) {
     }
   }
 
+  // Mirrors the backend's task-type pick: the chosen model's own type when one
+  // is selected, otherwise i2v when a linked panel carries a preview.
+  async _sceneTaskType() {
+    if (this._modelChoice) {
+      const model = this.models.find((m) => m.id === this._modelChoice);
+      const types = model?.task_types ?? [];
+      if (types.includes("image_to_video")) return "image_to_video";
+      if (types.length > 0) return types[0];
+    }
+    if (this.scene.storyboard_id) {
+      try {
+        const board = await api.getStoryboard(this.scene.storyboard_id);
+        const panel = (board.panels ?? []).find(
+          (p) => p.linked_scene_id === this._sceneId && p.preview_asset_version_id,
+        );
+        if (panel) return "image_to_video";
+      } catch {
+        // fall through to text_to_video
+      }
+    }
+    return "text_to_video";
+  }
+
+  // Enhances the scene prompt (and, for batch, each shot's own prompt) via the
+  // LLM assist endpoint and saves the results before the generate call.
+  async _autoEnhance(batch) {
+    const taskType = await this._sceneTaskType();
+    const modelId = this._modelChoice || this._enhancePrefs.modelId || "";
+    const scenePrompt = this.scene.prompt?.content ?? "";
+    this.busy = true;
+    this.error = "";
+    this.notice = "Enhancing prompt with AI…";
+    try {
+      const enhanced = await runEnhance(api, {
+        text: scenePrompt,
+        taskType,
+        modelId,
+        autoSkill: this._enhancePrefs.autoSkill,
+      });
+      if (!enhanced || enhanced === scenePrompt) {
+        this.notice = "No enhancement available — generating as-is.";
+        return;
+      }
+      this.scene = await api.updateScene(this._sceneId, { prompt: enhanced });
+      if (batch) {
+        for (const shot of this.shots) {
+          const shotPrompt = (shot.prompt?.content ?? "").trim();
+          if (!shotPrompt) continue;
+          const enhancedShot = await runEnhance(api, {
+            text: shotPrompt,
+            taskType,
+            modelId,
+            autoSkill: this._enhancePrefs.autoSkill,
+          });
+          if (enhancedShot && enhancedShot !== shotPrompt) {
+            await api.updateShot(this._sceneId, shot.id, {
+              prompt: enhancedShot,
+            });
+          }
+        }
+        this.shots = await api.listShots(this._sceneId);
+      }
+      this.notice = "Prompt enhanced with AI.";
+    } catch (err) {
+      this.error = err.message || "Failed to enhance prompt.";
+    } finally {
+      this.busy = false;
+    }
+  }
+
   async _generate(batch) {
+    if (this._enhancePrefs.autoEnhance) {
+      await this._autoEnhance(batch);
+      if (this.error) return;
+    }
     // The backend picks i2v (linked panel preview) or t2v when no model is
     // chosen, so gate on the whole candidate set — never silently fall to CPU.
     const model = this._modelChoice
@@ -951,7 +1078,9 @@ export class SceneDetail extends VramGuard(LitElement) {
     const options = {};
     if (device) options.device = device;
     if (this._modelChoice) options.model_id = this._modelChoice;
-    if (String(this._seed ?? "").trim()) options.seed = String(this._seed).trim();
+    if (String(this._seed ?? "").trim()) {
+      options.seed = String(this._seed).trim();
+    }
     this.busy = true;
     this.error = "";
     this.notice = null;

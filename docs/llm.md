@@ -112,6 +112,30 @@ All three return `503 LLM_NOT_CONFIGURED` when the LLM is not configured.
 - **Shared dialog (ai-assist-dialog)** — `write_script` / `extend_script` (script-detail), per-panel
   `enhance_prompt` (storyboard-detail), and audio `enhance_prompt` (audio-dialog) keep the dialog
   flow with its own context field.
+- **Auto-enhance (all generation prompt inputs)** — scene-detail, storyboard-detail, and
+  asset-generate each expose two checkboxes next to their prompt/generate controls: **Auto-enhance
+  prompt on generate** and **Auto-apply model skills**. When the first is checked, the run path
+  enhances the prompt through the same `enhance_prompt` assist purpose _before_ enqueuing and saves
+  the result as a new prompt version (scene/panel/shot prompt; the asset prompt stays in the form).
+  scene-detail additionally carries an explicit "Enhance prompt with AI" button (dialog flow) beside
+  its prompt input. Behavior:
+  - **Model resolution** — an explicit choice wins (the surface's model picker), else the first
+    enabled model for the run's task type (mirrors the backend auto-pick).
+  - **Task type** — scene/shot: `image_to_video` when a linked panel carries a preview (or the
+    chosen model only does i2v), else `text_to_video`; panel: `text_to_image`; asset: by kind +
+    references (same rule as the generate call).
+  - **Skill auto-pick** (second checkbox) — deterministic over the enabled assistant skills that fit
+    the resolved model: model-scoped skills first, then a prompt _with_ `@references` prefers the
+    most specialized (fewest `model_task_types`, e.g. `sys-minimax-h3-reference`), a prompt
+    _without_ references the broadest (e.g. `sys-minimax-h3-video`); name breaks ties.
+  - **Persistence** — the checkbox states survive across sessions in localStorage
+    (`cinemaitor:enhance:scene` / `:panel` / `:asset`).
+  - **Failure is non-blocking** — no enabled model, an LLM error, or unchanged content skips the
+    enhance step and the generation proceeds with the raw prompt (a notice explains the skip).
+  - Batch scene runs enhance the scene prompt once and each shot's own prompt separately.
+
+The shared pure helpers (token detection, skill pick, prefs, the enhance runner) live in
+`frontend/src/components/prompt-enhance.js` (unit-tested, DOM-free).
 
 ## Skills as prompt knowledge
 
