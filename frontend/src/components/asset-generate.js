@@ -2,6 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import "./ref-input.js";
 import { buildAssistRequest, skillMatchesModel } from "../ai-assist-request.js";
+import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
 import {
   ASPECT_RATIO_PRESETS,
   AUDIO_ASSET_TYPES,
@@ -175,6 +176,13 @@ export class AssetGenerate extends VramGuard(LitElement) {
       width: auto;
     }
 
+    .check-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+
     .assist-block {
       display: flex;
       flex-direction: column;
@@ -301,6 +309,12 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this._modelCache = new Map();
     this._mentionedRefs = [];
     this._suppressedRefs = new Set();
+    this._enhancePrefs = loadPrefs(window.localStorage, "asset");
+  }
+
+  _setEnhancePref(key, value) {
+    this._enhancePrefs = { ...this._enhancePrefs, [key]: value };
+    savePrefs(window.localStorage, "asset", this._enhancePrefs);
   }
 
   firstUpdated() {
@@ -312,7 +326,10 @@ export class AssetGenerate extends VramGuard(LitElement) {
   }
 
   updated(changed) {
-    if (changed.has("kind") || changed.has("references") || changed.has("includeCurrent")) {
+    if (
+      changed.has("kind") || changed.has("references") ||
+      changed.has("includeCurrent")
+    ) {
       this._loadModels();
     }
   }
@@ -395,7 +412,9 @@ export class AssetGenerate extends VramGuard(LitElement) {
     // A ref the user removed while it is still @mentioned is suppressed so the
     // next parse does not snap it back into the list.
     for (const r of this.references) {
-      if (!nextIds.has(r.asset_id) && this._mentionedRefs.includes(r.asset_id)) {
+      if (
+        !nextIds.has(r.asset_id) && this._mentionedRefs.includes(r.asset_id)
+      ) {
         this._suppressedRefs.add(r.asset_id);
       }
     }
@@ -454,7 +473,9 @@ export class AssetGenerate extends VramGuard(LitElement) {
         aspect_ratio: this.aspectRatio,
         resolution: this.resolution,
       });
-      if (sizeFields.aspect_ratio) payload.aspect_ratio = sizeFields.aspect_ratio;
+      if (sizeFields.aspect_ratio) {
+        payload.aspect_ratio = sizeFields.aspect_ratio;
+      }
       if (sizeFields.resolution) payload.resolution = sizeFields.resolution;
     }
     if (this.references.length > 0) payload.references = this.references;
@@ -500,6 +521,24 @@ export class AssetGenerate extends VramGuard(LitElement) {
       return;
     }
 
+    if (this._enhancePrefs.autoEnhance) {
+      this.busy = true;
+      this.status = "Enhancing prompt with AI…";
+      const enhanced = await runEnhance(api, {
+        text: this.prompt,
+        taskType: this._taskType(),
+        modelId: this._selectedModel()?.id ?? "",
+        autoSkill: this._enhancePrefs.autoSkill,
+      });
+      if (enhanced && enhanced !== this.prompt) {
+        this.prompt = enhanced;
+        if (!this._isEdit() && !this.slugTouched) {
+          this.slug = slugify(enhanced);
+        }
+      } else {
+        this.status = "No enhancement available — generating as-is.";
+      }
+    }
     const payload = this._buildPayload();
 
     // Pre-submit VRAM choice for local_cli models: opens the dialog when the
@@ -631,8 +670,10 @@ export class AssetGenerate extends VramGuard(LitElement) {
   }
 
   _assistMismatch() {
-    const model = this.assistModels.find((m) => m.id === this.assistModelId) ?? null;
-    const skill = this.assistSkills.find((s) => s.id === this.assistSkillId) ?? null;
+    const model = this.assistModels.find((m) => m.id === this.assistModelId) ??
+      null;
+    const skill = this.assistSkills.find((s) => s.id === this.assistSkillId) ??
+      null;
     return Boolean(model && skill) && !skillMatchesModel(skill, model);
   }
 
@@ -768,6 +809,18 @@ export class AssetGenerate extends VramGuard(LitElement) {
               `
               : ""}
           </div>
+          <div class="check-row">
+            <label class="check">
+              <input type="checkbox" .checked=${this._enhancePrefs.autoEnhance}
+                @change=${(e) => this._setEnhancePref("autoEnhance", e.target.checked)} />
+              Auto-enhance prompt on generate
+            </label>
+            <label class="check">
+              <input type="checkbox" .checked=${this._enhancePrefs.autoSkill}
+                @change=${(e) => this._setEnhancePref("autoSkill", e.target.checked)} />
+              Auto-apply model skills
+            </label>
+          </div>
           ${this.assistMetaLoaded && !this.assistConfigured
             ? html`
               <div class="assist-hint">
@@ -789,7 +842,8 @@ export class AssetGenerate extends VramGuard(LitElement) {
           ${this.assistResult
             ? html`
               <div class="assist-result">
-                <textarea readonly .value=${this.assistResult} rows="6"></textarea>
+                <textarea readonly .value=${this
+                  .assistResult} rows="6"></textarea>
                 <div class="assist-actions">
                   <button type="button" class="btn" @click=${this._applyAssist}>
                     Use as prompt
@@ -1039,7 +1093,8 @@ export class AssetGenerate extends VramGuard(LitElement) {
                 ? "Generation queued — candidates will appear as new versions when the job finishes."
                 : "Generation queued — the asset is created now and gets its first version when the job finishes."}
               &nbsp;
-              <a href="#/jobs">Open job monitor (job ${this.queuedResult.job_id})</a>
+              <a href="#/jobs">Open job monitor (job ${this.queuedResult
+                .job_id})</a>
             </div>
           `
           : ""}

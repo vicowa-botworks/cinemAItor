@@ -105,7 +105,9 @@ app-root (main router)
   │   │   │               for local_cli models, inline "Enhance with AI" below the prompt input —
   │   │   │               the prompt box is the input; the run's result renders in place with
   │   │   │               Use as prompt / Copy / Dismiss + model & model-skill pickers (chosen
-  │   │   │               generation model pre-selected; docs/llm.md))
+   │   │   │               generation model pre-selected), "auto-enhance prompt on generate" +
+   │   │   │               "auto-apply model skills" checkboxes (persisted; enhance runs before
+   │   │   │               queueing via the shared prompt-enhance runner; docs/llm.md))
   │   └── asset-reference-picker (pick existing image/video/audio assets as generation
   │   │                           references, active version by default, max 15)
   ├── asset-detail (preview, master/proxy switch, metadata, versions/restore/delete,
@@ -129,8 +131,14 @@ app-root (main router)
 │   │              parsing with status badges, asset picker, broken-reference repair
 │   │              (retarget a missing token to a live asset in the draft text),
 │   │              history view/restore)
-├── reference-repair (shared pure token-span rewrite for broken @reference repair —
-│   │                 unit-tested)
+ ├── reference-repair (shared pure token-span rewrite for broken @reference repair —
+ │   │                 unit-tested)
+ ├── prompt-enhance (shared prompt-enhance support for every generation prompt input:
+ │   │              @reference-token detection, deterministic model-skill auto-pick (scoped
+ │   │              skills first; refs present → most specialized task-type scope, absent →
+ │   │              broadest), localStorage prefs (autoEnhance/autoSkill/modelId per surface),
+ │   │              and the enhance runner over POST /llm/assist enhance_prompt — unit-tested,
+ │   │              DOM-free; consumed by scene-detail, storyboard-detail, asset-generate)
 ├── model-manager (registry list/filters, hardware report + warnings, per-model
 │   │              health check + checksum verify, per-model benchmark run + results
 │   │              table (WS 14) — the Benchmark button is disabled (with an explanatory
@@ -184,17 +192,22 @@ app-root (main router)
 │   │             ai-assist-dialog (write_script / extend_script → review in editor); version
 │   │             history + restore, name/status + delete, #/script/:id — see docs/scripts.md)
 ├── storyboard-list (board list + create; project filter via #/storyboards?project=)
-├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
-│   │                 live preview polling, per-panel Enhance with AI (shared ai-assist-dialog,
-│   │                 pre-selects the preview model))
+ ├── storyboard-detail (panels: CRUD, versioned panel prompts, t2i preview → job queue,
+ │   │                 live preview polling, per-panel Enhance with AI (shared ai-assist-dialog,
+ │   │                 pre-selects the preview model), board-level "auto-enhance prompt on
+ │   │                 generate" + "auto-apply model skills" checkboxes (persisted) that
+ │   │                 enhance + save the panel prompt before previewing)
 ├── scene-list (scene list + create; project/storyboard filters; Import script — paste/load a
 │   │             screenplay, preview the parsed Fountain-lite scenes, bulk-create them as
 │   │             draft scenes with prompts (SCN-015, parser in script-parse.js); continuity
 │   │             check panel (MS-8) — project continuity report with severity-chipped issues)
 ├── script-parse (shared pure Fountain-lite screenplay parser + scene-input mapping —
 │   │              unit-tested, DOM-free; consumed by scene-list import UI)
-├── scene-detail (shots: CRUD, scene/shot prompts, i2v/t2v single + batch → job queue,
-│   │            clip playback, embedded audio generation)
+ ├── scene-detail (shots: CRUD, scene/shot prompts, "Enhance prompt with AI" button on the
+ │   │            scene prompt (shared ai-assist-dialog), "auto-enhance prompt on generate" +
+ │   │            "auto-apply model skills" checkboxes (persisted) that enhance + save the
+ │   │            scene/shot prompts before single/batch runs, i2v/t2v single + batch → job
+ │   │            queue, clip playback, embedded audio generation)
 ├── review-board (job candidate comparison with two-candidate A/B mode — synced play/seek +
 │   │             quick approve; approve / reject / shortlist + notes)
 ├── skills-list (v1 skill system: list, create/edit JSON definitions + markdown-aware

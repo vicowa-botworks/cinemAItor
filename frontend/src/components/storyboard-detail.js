@@ -4,6 +4,7 @@ import "./ref-input.js";
 import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js";
 import { VramGuard } from "./vram-guard.js";
 import { reconcilePreviews } from "./preview-reconcile.js";
+import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
 
 const POLL_MS = 5000;
 const PANEL_FIELDS = [
@@ -285,6 +286,22 @@ export class StoryboardDetail extends VramGuard(LitElement) {
       align-items: center;
     }
 
+    .check-row {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--color-text-muted);
+      cursor: pointer;
+    }
+
     .details {
       border-top: 1px solid var(--color-border);
       padding-top: 12px;
@@ -394,8 +411,14 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     this.assistOpen = false;
     this.assistContext = "";
     this.assistPanelId = null;
+    this._enhancePrefs = loadPrefs(window.localStorage, "panel");
     this._timer = null;
     this._boardId = null;
+  }
+
+  _setEnhancePref(key, value) {
+    this._enhancePrefs = { ...this._enhancePrefs, [key]: value };
+    savePrefs(window.localStorage, "panel", this._enhancePrefs);
   }
 
   async connectedCallback() {
@@ -472,9 +495,20 @@ export class StoryboardDetail extends VramGuard(LitElement) {
                               Rename
                             </button>
             `}
+          <div class="check-row" style="margin-left:auto; margin-top:0;">
+            <label class="check">
+              <input type="checkbox" .checked=${this._enhancePrefs.autoEnhance}
+                @change=${(e) => this._setEnhancePref("autoEnhance", e.target.checked)} />
+              Auto-enhance prompt on generate
+            </label>
+            <label class="check">
+              <input type="checkbox" .checked=${this._enhancePrefs.autoSkill}
+                @change=${(e) => this._setEnhancePref("autoSkill", e.target.checked)} />
+              Auto-apply model skills
+            </label>
+          </div>
           <button
             class="btn btn-small btn-danger"
-            style="margin-left:auto;"
             @click=${this._deleteBoard}>
             Delete
           </button>
@@ -528,7 +562,8 @@ export class StoryboardDetail extends VramGuard(LitElement) {
                 ${panel.shot_number
                   ? html`<span class="shot-number">${panel.shot_number}</span>`
                   : null}
-                <span class="panel-description">${panel.description ?? ""}</span>
+                <span class="panel-description">${panel.description ??
+                  ""}</span>
                 <span class="chip ${panel.status}">${panel.status}</span>
                 <button
                   class="btn-small"
@@ -626,7 +661,10 @@ export class StoryboardDetail extends VramGuard(LitElement) {
                           type="text"
                           .value=${draft.camera_settings_json ?? ""}
                           @input=${(e) =>
-                            this._setDraftField("camera_settings_json", e.target.value)}>
+                            this._setDraftField(
+                              "camera_settings_json",
+                              e.target.value,
+                            )}>
                       </div>
                     </div>
 
@@ -655,7 +693,8 @@ export class StoryboardDetail extends VramGuard(LitElement) {
                     </div>
 
                     <div class="panel-actions">
-                      <button class="btn-small btn-danger" ?disabled=${this.saving}
+                      <button class="btn-small btn-danger" ?disabled=${this
+                        .saving}
                         @click=${() => this._deletePanel(panel)}>
                         Delete panel
                       </button>
@@ -697,9 +736,10 @@ export class StoryboardDetail extends VramGuard(LitElement) {
   async _loadModels() {
     if (this.models.length > 0) return;
     try {
-      this.models = (await api.listModels({ task_type: "text_to_image" })).filter(
-        (m) => m.enabled,
-      );
+      this.models = (await api.listModels({ task_type: "text_to_image" }))
+        .filter(
+          (m) => m.enabled,
+        );
     } catch {
       this.models = [];
     }
@@ -746,7 +786,10 @@ export class StoryboardDetail extends VramGuard(LitElement) {
   _replacePreviews() {
     // Plan the reconciliation from the (fresh) panels; keep/fetch/revoke is
     // pure + unit-tested in preview-reconcile.js.
-    const { keep, fetch, revoke } = reconcilePreviews(this.panels, this.previewUrls);
+    const { keep, fetch, revoke } = reconcilePreviews(
+      this.panels,
+      this.previewUrls,
+    );
     for (const url of revoke) URL.revokeObjectURL(url);
     this.previewUrls = keep;
     for (const panelId of fetch) this._fetchPreview(panelId);
@@ -841,7 +884,9 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     this.error = "";
     this.notice = null;
     try {
-      const updated = await api.updatePanel(this._boardId, panel.id, { prompt });
+      const updated = await api.updatePanel(this._boardId, panel.id, {
+        prompt,
+      });
       this.panels = this.panels.map((p) => (p.id === panel.id ? updated : p));
       this.notice = "Prompt saved.";
     } catch (err) {
@@ -932,6 +977,21 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     this.error = "";
     this.notice = null;
     try {
+      if (this._enhancePrefs.autoEnhance) {
+        const promptText = panel.prompt?.content ?? "";
+        this.notice = "Enhancing prompt with AI…";
+        const enhanced = await runEnhance(api, {
+          text: promptText,
+          taskType: "text_to_image",
+          modelId: d.model_id || this._panelModelId() ||
+            this._enhancePrefs.modelId || "",
+          autoSkill: this._enhancePrefs.autoSkill,
+        });
+        if (enhanced && enhanced !== promptText) {
+          await this._savePrompt(panel, enhanced);
+          if (this.error) return;
+        }
+      }
       const options = {};
       if (device) options.device = device;
       if (modelId) options.model_id = modelId;
