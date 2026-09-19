@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { closeDb } from "../src/db/database.ts";
-import { createAsset, createAssetVersion } from "../src/db/assets.ts";
+import { createAsset, createAssetVersion, getAssetBySlug } from "../src/db/assets.ts";
 import { createProject } from "../src/db/projects.ts";
 import { registerModel } from "../src/db/models.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
@@ -688,6 +688,202 @@ describe("storyboards and scenes api", () => {
           ownerToken,
         );
         assertEquals(bareFail.status, 400);
+      })();
+    });
+  });
+
+  it("attaches scene and shot @references to generation job inputs", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        // Two image assets with on-disk versions (the runner stats input files).
+        const sloopFile = "/tmp/ci-refs-sloop.png";
+        const crewFile = "/tmp/ci-refs-crew.png";
+        await Deno.writeTextFile(sloopFile, "sloop");
+        await Deno.writeTextFile(crewFile, "crew");
+        const mkRef = (slug: string, file: string) => {
+          const asset = createAsset(
+            {
+              unique_slug: slug,
+              display_name: slug,
+              asset_type: "image",
+              library_scope: "global",
+            },
+            ownerId,
+          );
+          createAssetVersion(asset.id, ownerId, {
+            content_hash: "c".repeat(64),
+            file_path: file,
+            format: "png",
+            mime_type: "image/png",
+            file_size: 5,
+          });
+          return asset.id;
+        };
+        const sloopId = mkRef("ref_sloop", sloopFile);
+        const crewId = mkRef("ref_crew", crewFile);
+
+        const t2vModelId = registerModel(ownerId, {
+          name: "api-mock-t2v-refs",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["text_to_video"],
+          enabled: true,
+        }).id;
+
+        const jobInputs = async (jobId: string) =>
+          ((await req(
+            "GET",
+            `/api/v1/jobs/${jobId}`,
+            undefined,
+            ownerToken,
+          )).json as {
+            input_asset_versions: { asset_id: string; version_number: number }[];
+          }).input_asset_versions;
+
+        // 1) t2v scene generation carries the scene prompt's @references in
+        //    prompt order.
+        const scene = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Sea", prompt: "@ref_sloop passes @ref_crew" },
+          ownerToken,
+        );
+        assertEquals(scene.status, 201);
+        const sceneId = (scene.json as { id: string }).id;
+        const gen = await req(
+          "POST",
+          `/api/v1/scenes/${sceneId}/generate`,
+          { model_id: t2vModelId },
+          ownerToken,
+        );
+        assertEquals(gen.status, 202);
+        assertEquals((gen.json as { job_type: string }).job_type, "text_to_video");
+        const genJob = (gen.json as { job_id: string }).job_id;
+        const done1 = await waitForJob(ownerToken, genJob, ["succeeded", "failed"]);
+        assertEquals(done1.status, "succeeded");
+        assertEquals(await jobInputs(genJob), [
+          { asset_id: sloopId, version_number: 1 },
+          { asset_id: crewId, version_number: 1 },
+        ]);
+
+        // 2) i2v: the linked panel preview stays at index 0 and a duplicated
+        //    reference is attached once.
+        const board = await req(
+          "POST",
+          "/api/v1/storyboards",
+          { project_id: projectId, name: "Board" },
+          ownerToken,
+        );
+        const boardId = (board.json as { id: string }).id;
+        const panel = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels`,
+          { panel_order: 1, prompt: "a harbor at dusk" },
+          ownerToken,
+        );
+        const panelId = (panel.json as { id: string }).id;
+        const preview = await req(
+          "POST",
+          `/api/v1/storyboards/${boardId}/panels/${panelId}/generate-preview`,
+          { model_id: t2iModelId },
+          ownerToken,
+        );
+        assertEquals(preview.status, 202);
+        const previewJob = (preview.json as { job_id: string }).job_id;
+        const previewDone = await waitForJob(ownerToken, previewJob, [
+          "succeeded",
+          "failed",
+        ]);
+        assertEquals(previewDone.status, "succeeded");
+
+        const scene2 = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Dusk", prompt: "@ref_crew and @ref_crew again" },
+          ownerToken,
+        );
+        const scene2Id = (scene2.json as { id: string }).id;
+        const link = await req(
+          "PATCH",
+          `/api/v1/storyboards/${boardId}/panels/${panelId}`,
+          { linked_scene_id: scene2Id },
+          ownerToken,
+        );
+        assertEquals(link.status, 200);
+
+        const i2vModelId = registerModel(ownerId, {
+          name: "api-mock-i2v-refs",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["image_to_video"],
+          enabled: true,
+        }).id;
+        const gen2 = await req(
+          "POST",
+          `/api/v1/scenes/${scene2Id}/generate`,
+          { model_id: i2vModelId },
+          ownerToken,
+        );
+        assertEquals(gen2.status, 202);
+        assertEquals((gen2.json as { job_type: string }).job_type, "image_to_video");
+        const gen2Job = (gen2.json as { job_id: string }).job_id;
+        const done2 = await waitForJob(ownerToken, gen2Job, ["succeeded", "failed"]);
+        assertEquals(done2.status, "succeeded");
+        const previewAssetId = getAssetBySlug(`panel_${panelId.slice(0, 8)}`)?.id;
+        assert(previewAssetId, "panel preview asset exists");
+        assertEquals(await jobInputs(gen2Job), [
+          { asset_id: previewAssetId, version_number: 1 },
+          { asset_id: crewId, version_number: 1 },
+        ]);
+
+        // 3) Batch: a shot uses its own prompt's references, an un-prompted
+        //    shot falls back to the scene prompt's.
+        const scene3 = await req(
+          "POST",
+          "/api/v1/scenes",
+          { project_id: projectId, name: "Convoy", prompt: "@ref_sloop sails on" },
+          ownerToken,
+        );
+        const scene3Id = (scene3.json as { id: string }).id;
+        await req(
+          "POST",
+          `/api/v1/scenes/${scene3Id}/shots`,
+          { shot_order: 1, name: "Crew", prompt: "the @ref_crew" },
+          ownerToken,
+        );
+        await req(
+          "POST",
+          `/api/v1/scenes/${scene3Id}/shots`,
+          { shot_order: 2, name: "Crew" },
+          ownerToken,
+        );
+        const batchRes = await req(
+          "POST",
+          `/api/v1/scenes/${scene3Id}/batch-generate`,
+          { model_id: t2vModelId },
+          ownerToken,
+        );
+        assertEquals(batchRes.status, 202);
+        const batchJobs = (
+          batchRes.json as { jobs: { shot_order?: number; job_id: string }[] }
+        ).jobs;
+        assertEquals(batchJobs.length, 2);
+        for (const j of batchJobs) {
+          const done = await waitForJob(ownerToken, j.job_id, ["succeeded", "failed"]);
+          assertEquals(done.status, "succeeded");
+        }
+        const inputs3 = await Promise.all(batchJobs.map((j) => jobInputs(j.job_id)));
+        assertEquals(
+          inputs3[0].map((i) => i.asset_id),
+          [crewId],
+          "shot prompt reference wins",
+        );
+        assertEquals(
+          inputs3[1].map((i) => i.asset_id),
+          [sloopId],
+          "scene prompt reference fills the un-prompted shot",
+        );
       })();
     });
   });

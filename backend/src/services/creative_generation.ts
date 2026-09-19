@@ -81,6 +81,24 @@ function referenceInputs(
   return inputs;
 }
 
+/**
+ * Append a prompt's resolved @references after the existing inputs (the panel
+ * preview keeps index 0 when present), deduped by asset id.
+ */
+function appendReferenceInputs(
+  base: { asset_id: string; version_number: number }[],
+  refs: ReferenceRow[],
+): { asset_id: string; version_number: number }[] {
+  const inputs = [...base];
+  const seen = new Set(inputs.map((input) => input.asset_id));
+  for (const input of referenceInputs(refs)) {
+    if (seen.has(input.asset_id)) continue;
+    seen.add(input.asset_id);
+    inputs.push(input);
+  }
+  return inputs;
+}
+
 export interface PanelGenerateResult {
   job_id: string;
   asset_id: string;
@@ -162,7 +180,9 @@ export interface SceneGenerateResult {
 
 /**
  * Generate a scene: image-to-video when a linked panel already has a preview
- * image, text-to-video otherwise.
+ * image, text-to-video otherwise. The scene prompt's @references are appended
+ * as job inputs (a panel preview, when present, stays at index 0 for the i2v
+ * first-frame input).
  */
 export function generateScene(
   userId: number,
@@ -187,7 +207,7 @@ export function generateScene(
 
   let jobType: "image_to_video" | "text_to_video";
   let model: Model;
-  const inputs: { asset_id: string; version_number: number }[] = [];
+  let inputs: { asset_id: string; version_number: number }[] = [];
   if (inputRow) {
     model = pickModel("image_to_video", options.model_id);
     jobType = "image_to_video";
@@ -206,6 +226,13 @@ export function generateScene(
     model = t2v[0];
     jobType = "text_to_video";
   }
+
+  // The scene prompt's @references become job inputs too (a panel preview,
+  // when present, stays at index 0 for the i2v first-frame input).
+  inputs = appendReferenceInputs(
+    inputs,
+    listReferencesForSource("scene", prompt.version_id),
+  );
 
   const slug = `scene_${sceneId.slice(0, 8)}`;
   let asset = getAssetBySlug(slug);
@@ -261,7 +288,9 @@ export interface BatchGenerateResult {
 /**
  * Create one generation job per shot of a scene (Milestone 7: "batch generate
  * multiple shots"). Each shot uses its own prompt when present, falling back
- * to the scene prompt. Shots without any prompt are skipped with a reason.
+ * to the scene prompt; the shot's @references (or the scene prompt's, when
+ * inherited) are appended after the shared panel-preview input. Shots without
+ * any prompt are skipped with a reason.
  */
 export function batchGenerateScene(
   userId: number,
@@ -290,8 +319,11 @@ export function batchGenerateScene(
 
   const jobType: "image_to_video" | "text_to_video" = inputRow ? "image_to_video" : "text_to_video";
   const model = pickModel(jobType, options.model_id);
-  const inputs = inputRow ? [inputRow] : [];
+  const baseInputs = inputRow ? [inputRow] : [];
   const scenePrompt = creativePromptFor("scene", sceneId, userId);
+  // Shared fallback references: shots without their own prompt inherit the
+  // scene prompt (and its @references).
+  const sceneRefRows = scenePrompt ? listReferencesForSource("scene", scenePrompt.version_id) : [];
 
   const now = new Date().toISOString();
   const jobs: { shot_id: string; job_id: string; asset_id: string }[] = [];
@@ -300,12 +332,17 @@ export function batchGenerateScene(
 
   for (const row of rows) {
     const shotId = row.id as string;
-    const prompt = creativePromptFor("shot", shotId, userId) ?? scenePrompt;
+    const shotPrompt = creativePromptFor("shot", shotId, userId);
+    const prompt = shotPrompt ?? scenePrompt;
     if (!prompt) {
       skipped.push({ shot_id: shotId, reason: "no prompt" });
       continue;
     }
     warnings.push(...prompt.warnings);
+    const inputs = appendReferenceInputs(
+      baseInputs,
+      shotPrompt ? listReferencesForSource("shot", shotPrompt.version_id) : sceneRefRows,
+    );
 
     const slug = `shot_${shotId.slice(0, 8)}`;
     let asset = getAssetBySlug(slug);
