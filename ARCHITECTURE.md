@@ -245,6 +245,18 @@ app-root (main router)
 │   │        for review-board candidate compare and asset-detail version compare — unit-tested)
 ├── timeline-playback (shared pure playback math: active visual/audio/text at time, source time,
 │   │                  fade factors, grade→CSS filter mapping, in/out range — unit-tested)
+├── demo-engine (demo mode core — pure, DOM-free, unit-tested: DemoRun drives an ordered
+│   │            step list in auto mode (prepare → dwell → execute → poll → next) or guided
+│   │            mode (prepare → PAUSE for user edits → Continue → execute → poll → pause);
+│   │            steps drive the host page's own handlers/forms, all state reported via
+│   │            onEvent — see docs/demo.md)
+├── demo-content (the demo film "The Lighthouse" — Fountain script, image assets, storyboard
+│   │             panels with @references, i2v shots, music score, timeline plan — plus
+│   │             demoPreflight (which enabled models cover the film's task types; missing
+│   │             parts are announced and skipped) — unit-tested)
+├── demo-runner (Lit control bar for demo runs: step checklist with progress + narration,
+│   │            scrolling narration log, Continue/Skip/Stop — host-owned open flag following
+│   │            the ai-assist-dialog convention; see docs/demo.md)
 └── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
     diagnostic bundle export, project backup/restore, storage management — per-project
     usage, `?verify=1` checksum integrity and admin cache cleanup)
