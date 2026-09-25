@@ -57,6 +57,7 @@ export const DEMO_FILM = {
       slug: "lighthouse",
       display_name: "Lighthouse",
       kind: "image",
+      asset_type: "location",
       prompt:
         "A tall stone lighthouse on a rugged cliff at night, its beam sweeping a stormy black sea, crashing waves, cinematic wide shot, moody film still",
     },
@@ -64,6 +65,7 @@ export const DEMO_FILM = {
       slug: "keeper",
       display_name: "Lighthouse keeper",
       kind: "image",
+      asset_type: "character",
       prompt:
         "A weathered lighthouse keeper in his fifties, deep lines on his face, old oilskin coat, standing in a lamp room, warm lamp light on his face, cinematic film still",
     },
@@ -71,6 +73,7 @@ export const DEMO_FILM = {
       slug: "boat",
       display_name: "Fishing boat",
       kind: "image",
+      asset_type: "prop",
       prompt:
         "A small wooden fishing boat in rough night seas, waves breaking over the bow, a faint lamp glowing in the cabin, cinematic film still",
     },

@@ -17,6 +17,10 @@ import "./vram-choice-dialog.js";
  *   "cpu"    — the user accepted the slow path → queue with device=cpu
  *   "cuda"   — "free up VRAM" + recheck confirmed enough VRAM → queue with device=cuda
  *   "cancel" — the user dismissed the dialog → the host must abort the submit
+ *
+ * Hosts may set `this.vramBypass = true` (demo mode): the interactive dialog
+ * is never opened — where it would have appeared, the guard resolves `null`
+ * and the runner's own live GPU/CPU auto-fallback decides at run time.
  */
 export const VramGuard = (superClass) =>
   class extends superClass {
@@ -84,6 +88,7 @@ export const VramGuard = (superClass) =>
       // If VRAM auto-unload is enabled, free the local GPU services once and
       // re-probe — if that's enough, continue on the GPU without a dialog.
       if (await this._tryAutoFreeVram(model)) return "cuda";
+      if (this.vramBypass) return null; // demo: no dialog — the runner's live auto-fallback decides
       this._vram = {
         open: true,
         requirementGb: formatGb(check.requirementMb),
