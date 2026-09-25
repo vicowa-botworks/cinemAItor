@@ -1,5 +1,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
+import { DemoHost } from "./demo-host.js";
+import { buildScriptDemoSteps } from "./demo-scripts.js";
 import "./ai-assist-dialog.js";
 
 /**
@@ -8,7 +10,7 @@ import "./ai-assist-dialog.js";
  * history panel reads as the edit + generation log. Generation reuses the
  * shared <ai-assist-dialog> (write_script / extend_script purposes).
  */
-export class ScriptDetail extends LitElement {
+export class ScriptDetail extends DemoHost(LitElement) {
   static styles = css`
     :host {
       display: block;
@@ -256,6 +258,18 @@ export class ScriptDetail extends LitElement {
     return decodeURIComponent((window.location.hash.split("/")[2] ?? "").replace(/^#/, ""));
   }
 
+  get demoTitle() {
+    return "Script demo";
+  }
+
+  get demoSubtitle() {
+    return this.script?.name ?? "";
+  }
+
+  buildDemoSteps(mode, preflight) {
+    return buildScriptDemoSteps(this, preflight);
+  }
+
   async connectedCallback() {
     super.connectedCallback?.();
     await this._load();
@@ -318,6 +332,7 @@ export class ScriptDetail extends LitElement {
               </span>
             `}
           <div class="spacer"></div>
+          ${this.demoLauncher}
           <button
             class="btn btn-danger"
             ?disabled=${this.deleting}
@@ -325,6 +340,7 @@ export class ScriptDetail extends LitElement {
             ${this.deleting ? "Deleting…" : "Delete"}
           </button>
         </div>
+        ${this.demoRunnerPanel}
 
         <div class="section">
           <div class="section-head">

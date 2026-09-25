@@ -1,6 +1,8 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { jobEvents } from "../job-events.js";
+import { DemoHost } from "./demo-host.js";
+import { buildAssetDemoSteps } from "./demo-assets.js";
 
 const FILTER_TYPES = [
   "character",
@@ -17,7 +19,7 @@ const FILTER_TYPES = [
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
-export class AssetList extends LitElement {
+export class AssetList extends DemoHost(LitElement) {
   static styles = css`
     .asset-list {
       display: flex;
@@ -165,6 +167,18 @@ export class AssetList extends LitElement {
     this._refreshTimer = null;
   }
 
+  get demoTitle() {
+    return "Assets demo";
+  }
+
+  get demoSubtitle() {
+    return this.projectId ? "Project Assets" : "Asset Library";
+  }
+
+  buildDemoSteps(mode, preflight) {
+    return buildAssetDemoSteps(this, preflight);
+  }
+
   connectedCallback() {
     super.connectedCallback?.();
     this._unsubscribeEvents = jobEvents.subscribe((ev) => this._onLiveEvent(ev));
@@ -282,8 +296,10 @@ export class AssetList extends LitElement {
             <button class="btn" @click=${() => this._openPanel("upload")}>Upload</button>
             <button class="btn btn-secondary"
               @click=${() => this._openPanel("create")}>New Asset</button>
+            ${this.demoLauncher}
           </div>
         </div>
+        ${this.demoRunnerPanel}
 
         ${this.panel === "generate"
           ? html`
