@@ -163,6 +163,20 @@ export const DEMO_FILM = {
     prompt:
       "A slow, moody ambient film score: lone cello and sparse piano over soft wind and distant surf, tense and dark, resolving into calm, hopeful warmth by the end. No vocals.",
   },
+  // The Timeline demo (timeline-detail.js) places one clip per scene —
+  // generated from that scene's shot prompt — back-to-back on a single video
+  // track, lays the music score on an audio track under it, then runs a draft
+  // render. Clips are project-scoped assets discovered by these slugs.
+  timeline: {
+    video_track: "Scenes",
+    audio_track: "Score",
+    render_preset: "preset-draft",
+    clip_slugs: [
+      "lighthouse_clip_1",
+      "lighthouse_clip_2",
+      "lighthouse_clip_3",
+    ],
+  },
 };
 
 // Task types the demo needs, grouped by what they drive. Preflight checks each

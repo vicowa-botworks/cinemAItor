@@ -6,6 +6,8 @@ import { filmstripFramesFor } from "../timeline-playback.js";
 import { parseAudioMetadata } from "../audio-adjustments.js";
 import "./audio-dialog.js";
 import { VramGuard } from "./vram-guard.js";
+import { DemoHost } from "./demo-host.js";
+import { buildTimelineDemoSteps } from "./demo-timeline.js";
 
 const SCALE = 60;
 const LABEL_W = 210;
@@ -64,7 +66,19 @@ function isTextTrack(track) {
   return TEXT_TRACK_TYPES.includes(track.track_type);
 }
 
-export class TimelineDetail extends VramGuard(LitElement) {
+export class TimelineDetail extends DemoHost(VramGuard(LitElement)) {
+  get demoTitle() {
+    return "The Timeline + Audio demo";
+  }
+
+  get demoSubtitle() {
+    return "Lay the tracks, generate the film's clips + score, and draft-render the whole movie.";
+  }
+
+  buildDemoSteps(mode, preflight) {
+    return buildTimelineDemoSteps(this, preflight);
+  }
+
   static styles = css`
     .detail {
       display: flex;
@@ -1806,6 +1820,7 @@ export class TimelineDetail extends VramGuard(LitElement) {
             @click=${this._toggleScore}>
             ${this.showScore ? "Hide score" : "Suggest score"}
           </button>
+          ${this.demoLauncher}
           <button
             class="btn-small"
             ?disabled=${this.busy}
@@ -1814,6 +1829,7 @@ export class TimelineDetail extends VramGuard(LitElement) {
           </button>
         </div>
 
+        ${this.demoRunnerPanel}
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
 
