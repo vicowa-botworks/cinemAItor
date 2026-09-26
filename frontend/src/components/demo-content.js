@@ -107,6 +107,35 @@ export const DEMO_FILM = {
         "Dawn: calm sea in soft pink light; @boat beached safely on the rocks; @lighthouse on the cliff in the distance. Cinematic, hopeful.",
     },
   ],
+  // One scene per script scene. The scenes demo treats the open scene as the
+  // film's first scene (the others exist for the full-movie demo). The prompt
+  // is the scene clip's generation prompt (motion + lens language).
+  scenes: [
+    {
+      name: "EXT. Lighthouse head - DUSK",
+      description:
+        "The lighthouse on its head at dusk. The beam sweeps empty water as the keeper climbs in — the film opens on the machine and its keeper.",
+      target_duration: 12,
+      prompt:
+        "Slow aerial push-in on the lighthouse as the beam completes its sweep; sea spray catches the light. Handheld energy, natural dusk light, 24mm wide.",
+    },
+    {
+      name: "INT. Keeper's quarters - NIGHT",
+      description:
+        "A small room lit by lamp and log. The keeper and his daughter argue about leaving; the light still turns through the round window.",
+      target_duration: 30,
+      prompt:
+        "Slow dolly around the lamplit room as the two argue; the beam sweeps the wall in long passes. Practical lamp light, 35mm, restrained moves.",
+    },
+    {
+      name: "EXT. Shingle beach - DAWN",
+      description:
+        "Dawn, the storm passed. The keeper finds the beached boat and walks out to it; the lighthouse light no longer turns.",
+      target_duration: 20,
+      prompt:
+        "Wide static shot as the keeper walks out across the shingle to the beached boat; the light stands dark in the background. Flat dawn light, 50mm.",
+    },
+  ],
   // One shot per scene. The demo links each shot's scene to its first panel,
   // so clip generation runs image-to-video off the panel preview when an
   // image-to-video model is enabled (text-to-video otherwise).

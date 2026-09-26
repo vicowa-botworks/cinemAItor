@@ -135,16 +135,18 @@ the narration and skipped rather than failing the run.
 
 Each page that creates something gets a **Demo** control offering **Automatic** and **Guided**:
 
-| Page                  | Component           | Demonstrates                                                        |
-| --------------------- | ------------------- | ------------------------------------------------------------------- |
-| Scripts               | `script-detail`     | create a script, write/extend with AI, save a version               |
-| Assets                | `asset-list`        | create + generate image assets with references                      |
-| Storyboard            | `storyboard-detail` | create a board, add panels, enhance, preview (t2i)                  |
-| Scenes                | `scene-detail`      | import/create scenes, shots, enhance, single + batch generate (i2v) |
-| Timeline + Audio      | `timeline-detail`   | tracks, items, score suggestion, render, export                     |
-| Projects (full movie) | `project-list`      | the whole film, start to finish, ending with a rendered movie       |
+| Page                  | Component           | Demonstrates                                                  |
+| --------------------- | ------------------- | ------------------------------------------------------------- |
+| Scripts               | `script-detail`     | create a script, write/extend with AI, save a version         |
+| Assets                | `asset-list`        | create + generate image assets with references                |
+| Storyboard            | `storyboard-detail` | panels on the opened board: add, enhance, preview (t2i)       |
+| Scenes                | `scene-detail`      | fill the opened scene, add a shot, single + batch clip (i2v)  |
+| Timeline + Audio      | `timeline-detail`   | tracks, items, score suggestion, render, export               |
+| Projects (full movie) | `project-list`      | the whole film, start to finish, ending with a rendered movie |
 
-A page demo is self-contained: if the page's object does not exist yet, the demo creates it first
-(narrated). The full movie demo (Projects page) has a fully automatic variant (one continuous run
-with a progress HUD) and a guided variant that steps through every stage and lets the user adjust
-each one, with progress kept in `localStorage` so it can be resumed.
+A page demo is self-contained: on pages whose route does not require an existing object (Scripts,
+Assets), the demo creates the object first (narrated). The Storyboard and Scenes demos run on the
+object the route already opened (those pages need an id) and treat it as the film's board/first
+scene. The full movie demo (Projects page) has a fully automatic variant (one continuous run with a
+progress HUD) and a guided variant that steps through every stage and lets the user adjust each one,
+with progress kept in `localStorage` so it can be resumed.

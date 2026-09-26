@@ -5,6 +5,8 @@ import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js"
 import { VramGuard } from "./vram-guard.js";
 import { reconcilePreviews } from "./preview-reconcile.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
+import { DemoHost } from "./demo-host.js";
+import { buildStoryboardDemoSteps } from "./demo-storyboard.js";
 
 const POLL_MS = 5000;
 const PANEL_FIELDS = [
@@ -22,7 +24,7 @@ const PANEL_FIELDS = [
   ["notes", "Notes", "textarea"],
 ];
 
-export class StoryboardDetail extends VramGuard(LitElement) {
+export class StoryboardDetail extends DemoHost(VramGuard(LitElement)) {
   static styles = css`
     .board-detail {
       display: flex;
@@ -421,6 +423,18 @@ export class StoryboardDetail extends VramGuard(LitElement) {
     savePrefs(window.localStorage, "panel", this._enhancePrefs);
   }
 
+  get demoTitle() {
+    return "Storyboard demo";
+  }
+
+  get demoSubtitle() {
+    return this.board?.name ?? "";
+  }
+
+  buildDemoSteps(mode, preflight) {
+    return buildStoryboardDemoSteps(this, preflight);
+  }
+
   async connectedCallback() {
     super.connectedCallback?.();
     this._boardId = this.boardId ??
@@ -507,12 +521,14 @@ export class StoryboardDetail extends VramGuard(LitElement) {
               Auto-apply model skills
             </label>
           </div>
+          ${this.demoLauncher}
           <button
             class="btn btn-small btn-danger"
             @click=${this._deleteBoard}>
             Delete
           </button>
         </div>
+        ${this.demoRunnerPanel}
 
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
@@ -1006,6 +1022,7 @@ export class StoryboardDetail extends VramGuard(LitElement) {
       forgetCreativeAssetIds("panel");
       this.panels = this.panels.map((p) => p.id === panel.id ? { ...p, status: "generating" } : p);
       this._syncPolling();
+      return result;
     } catch (err) {
       this.error = err.message || "Failed to start preview job.";
     } finally {
