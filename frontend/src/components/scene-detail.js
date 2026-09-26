@@ -6,6 +6,8 @@ import "./audio-dialog.js";
 import "./ai-assist-dialog.js";
 import { VramGuard } from "./vram-guard.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
+import { DemoHost } from "./demo-host.js";
+import { buildSceneDemoSteps } from "./demo-scenes.js";
 
 const SCENE_STATUSES = [
   "draft",
@@ -15,7 +17,7 @@ const SCENE_STATUSES = [
   "archived",
 ];
 
-export class SceneDetail extends VramGuard(LitElement) {
+export class SceneDetail extends DemoHost(VramGuard(LitElement)) {
   static styles = css`
     .scene-detail {
       display: flex;
@@ -343,6 +345,18 @@ export class SceneDetail extends VramGuard(LitElement) {
     savePrefs(window.localStorage, "scene", this._enhancePrefs);
   }
 
+  get demoTitle() {
+    return "Scenes demo";
+  }
+
+  get demoSubtitle() {
+    return this.scene?.name ?? "";
+  }
+
+  buildDemoSteps(mode, preflight) {
+    return buildSceneDemoSteps(this, preflight);
+  }
+
   async connectedCallback() {
     super.connectedCallback?.();
     this._sceneId = this.sceneId ??
@@ -350,6 +364,7 @@ export class SceneDetail extends VramGuard(LitElement) {
         (window.location.hash.match(/#\/scene\/([^/?]+)/) ?? [])[1] ?? "",
       );
     await this._load();
+    this._loadModels();
   }
 
   disconnectedCallback() {
@@ -415,6 +430,7 @@ export class SceneDetail extends VramGuard(LitElement) {
                                     Rename
                                   </button>
                   `}
+                ${this.demoLauncher}
                 <button
                   class="btn-small btn-danger"
                   style="margin-left:auto;"
@@ -422,6 +438,8 @@ export class SceneDetail extends VramGuard(LitElement) {
                   Delete
                 </button>
               </div>
+
+              ${this.demoRunnerPanel}
 
               ${this.error ? html`<div class="error">${this.error}</div>` : null}
               ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
@@ -1108,6 +1126,7 @@ export class SceneDetail extends VramGuard(LitElement) {
       );
       this._modelChoice = "";
       this._seed = "";
+      return result;
     } catch (err) {
       this.error = err.message || "Failed to start generation.";
     } finally {

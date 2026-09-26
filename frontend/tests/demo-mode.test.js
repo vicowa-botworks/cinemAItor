@@ -79,6 +79,21 @@ describe("DEMO_FILM", () => {
       assert(typeof shot.name === "string" && shot.name.length > 0);
       assert(typeof shot.prompt === "string" && shot.prompt.length > 0);
     }
+    assertEquals(
+      DEMO_FILM.scenes.length,
+      3,
+      "one film scene per script scene",
+    );
+    for (const scene of DEMO_FILM.scenes) {
+      assert(typeof scene.name === "string" && scene.name.length > 0);
+      assert(
+        typeof scene.description === "string" && scene.description.length > 0,
+      );
+      assert(
+        Number.isInteger(scene.target_duration) && scene.target_duration > 0,
+      );
+      assert(typeof scene.prompt === "string" && scene.prompt.length > 0);
+    }
     assertEquals(DEMO_FILM.panels.map((p) => p.scene_index).sort(), [
       1,
       1,
