@@ -17,14 +17,14 @@ plus a pause at every step boundary.
 
 ## Modules
 
-| Module                                    | What it is                                                                                                                                                                                                        |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `frontend/src/components/demo-engine.js`  | `DemoRun` — pure, DOM-free, unit-tested. Runs an ordered list of steps in auto/guided mode and reports everything through an `onEvent` callback.                                                                  |
-| `frontend/src/components/demo-runner.js`  | `<demo-runner>` — the Lit control bar: step checklist (with progress + narration), a scrolling "what I'm doing and why" log, Continue/Skip/Stop buttons.                                                          |
-| `frontend/src/components/demo-content.js` | The demo film **"The Lighthouse"** (script, assets, panels, shots, score, timeline plan) plus `demoPreflight` — checks which enabled models cover the film's task types and names the parts that will be skipped. |
-| `frontend/src/components/demo-movie-state.js` | `localStorage` state + `stage`→`page`/route map for the guided cross-page movie demo: `saveMovieState` / `loadMovieState` / `clearMovieState`, `moviePageForStage`, `routeForMoviePage`, and `nextMoviePage`. Pure, DOM-free (only `localStorage`). |
-| `frontend/src/components/movie-demo-host.js` | `MovieDemoHost` mixin — runs the guided movie demo *across* pages: hosts only the current page's stage segment, auto-navigates to the next page on each boundary, persists progress to `localStorage`, and resumes a stored run when its page is opened. |
-| `frontend/src/components/demo-movie.js` | `buildMovieDemoSteps` (the full step list, calls the API directly — used by the Projects-page automatic demo) and `movieDemoStepsForPage` (per-page segments for the guided cross-page demo). |
+| Module                                        | What it is                                                                                                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/components/demo-engine.js`      | `DemoRun` — pure, DOM-free, unit-tested. Runs an ordered list of steps in auto/guided mode and reports everything through an `onEvent` callback.                                                                                                         |
+| `frontend/src/components/demo-runner.js`      | `<demo-runner>` — the Lit control bar: step checklist (with progress + narration), a scrolling "what I'm doing and why" log, Continue/Skip/Stop buttons.                                                                                                 |
+| `frontend/src/components/demo-content.js`     | The demo film **"The Lighthouse"** (script, assets, panels, shots, score, timeline plan) plus `demoPreflight` — checks which enabled models cover the film's task types and names the parts that will be skipped.                                        |
+| `frontend/src/components/demo-movie-state.js` | `localStorage` state + `stage`→`page`/route map for the guided cross-page movie demo: `saveMovieState` / `loadMovieState` / `clearMovieState`, `moviePageForStage`, `routeForMoviePage`, and `nextMoviePage`. Pure, DOM-free (only `localStorage`).      |
+| `frontend/src/components/movie-demo-host.js`  | `MovieDemoHost` mixin — runs the guided movie demo _across_ pages: hosts only the current page's stage segment, auto-navigates to the next page on each boundary, persists progress to `localStorage`, and resumes a stored run when its page is opened. |
+| `frontend/src/components/demo-movie.js`       | `buildMovieDemoSteps` (the full step list, calls the API directly — used by the Projects-page automatic demo) and `movieDemoStepsForPage` (per-page segments for the guided cross-page demo).                                                            |
 
 Tests: `frontend/tests/demo-mode.test.js` (content shape, preflight, engine lifecycle + `seed` —
 gated sleep injections, no real timers, no DOM), `demo-movie.test.js` (full step list + per-page
@@ -170,29 +170,31 @@ a **Continue** / **Skip** / **Stop** control, and the user presses Continue to r
 the current page's segment is exhausted the run auto-navigates to the next page and re-hosts there.
 
 The movie steps are API-driven from `DEMO_FILM` and idempotent (a step reuses an object an earlier
-run already created), so the guided value is in *watching the run proceed page by page*, **stopping**
-to inspect a page or work on it by hand, and **resuming** — the idempotent steps pick up where the
-run left off and the persisted scratch carries the cross-page object ids. To change *what* a step
-generates, stop the run, make the change by hand on the page, then resume. (This differs from the
-per-page demos, whose steps drive the page's real forms and so do apply in-form edits.)
+run already created), so the guided value is in _watching the run proceed page by page_,
+**stopping** to inspect a page or work on it by hand, and **resuming** — the idempotent steps pick
+up where the run left off and the persisted scratch carries the cross-page object ids. To change
+_what_ a step generates, stop the run, make the change by hand on the page, then resume. (This
+differs from the per-page demos, whose steps drive the page's real forms and so do apply in-form
+edits.)
 
 **How it works**
 
 - The full step list (`buildMovieDemoSteps`) is unchanged from the automatic demo — the same
-  objects, the same API calls, the same idempotency. The cross-page demo only changes *where* the
-  steps run and *when* it moves.
-- Steps are grouped by `stage` (Overview / Project / Assets / Storyboard / Scenes / Clips /
-  Timeline / Score / Render). Each page hosts exactly the stages that live on it, in order:
-  Projects = Overview + Project, Assets = Assets, Storyboard = Storyboard, Scenes = Scenes + Clips,
-   Timeline = Timeline + Score + Render. `movieDemoStepsForPage(page)` slices the full list into that
-   page's contiguous segment.
-- The run is **re-hosted per page**: a `DemoRun` is created fresh on each page with only that
-  page's segment. Because every step is idempotent and reads prior state from the shared
-  `ctx.scratch`, the segment only needs to be told *which earlier steps are already done*.
-- That knowledge is the `localStorage` state (`demo-movie-state.js`): `{ page, doneIds, scratch,
-  startedAt }`. `scratch` is the engine's shared scratch object (project/storyboard/scene ids, the
-  panel→shot id map, the placed clip ids, …) that the automatic demo threads through a single run;
-  across pages it must survive navigation, so it is persisted.
+  objects, the same API calls, the same idempotency. The cross-page demo only changes _where_ the
+  steps run and _when_ it moves.
+- Steps are grouped by `stage` (Overview / Project / Assets / Storyboard / Scenes / Clips / Timeline
+  / Score / Render). Each page hosts exactly the stages that live on it, in order: Projects =
+  Overview + Project, Assets = Assets, Storyboard = Storyboard, Scenes = Scenes + Clips, Timeline =
+  Timeline + Score + Render. `movieDemoStepsForPage(page)` slices the full list into that page's
+  contiguous segment.
+- The run is **re-hosted per page**: a `DemoRun` is created fresh on each page with only that page's
+  segment. Because every step is idempotent and reads prior state from the shared `ctx.scratch`, the
+  segment only needs to be told _which earlier steps are already done_.
+- That knowledge is the `localStorage` state (`demo-movie-state.js`):
+  `{ page, doneIds, scratch,
+  startedAt }`. `scratch` is the engine's shared scratch object
+  (project/storyboard/scene ids, the panel→shot id map, the placed clip ids, …) that the automatic
+  demo threads through a single run; across pages it must survive navigation, so it is persisted.
 - On the next page, `DemoRun` is constructed with `ctx.scratch` restored and a `seed`
   (`{ doneIds }`): the done step ids are pre-marked done and the scratch is in place, so the segment
   resumes exactly where it left off and its idempotent steps reuse the objects the earlier pages
@@ -202,10 +204,10 @@ per-page demos, whose steps drive the page's real forms and so do apply in-form 
   order) that still has a pending step, persists `page` set to that page, and sets the hash to
   navigate there. When a page loads (or reloads), the mixin re-hosts the persisted run if the
   state's page is that page — seeding the already-done step ids and restoring the scratch, so the
-  run resumes exactly where it left off. A *stopped* (not finished) run stays resumable: its state
+  run resumes exactly where it left off. A _stopped_ (not finished) run stays resumable: its state
   remains in `localStorage`, and opening the page it belongs to picks it back up. When the whole
   movie is done the state is cleared.
 
-So a user can start the guided movie on the Projects page, stop it midway to inspect a page (or
-make a hand edit), get interrupted, and come back later (same or a fresh tab) — opening the page the
-run is on resumes it where it left off and continues through to the rendered movie.
+So a user can start the guided movie on the Projects page, stop it midway to inspect a page (or make
+a hand edit), get interrupted, and come back later (same or a fresh tab) — opening the page the run
+is on resumes it where it left off and continues through to the rendered movie.
