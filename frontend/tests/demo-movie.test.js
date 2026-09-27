@@ -1,7 +1,12 @@
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assert, assertEquals } from "jsr:@std/assert";
-import { buildMovieDemoSteps } from "../src/components/demo-movie.js";
+import {
+  buildMovieDemoSteps,
+  movieDemoSegments,
+  movieDemoStepsForPage,
+} from "../src/components/demo-movie.js";
 import { DEMO_FILM } from "../src/components/demo-content.js";
+import { MOVIE_PAGES } from "../src/components/demo-movie-state.js";
 
 // ---- buildMovieDemoSteps --------------------------------------------------
 
@@ -450,5 +455,62 @@ describe("buildMovieDemoSteps", () => {
     assertEquals(queued.kind, "render");
     assertEquals(queued.render_id, b.api.created.renders[0].id);
     assertEquals(b.api.created.renders[0].preset_id, DEMO_FILM.timeline.render_preset);
+  });
+});
+
+// ---- guided-movie page segmentation ---------------------------------------
+
+describe("movie demo page segmentation", () => {
+  const preflight = makePreflight();
+
+  it("splits the full pipeline into exactly one segment per guided-movie page", () => {
+    const segments = movieDemoSegments({}, preflight);
+    assertEquals(segments.map((s) => s.page), MOVIE_PAGES.map((p) => p.page));
+    // Each page owns at least one step.
+    for (const seg of segments) {
+      assert(seg.steps.length > 0, `${seg.page} hosts steps`);
+    }
+  });
+
+  it("concatenating the page segments in order reproduces the full pipeline", () => {
+    const full = buildMovieDemoSteps({}, preflight);
+    const concatenated = movieDemoSegments({}, preflight).flatMap(
+      (seg) => seg.steps,
+    );
+    assertEquals(
+      concatenated.map((s) => s.id),
+      full.map((s) => s.id),
+      "segments must be a partition of the pipeline, in order",
+    );
+  });
+
+  it("each page's segment carries only that page's steps", () => {
+    const expected = {
+      projects: ["movie-intro", "movie-project"],
+      assets: DEMO_FILM.assets.map((a) => `assets-${a.slug}`),
+      storyboard: ["movie-storyboard", "movie-panels", "movie-panels-preview"],
+      scenes: [
+        "movie-scenes",
+        "movie-clips-link",
+        ...DEMO_FILM.scenes.map((_, i) => `movie-clip-${i + 1}`),
+      ],
+      timeline: [
+        "movie-timeline",
+        "movie-tracks",
+        "movie-clips-place",
+        "movie-score",
+        "movie-score-place",
+        "movie-render",
+        "movie-done",
+      ],
+    };
+    for (const page of Object.keys(expected)) {
+      const steps = movieDemoStepsForPage({}, preflight, page);
+      assertEquals(
+        steps.map((s) => s.id),
+        expected[page],
+        `${page} hosts its own steps`,
+      );
+    }
   });
 });

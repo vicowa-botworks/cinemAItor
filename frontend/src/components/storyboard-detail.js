@@ -6,6 +6,7 @@ import { VramGuard } from "./vram-guard.js";
 import { reconcilePreviews } from "./preview-reconcile.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
 import { DemoHost } from "./demo-host.js";
+import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildStoryboardDemoSteps } from "./demo-storyboard.js";
 
 const POLL_MS = 5000;
@@ -24,7 +25,9 @@ const PANEL_FIELDS = [
   ["notes", "Notes", "textarea"],
 ];
 
-export class StoryboardDetail extends DemoHost(VramGuard(LitElement)) {
+export class StoryboardDetail extends MovieDemoHost(
+  DemoHost(VramGuard(LitElement)),
+) {
   static styles = css`
     .board-detail {
       display: flex;
@@ -431,6 +434,10 @@ export class StoryboardDetail extends DemoHost(VramGuard(LitElement)) {
     return this.board?.name ?? "";
   }
 
+  get movieDemoPage() {
+    return "storyboard";
+  }
+
   buildDemoSteps(mode, preflight) {
     return buildStoryboardDemoSteps(this, preflight);
   }
@@ -529,6 +536,7 @@ export class StoryboardDetail extends DemoHost(VramGuard(LitElement)) {
           </button>
         </div>
         ${this.demoRunnerPanel}
+        ${this.movieDemoRunnerPanel}
 
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
