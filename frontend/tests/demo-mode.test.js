@@ -311,6 +311,74 @@ describe("DemoRun", () => {
     assertEquals(executed, ["a", "b"]);
   });
 
+  it("seed.doneIds marks those steps done and skips them on start", async () => {
+    const executed = [];
+    const run = new DemoRun({
+      steps: [
+        makeStep({
+          id: "a",
+          title: "A",
+          execute: async () => {
+            executed.push("a");
+            return { kind: "asset", asset_id: "a1" };
+          },
+        }),
+        makeStep({
+          id: "b",
+          title: "B",
+          execute: async () => {
+            executed.push("b");
+            return { kind: "asset", asset_id: "b1" };
+          },
+        }),
+      ],
+      mode: "auto",
+      dwellMs: 0,
+      pollMs: 0,
+      sleep: nowait,
+      seed: { doneIds: ["a"] },
+    });
+
+    await run.start();
+
+    assertEquals(executed, ["b"], "the seeded step must not execute");
+    assertEquals(run.states[0].status, "done");
+    assertEquals(run.states[1].status, "done");
+    assertEquals(run.results, { b: { kind: "asset", asset_id: "b1" } });
+  });
+
+  it("seed.doneIds covering every step finishes immediately without executing", async () => {
+    const executed = [];
+    const run = new DemoRun({
+      steps: [
+        makeStep({
+          id: "a",
+          title: "A",
+          execute: async () => {
+            executed.push("a");
+            return { kind: "asset", asset_id: "a1" };
+          },
+        }),
+        makeStep({
+          id: "b",
+          title: "B",
+          execute: async () => ({ kind: "none" }),
+        }),
+      ],
+      mode: "auto",
+      dwellMs: 0,
+      pollMs: 0,
+      sleep: nowait,
+      seed: { doneIds: ["a", "b"] },
+    });
+
+    await run.start();
+
+    assertEquals(executed, [], "nothing may execute when every step is seeded");
+    assertEquals(run.finished, true);
+    assertEquals(run.states.map((s) => s.status), ["done", "done"]);
+  });
+
   it("stops the run when a poll reports a failure, keeping later steps pending", async () => {
     const events = [];
     let polls = 0;

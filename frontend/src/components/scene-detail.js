@@ -7,6 +7,7 @@ import "./ai-assist-dialog.js";
 import { VramGuard } from "./vram-guard.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
 import { DemoHost } from "./demo-host.js";
+import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildSceneDemoSteps } from "./demo-scenes.js";
 
 const SCENE_STATUSES = [
@@ -17,7 +18,7 @@ const SCENE_STATUSES = [
   "archived",
 ];
 
-export class SceneDetail extends DemoHost(VramGuard(LitElement)) {
+export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) {
   static styles = css`
     .scene-detail {
       display: flex;
@@ -353,6 +354,10 @@ export class SceneDetail extends DemoHost(VramGuard(LitElement)) {
     return this.scene?.name ?? "";
   }
 
+  get movieDemoPage() {
+    return "scenes";
+  }
+
   buildDemoSteps(mode, preflight) {
     return buildSceneDemoSteps(this, preflight);
   }
@@ -440,6 +445,7 @@ export class SceneDetail extends DemoHost(VramGuard(LitElement)) {
               </div>
 
               ${this.demoRunnerPanel}
+              ${this.movieDemoRunnerPanel}
 
               ${this.error ? html`<div class="error">${this.error}</div>` : null}
               ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}

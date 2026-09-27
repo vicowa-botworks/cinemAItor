@@ -13,6 +13,7 @@
 // duplicating objects. Pure functions over (api, preflight); no DOM, no Lit.
 
 import { DEMO_FILM } from "./demo-content.js";
+import { MOVIE_PAGES, pageForStage } from "./demo-movie-state.js";
 
 const TERMINAL_OK = "succeeded";
 const TERMINAL_BAD = new Set(["failed", "cancelled"]);
@@ -789,4 +790,29 @@ export function buildMovieDemoSteps(host, preflight) {
   steps.push(renderStep(film));
   steps.push(doneStep(film));
   return steps;
+}
+
+/**
+ * The subset of the movie demo's steps that the given guided-movie page hosts,
+ * in pipeline order. Each page runs only its own segment — the cross-page
+ * object ids (project, assets, storyboard, …) flow through the persisted
+ * scratch, not through step results, so a page's segment can run against the
+ * ids the previous pages already created.
+ */
+export function movieDemoStepsForPage(host, preflight, page) {
+  return buildMovieDemoSteps(host, preflight).filter(
+    (step) => pageForStage(step.stage) === page,
+  );
+}
+
+/**
+ * The guided-movie pages in order, each annotated with the step ids it hosts
+ * — the seam the host mixin uses to run one segment per page and to know which
+ * steps are "done" when it re-homes the run on the next page.
+ */
+export function movieDemoSegments(host, preflight) {
+  return MOVIE_PAGES.map((page) => ({
+    page: page.page,
+    steps: movieDemoStepsForPage(host, preflight, page.page),
+  }));
 }

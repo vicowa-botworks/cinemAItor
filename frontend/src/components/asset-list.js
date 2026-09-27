@@ -2,6 +2,7 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { jobEvents } from "../job-events.js";
 import { DemoHost } from "./demo-host.js";
+import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildAssetDemoSteps } from "./demo-assets.js";
 
 const FILTER_TYPES = [
@@ -19,7 +20,7 @@ const FILTER_TYPES = [
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
-export class AssetList extends DemoHost(LitElement) {
+export class AssetList extends MovieDemoHost(DemoHost(LitElement)) {
   static styles = css`
     .asset-list {
       display: flex;
@@ -175,6 +176,10 @@ export class AssetList extends DemoHost(LitElement) {
     return this.projectId ? "Project Assets" : "Asset Library";
   }
 
+  get movieDemoPage() {
+    return "assets";
+  }
+
   buildDemoSteps(mode, preflight) {
     return buildAssetDemoSteps(this, preflight);
   }
@@ -300,6 +305,7 @@ export class AssetList extends DemoHost(LitElement) {
           </div>
         </div>
         ${this.demoRunnerPanel}
+        ${this.movieDemoRunnerPanel}
 
         ${this.panel === "generate"
           ? html`

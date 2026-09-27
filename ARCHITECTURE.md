@@ -249,7 +249,8 @@ app-root (main router)
 │   │            step list in auto mode (prepare → dwell → execute → poll → next) or guided
 │   │            mode (prepare → PAUSE for user edits → Continue → execute → poll → pause);
 │   │            steps drive the host page's own handlers/forms, all state reported via
-│   │            onEvent — see docs/demo.md)
+│   │            onEvent; an optional `seed` ({ doneIds }) pre-marks steps done and skips them so
+│   │            a run resumes where an earlier (persisted) one left off — see docs/demo.md)
 ├── demo-content (the demo film "The Lighthouse" — Fountain script, image assets, storyboard
 │   │             panels with @references, i2v shots, music score, timeline plan — plus
 │   │             demoPreflight (which enabled models cover the film's task types; missing
@@ -257,6 +258,18 @@ app-root (main router)
 ├── demo-runner (Lit control bar for demo runs: step checklist with progress + narration,
 │   │            scrolling narration log, Continue/Skip/Stop — host-owned open flag following
 │   │            the ai-assist-dialog convention; see docs/demo.md)
+├── demo-movie (the Projects-page full-movie demo — buildMovieDemoSteps runs the whole pipeline
+│   │           against the API directly (create project → assets → storyboard → scenes/clips →
+│   │           timeline → score → render), fully idempotent by unique_slug; movieDemoStepsForPage
+│   │           slices the step list into a guided page's contiguous stage segment — unit-tested)
+├── demo-movie-state (guided cross-page movie demo state — pure, DOM-free, unit-tested: the
+│   │                 `cinemaitor:demo:movie` localStorage state (page/doneIds/scratch/startedAt) +
+│   │                 the stage→page/route map; see docs/demo.md)
+├── movie-demo-host (MovieDemoHost mixin — the guided cross-page movie demo across the five movie
+│   │                pages: hosts only the current page's stage segment, auto-navigates to the next
+│   │                page when the segment is exhausted, persists progress to localStorage after each
+│   │                step, and re-hosts a stored (stopped) run when its page is opened — separate
+│   │                from the per-page DemoHost so a page can offer both demos; see docs/demo.md)
 └── diagnostics-panel (hardware/model/storage reports, diagnostics log browser,
     diagnostic bundle export, project backup/restore, storage management — per-project
     usage, `?verify=1` checksum integrity and admin cache cleanup)

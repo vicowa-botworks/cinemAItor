@@ -62,6 +62,7 @@ export class DemoRun {
       dwellMs = 1200,
       pollMs = 1500,
       sleep = defaultSleep,
+      seed,
     },
   ) {
     if (!Array.isArray(steps) || steps.length === 0) {
@@ -79,11 +80,12 @@ export class DemoRun {
     }
     this.mode = mode === "guided" ? "guided" : "auto";
     this.ctx = ctx ?? {};
+    const seedDone = Array.isArray(seed?.doneIds) ? new Set(seed.doneIds) : new Set();
     this._steps = steps.map((step) => ({
       step,
-      status: DEMO_STEP_STATUS.pending,
+      status: seedDone.has(step.id) ? DEMO_STEP_STATUS.done : DEMO_STEP_STATUS.pending,
       narration: "",
-      note: "",
+      note: seedDone.has(step.id) ? "Resumed — already completed" : "",
       progress: null,
       result: undefined,
       error: null,
@@ -160,6 +162,12 @@ export class DemoRun {
 
   _advance() {
     this._idx += 1;
+    while (
+      this._idx < this._steps.length &&
+      this._steps[this._idx].status === DEMO_STEP_STATUS.done
+    ) {
+      this._idx += 1;
+    }
     return this._idx < this._steps.length ? this._steps[this._idx] : null;
   }
 

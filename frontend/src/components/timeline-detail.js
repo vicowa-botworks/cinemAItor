@@ -7,6 +7,7 @@ import { parseAudioMetadata } from "../audio-adjustments.js";
 import "./audio-dialog.js";
 import { VramGuard } from "./vram-guard.js";
 import { DemoHost } from "./demo-host.js";
+import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildTimelineDemoSteps } from "./demo-timeline.js";
 
 const SCALE = 60;
@@ -66,13 +67,19 @@ function isTextTrack(track) {
   return TEXT_TRACK_TYPES.includes(track.track_type);
 }
 
-export class TimelineDetail extends DemoHost(VramGuard(LitElement)) {
+export class TimelineDetail extends MovieDemoHost(
+  DemoHost(VramGuard(LitElement)),
+) {
   get demoTitle() {
     return "The Timeline + Audio demo";
   }
 
   get demoSubtitle() {
     return "Lay the tracks, generate the film's clips + score, and draft-render the whole movie.";
+  }
+
+  get movieDemoPage() {
+    return "timeline";
   }
 
   buildDemoSteps(mode, preflight) {
@@ -1830,6 +1837,7 @@ export class TimelineDetail extends DemoHost(VramGuard(LitElement)) {
         </div>
 
         ${this.demoRunnerPanel}
+        ${this.movieDemoRunnerPanel}
         ${this.error ? html`<div class="error">${this.error}</div>` : null}
         ${this.notice ? html`<div class="notice">${this.notice}</div>` : null}
 

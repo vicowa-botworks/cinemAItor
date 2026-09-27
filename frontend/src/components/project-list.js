@@ -2,10 +2,11 @@ import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
 import { DemoHost } from "./demo-host.js";
 import { buildMovieDemoSteps } from "./demo-movie.js";
+import { MovieDemoHost } from "./movie-demo-host.js";
 import "./project-card.js";
 import "./project-form.js";
 
-export class ProjectList extends DemoHost(LitElement) {
+export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
   static styles = css`
     .project-list-container {
       max-width: 1200px;
@@ -108,6 +109,30 @@ export class ProjectList extends DemoHost(LitElement) {
     return buildMovieDemoSteps(this, preflight);
   }
 
+  get movieDemoPage() {
+    return "projects";
+  }
+
+  get movieDemoTitle() {
+    return "Guided movie demo";
+  }
+
+  get movieDemoSubtitle() {
+    return "The Lighthouse, page by page — with resume";
+  }
+
+  get movieDemoStartButton() {
+    return html`
+      <button
+        class="btn-create"
+        style="background-color: var(--color-accent, #8b5cf6);"
+        ?disabled=${this._movieRun || this._movieStarting}
+        @click=${this._onStartMovieDemo}>
+        ${this._movieStarting ? "Starting…" : "Guided movie demo"}
+      </button>
+    `;
+  }
+
   async connectedCallback() {
     super.connectedCallback?.();
     await this._loadProjects();
@@ -158,12 +183,14 @@ export class ProjectList extends DemoHost(LitElement) {
           <h2>My Projects</h2>
           <div class="list-header-actions">
             ${this.demoLauncher}
+            ${this.movieDemoStartButton}
             <button class="btn-create" @click=${this._toggleCreate}>
               ${this.showCreate ? "Close" : "+ New Project"}
             </button>
           </div>
         </div>
         ${this.demoRunnerPanel}
+        ${this.movieDemoRunnerPanel}
 
         ${this.showCreate
           ? html`
