@@ -1,9 +1,11 @@
 import { css, html, LitElement } from "lit";
 import { api } from "../api.js";
+import { DemoHost } from "./demo-host.js";
+import { buildMovieDemoSteps } from "./demo-movie.js";
 import "./project-card.js";
 import "./project-form.js";
 
-export class ProjectList extends LitElement {
+export class ProjectList extends DemoHost(LitElement) {
   static styles = css`
     .project-list-container {
       max-width: 1200px;
@@ -33,6 +35,12 @@ export class ProjectList extends LitElement {
 
     .btn-create:hover {
       background-color: var(--color-primary-hover);
+    }
+
+    .list-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
     .create-panel {
@@ -88,6 +96,18 @@ export class ProjectList extends LitElement {
     this.showCreate = false;
   }
 
+  get demoTitle() {
+    return "Full movie demo";
+  }
+
+  get demoSubtitle() {
+    return "The Lighthouse — the whole pipeline, end to end";
+  }
+
+  buildDemoSteps(_mode, preflight) {
+    return buildMovieDemoSteps(this, preflight);
+  }
+
   async connectedCallback() {
     super.connectedCallback?.();
     await this._loadProjects();
@@ -136,10 +156,14 @@ export class ProjectList extends LitElement {
       <div class="project-list-container">
         <div class="list-header">
           <h2>My Projects</h2>
-          <button class="btn-create" @click=${this._toggleCreate}>
-            ${this.showCreate ? "Close" : "+ New Project"}
-          </button>
+          <div class="list-header-actions">
+            ${this.demoLauncher}
+            <button class="btn-create" @click=${this._toggleCreate}>
+              ${this.showCreate ? "Close" : "+ New Project"}
+            </button>
+          </div>
         </div>
+        ${this.demoRunnerPanel}
 
         ${this.showCreate
           ? html`
