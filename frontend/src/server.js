@@ -21,7 +21,7 @@ Deno.serve({ port: PORT }, async (req) => {
   if (pathname === "/" || pathname === "") {
     const file = await Deno.readFile("./index.html");
     return new Response(file, {
-      headers: { "Content-Type": MIME.html },
+      headers: { "Content-Type": MIME.html, "Cache-Control": "no-cache" },
     });
   }
 
@@ -31,7 +31,12 @@ Deno.serve({ port: PORT }, async (req) => {
       const source = await Deno.readFile(filePath);
       const ext = pathname.split(".").pop() ?? "";
       return new Response(source, {
-        headers: { "Content-Type": MIME[ext] ?? "application/octet-stream" },
+        headers: {
+          "Content-Type": MIME[ext] ?? "application/octet-stream",
+          // Dev server: never let the browser serve a stale cached ES module,
+          // or code changes (e.g. ref-input.js) silently fail to appear.
+          "Cache-Control": "no-cache",
+        },
       });
     } catch {
       return new Response("Not Found", { status: 404 });
