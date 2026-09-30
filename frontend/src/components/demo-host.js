@@ -20,7 +20,7 @@ import "./demo-runner.js";
  *     continuing.
  *
  * The host renders:
- *   - `${this.demoLauncher}` — the button pair (put it in the page header),
+ *   - `${this.demoLauncher}` — the demo launcher (put it in the page header),
  *   - `${this.demoRunnerPanel}` — the control panel while a run is alive.
  *
  * Lifecycle: a run that is still alive when the page is disconnected (route
@@ -53,7 +53,12 @@ export const DemoHost = (superClass) =>
       this._demoRun = null;
     }
 
-    /** The "Demo: auto / guided" button pair, for the page header. */
+    /**
+     * The "Demo: auto / guided" launcher, for the page header. A host may set
+     * `demoHideGuided` to show only the auto button — the Projects page does,
+     * because its guided run is the separate cross-page "Guided movie demo", so
+     * a single-page guided button would just be a redundant subset of it.
+     */
     get demoLauncher() {
       return html`
         ${this._demoError
@@ -62,6 +67,7 @@ export const DemoHost = (superClass) =>
         <demo-launcher
           .busy=${this._demoStarting || Boolean(this._demoRun)}
           .title=${this.demoTitle ?? "Demo"}
+          .hideGuided=${this.demoHideGuided === true}
           @start-demo=${this._onStartDemo}></demo-launcher>
       `;
     }

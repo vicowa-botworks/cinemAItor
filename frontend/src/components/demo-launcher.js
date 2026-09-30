@@ -1,11 +1,15 @@
-import { css, html, LitElement } from "lit";
+import { css, html, LitElement, nothing } from "lit";
 
 /**
- * demo-launcher — the "Demo" button pair for a page's demo mode (docs/demo.md).
+ * demo-launcher — the "Demo" launcher for a page's demo mode (docs/demo.md).
  *
  * Two buttons, two engine modes:
  *   auto   — the page runs its own workflow end to end, narrating every step
  *   guided — the page pauses at each step so the user can change anything
+ *
+ * `hideGuided` shows only the auto button. The Projects page sets it: its
+ * guided run is the separate cross-page "Guided movie demo", so a single-page
+ * guided button there would be a redundant subset of it.
  *
  * Hosts (demo-host.js) embed `${this.demoLauncher}` in their header and listen
  * for the `start-demo` event (detail {mode}); the launcher holds no demo state.
@@ -42,12 +46,21 @@ export class DemoLauncher extends LitElement {
   static properties = {
     busy: { type: Boolean },
     title: { type: String },
+    hideGuided: { type: Boolean },
   };
 
   constructor() {
     super();
     this.busy = false;
     this.title = "Demo";
+    this.hideGuided = false;
+  }
+
+  _title() {
+    return this.hideGuided
+      ? "Learn by watching: the demo runs this page's real workflow, narrating every step and setting."
+      : "Learn by watching: the demo runs this page's real workflow, narrating every step and setting. " +
+        "'auto' runs it all; 'guided' pauses at each step so you can change anything before it continues.";
   }
 
   _start(mode) {
@@ -59,15 +72,15 @@ export class DemoLauncher extends LitElement {
 
   render() {
     return html`
-      <span
-        class="launcher"
-        title="Learn by watching: the demo runs this page's real workflow, narrating every step and setting. 'auto' runs it all; 'guided' pauses at each step so you can change anything before it continues.">
+      <span class="launcher" title=${this._title()}>
         <button ?disabled=${this.busy} @click=${() => this._start("auto")}>
           Demo: auto
         </button>
-        <button ?disabled=${this.busy} @click=${() => this._start("guided")}>
-          Demo: guided
-        </button>
+        ${this.hideGuided ? nothing : html`
+          <button ?disabled=${this.busy} @click=${() => this._start("guided")}>
+            Demo: guided
+          </button>
+        `}
       </span>
     `;
   }

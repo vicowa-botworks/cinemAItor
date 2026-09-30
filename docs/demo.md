@@ -138,7 +138,9 @@ the narration and skipped rather than failing the run.
 
 ## Entry points
 
-Each page that creates something gets a **Demo** control offering **Automatic** and **Guided**:
+Each page that creates something gets a **Demo** control offering **Automatic** and **Guided** (the
+Projects page is the exception — it offers only **Automatic**, since its guided run is the
+cross-page guided movie below):
 
 | Page                  | Component           | Demonstrates                                                  |
 | --------------------- | ------------------- | ------------------------------------------------------------- |
@@ -154,13 +156,16 @@ Assets), the demo creates the object first (narrated). The Storyboard and Scenes
 object the route already opened (those pages need an id) and treat it as the film's board/first
 scene.
 
-The Projects page offers **two** full-movie demos, side by side:
+The Projects page offers **two** full-movie demos, side by side — the "Demo: auto" and "Guided movie
+demo" buttons:
 
-- **Full movie demo** (this page) — the fully automatic variant from PR5: one continuous run,
-  entirely on the Projects page, ending with a rendered movie. It never leaves the page.
-- **Guided movie** — the cross-page variant: it walks the real workflow through the actual pages
-  (Projects → Assets → Storyboard → Scenes → Timeline), pausing at each step so it can be watched,
-  stopped, and resumed, and persists its progress to `localStorage` (below).
+- **Demo: auto** (this page) — the fully automatic variant from PR5: one continuous run, entirely on
+  the Projects page, ending with a rendered movie. It never leaves the page. (The usual "Demo:
+  guided" button is hidden here — its single-page guided run would just be a redundant subset of the
+  cross-page variant.)
+- **Guided movie demo** — the cross-page variant: it walks the real workflow through the actual
+  pages (Projects → Assets → Storyboard → Scenes → Timeline), pausing at each step so it can be
+  watched, stopped, and resumed, and persists its progress to `localStorage` (below).
 
 ## The guided cross-page movie demo
 
