@@ -109,6 +109,14 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     return buildMovieDemoSteps(this, preflight);
   }
 
+  /** The movie demo calls the API directly with the fixed film content — there
+   * is no form on this page to edit between guided pauses. Its guided run is
+   * the separate cross-page "Guided movie demo" below, so the single-page
+   * guided button would be a redundant subset of it. Show auto only. */
+  get demoHideGuided() {
+    return true;
+  }
+
   get movieDemoPage() {
     return "projects";
   }
