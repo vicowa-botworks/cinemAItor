@@ -3,6 +3,9 @@ import { api } from "../api.js";
 import { DemoHost } from "./demo-host.js";
 import { buildMovieDemoSteps } from "./demo-movie.js";
 import { MovieDemoHost } from "./movie-demo-host.js";
+import { clearMovieState } from "./demo-movie-state.js";
+import { resetDemoData } from "./demo-reset.js";
+import "./confirm-dialog.js";
 import "./project-card.js";
 import "./project-form.js";
 
@@ -36,6 +39,22 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
 
     .btn-create:hover {
       background-color: var(--color-primary-hover);
+    }
+
+    .btn-reset {
+      background: transparent;
+      color: var(--color-text-muted);
+      border: 1px solid var(--color-border);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .btn-reset:hover {
+      color: var(--color-error);
+      border-color: var(--color-error);
     }
 
     .list-header-actions {
@@ -87,6 +106,12 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     loading: {},
     error: {},
     showCreate: {},
+    resetOpen: { type: Boolean },
+    resetBusy: { type: Boolean },
+    resetTone: { type: String },
+    resetMessage: { type: String },
+    resetConfirmLabel: { type: String },
+    resetPhase: { type: String },
   };
 
   constructor() {
@@ -95,6 +120,12 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     this.loading = true;
     this.error = "";
     this.showCreate = false;
+    this.resetOpen = false;
+    this.resetBusy = false;
+    this.resetTone = "danger";
+    this.resetMessage = "";
+    this.resetConfirmLabel = "Delete all";
+    this.resetPhase = "confirm";
   }
 
   get demoTitle() {
@@ -176,6 +207,58 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     window.location.hash = `#/project/${encodeURIComponent(id)}`;
   }
 
+  _onResetClick() {
+    this.resetPhase = "confirm";
+    this.resetTone = "danger";
+    this.resetConfirmLabel = "Delete all";
+    this.resetBusy = false;
+    this.resetMessage =
+      "This deletes the demo project “The Lighthouse (demo)” and every asset, " +
+      "panel, scene, and timeline it created — including the global scene clips " +
+      "and score that survive a project delete. You can then run the demo again " +
+      "from scratch.";
+    this.resetOpen = true;
+  }
+
+  _onResetCancel() {
+    this.resetOpen = false;
+  }
+
+  async _onResetConfirm() {
+    if (this.resetPhase === "result") {
+      this.resetOpen = false;
+      return;
+    }
+    this.resetBusy = true;
+    try {
+      const result = await resetDemoData(api);
+      const d = result.deleted;
+      if (result.found) {
+        clearMovieState();
+        await this._loadProjects();
+        this.resetMessage =
+          `Deleted ${d.assets} asset(s), ${d.timelines} timeline(s), ` +
+          `${d.scenes} scene(s), ${d.panels} panel(s), ${d.storyboards} ` +
+          `storyboard(s) and the demo project.` +
+          (result.errors.length ? ` Errors: ${result.errors.join("; ")}` : "");
+        this.resetConfirmLabel = "Done";
+      } else {
+        this.resetMessage = "No demo data found to reset.";
+        this.resetConfirmLabel = "Close";
+      }
+      this.resetTone = "default";
+      this.resetPhase = "result";
+    } catch (err) {
+      this.resetMessage = `Reset failed: ${
+        err?.message || err
+      }. You can try again.`;
+      this.resetConfirmLabel = "Try again";
+      this.resetTone = "danger";
+      this.resetPhase = "result";
+    }
+    this.resetBusy = false;
+  }
+
   render() {
     if (this.loading) {
       return html`
@@ -192,6 +275,12 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
           <div class="list-header-actions">
             ${this.demoLauncher}
             ${this.movieDemoStartButton}
+            <button
+              class="btn-reset"
+              title="Delete every item the movie demo created so it can run again from scratch"
+              @click=${this._onResetClick}>
+              Reset demo data
+            </button>
             <button class="btn-create" @click=${this._toggleCreate}>
               ${this.showCreate ? "Close" : "+ New Project"}
             </button>
@@ -237,6 +326,17 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
             </div>
           `
           : ""}
+
+        <confirm-dialog
+          .open=${this.resetOpen}
+          .busy=${this.resetBusy}
+          .tone=${this.resetTone}
+          title="Reset demo data"
+          .message=${this.resetMessage}
+          .confirmLabel=${this.resetConfirmLabel}
+          busyLabel="Resetting…"
+          @confirm=${this._onResetConfirm}
+          @cancel=${this._onResetCancel}></confirm-dialog>
       </div>
     `;
   }
