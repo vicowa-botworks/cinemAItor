@@ -14,6 +14,7 @@
 
 import { DEMO_FILM } from "./demo-content.js";
 import { MOVIE_PAGES, pageForStage } from "./demo-movie-state.js";
+import { demoVramDevice } from "./vram-guard.js";
 
 const TERMINAL_OK = "succeeded";
 const TERMINAL_BAD = new Set(["failed", "cancelled"]);
@@ -85,7 +86,9 @@ function projectStep(film) {
     title: "Create the project",
     async prepare(ctx) {
       const existing = await findProjectByName(ctx.api, film.project.name);
-      ctx.scratch.project = existing ? { id: existing.id, name: existing.name } : null;
+      ctx.scratch.project = existing
+        ? { id: existing.id, name: existing.name }
+        : null;
     },
     async describe(ctx) {
       return ctx.scratch.project
@@ -106,7 +109,7 @@ function projectStep(film) {
   };
 }
 
-function assetStep(asset, assetsOk) {
+function assetStep(asset, assetsOk, modelId) {
   return {
     id: `assets-${asset.slug}`,
     stage: "Assets",
@@ -138,6 +141,9 @@ function assetStep(asset, assetsOk) {
         };
         return { kind: "none", result: s.assets[asset.slug] };
       }
+      const vram = await demoVramDevice(
+        modelId ? await ctx.api.getModel(modelId) : null,
+      );
       const res = await ctx.api.generateAsset({
         kind: asset.kind,
         prompt: asset.prompt,
@@ -147,16 +153,22 @@ function assetStep(asset, assetsOk) {
         library_scope: "project",
         project_id: s.project.id,
         candidates: 1,
+        device: vram.device,
       });
       return {
         kind: "jobs",
         job_ids: [res.job_id],
         asset_id: res.asset_id,
         slug: asset.slug,
+        _vramNote: vram.note,
       };
     },
     async poll(ctx, work) {
       const state = await pollJobs(ctx.api, work.job_ids);
+      if (work._vramNote) {
+        state.note = work._vramNote;
+        delete work._vramNote;
+      }
       if (state.failed || !state.done) return state;
       const s = ctx.scratch;
       const detail = (await ctx.api.getAsset(work.asset_id)) ?? {};
@@ -239,7 +251,7 @@ function panelsStep(film) {
   };
 }
 
-function panelPreviewsStep(film, assetsOk) {
+function panelPreviewsStep(film, assetsOk, modelId) {
   return {
     id: "movie-panels-preview",
     stage: "Storyboard",
@@ -266,18 +278,26 @@ function panelPreviewsStep(film, assetsOk) {
       if (!assetsOk || toPreview.length === 0) {
         return { kind: "none", skipped: toPreview.length === 0 };
       }
+      const vram = await demoVramDevice(
+        modelId ? await ctx.api.getModel(modelId) : null,
+      );
       const jobIds = [];
       for (const entry of toPreview) {
         const res = await ctx.api.generatePanelPreview(
           ctx.scratch.storyboard.id,
           entry.panel.id,
+          { device: vram.device },
         );
         jobIds.push(res.job_id);
       }
-      return { kind: "jobs", job_ids: jobIds };
+      return { kind: "jobs", job_ids: jobIds, _vramNote: vram.note };
     },
     async poll(ctx, work) {
       const state = await pollJobs(ctx.api, work.job_ids);
+      if (work._vramNote) {
+        state.note = work._vramNote;
+        delete work._vramNote;
+      }
       if (state.failed) return state;
       if (state.done) {
         return { done: true, result: { previews: work.job_ids.length } };
@@ -381,7 +401,7 @@ function linkStep(film, i2vPossible) {
   };
 }
 
-function clipStep(index, film, clipsAnyOk, i2vPossible) {
+function clipStep(index, film, clipsAnyOk, i2vPossible, modelId) {
   const scene = film.scenes[index];
   return {
     id: `movie-clip-${index + 1}`,
@@ -404,7 +424,9 @@ function clipStep(index, film, clipsAnyOk, i2vPossible) {
       if (reuse) {
         return `Scene ${index + 1} already has a clip — reusing it.`;
       }
-      const how = i2vPossible ? "image-to-video from its panel preview" : "text-to-video";
+      const how = i2vPossible
+        ? "image-to-video from its panel preview"
+        : "text-to-video";
       return `Generating the clip for "${scene.name}" — ${how}, driven by the scene's motion prompt.`;
     },
     async execute(ctx) {
@@ -420,16 +442,30 @@ function clipStep(index, film, clipsAnyOk, i2vPossible) {
         };
         return { kind: "none", result: s.clips[index] };
       }
-      const res = await ctx.api.generateScene(entry.scene.id);
+      const vram = await demoVramDevice(
+        modelId ? await ctx.api.getModel(modelId) : null,
+      );
+      const res = await ctx.api.generateScene(entry.scene.id, {
+        device: vram.device,
+      });
       s.clips[index] = {
         scene_id: entry.scene.id,
         asset_id: res.asset_id,
         version_id: null,
       };
-      return { kind: "jobs", job_ids: [res.job_id], index };
+      return {
+        kind: "jobs",
+        job_ids: [res.job_id],
+        index,
+        _vramNote: vram.note,
+      };
     },
     async poll(ctx, work) {
       const state = await pollJobs(ctx.api, work.job_ids);
+      if (work._vramNote) {
+        state.note = work._vramNote;
+        delete work._vramNote;
+      }
       if (state.failed || !state.done) return state;
       const s = ctx.scratch;
       const clip = s.clips[work.index];
@@ -481,7 +517,8 @@ function tracksStep(film) {
     async prepare(ctx) {
       const s = ctx.scratch;
       const detail = (await ctx.api.getTimeline(s.timeline.id)) ?? {};
-      const byName = (name) => (detail.tracks ?? []).find((t) => t.name === name);
+      const byName = (name) =>
+        (detail.tracks ?? []).find((t) => t.name === name);
       s._videoTrackFound = byName(film.timeline.video_track) ?? null;
       s._audioTrackFound = byName(film.timeline.audio_track) ?? null;
     },
@@ -580,7 +617,7 @@ function placeStep() {
   };
 }
 
-function scoreStep(film, musicOk) {
+function scoreStep(film, musicOk, modelId) {
   return {
     id: "movie-score",
     stage: "Score",
@@ -619,18 +656,26 @@ function scoreStep(film, musicOk) {
       const s = ctx.scratch;
       if (!musicOk || !s._hasVideo) return { kind: "none", skipped: true };
       if (s._scorePlaced) return { kind: "none", result: s.score };
+      const vram = await demoVramDevice(
+        modelId ? await ctx.api.getModel(modelId) : null,
+      );
       const res = await ctx.api.generateScore(s.timeline.id, {
         prompt: film.music.prompt,
+        device: vram.device,
       });
       s.score = {
         job_id: res.job.job_id,
         asset_id: res.job.asset_id,
         version_id: null,
       };
-      return { kind: "jobs", job_ids: [res.job.job_id] };
+      return { kind: "jobs", job_ids: [res.job.job_id], _vramNote: vram.note };
     },
     async poll(ctx, work) {
       const state = await pollJobs(ctx.api, work.job_ids);
+      if (work._vramNote) {
+        state.note = work._vramNote;
+        delete work._vramNote;
+      }
       if (state.failed || !state.done) return state;
       const s = ctx.scratch;
       const job = await ctx.api.getJob(work.job_ids[0]);
@@ -672,7 +717,9 @@ function scorePlaceStep() {
       const videoItems = (videoTrack?.items ?? []).filter(
         (it) => it.asset_version_id,
       );
-      const total = videoItems.length ? Math.max(...videoItems.map((it) => it.end_time)) : 0;
+      const total = videoItems.length
+        ? Math.max(...videoItems.map((it) => it.end_time))
+        : 0;
       if (total <= 0) return { kind: "none", skipped: true };
       await ctx.api.createTimelineItem(s.timeline.id, {
         track_id: s.audioTrack.id,
@@ -757,11 +804,15 @@ function doneStep(film) {
  */
 export function buildMovieDemoSteps(host, preflight) {
   const film = DEMO_FILM;
-  const task = (key) => (preflight?.tasks ?? []).find((t) => t.key === key) ?? {};
+  const task = (key) =>
+    (preflight?.tasks ?? []).find((t) => t.key === key) ?? {};
   const assetsOk = task("assets").ok === true;
   const clipsOk = task("clips").ok === true;
   const clipsTextOk = task("clips_text").ok === true;
   const musicOk = task("music").ok === true;
+  // The preflight's enabled model per generation task — its vram_requirement
+  // drives the demo's live VRAM device choice + warning (docs/demo.md).
+  const modelId = (key) => task(key).model_id ?? null;
   // i2v clips need both a clip model (i2v) and panel previews (t2i).
   const i2vPossible = clipsOk && assetsOk;
   // A clip is generatable only via a real path: i2v (needs previews) or the t2v
@@ -773,19 +824,29 @@ export function buildMovieDemoSteps(host, preflight) {
   const timelineName = `${film.title} — timeline`;
 
   const steps = [introStep(), projectStep(film)];
-  for (const asset of film.assets) steps.push(assetStep(asset, assetsOk));
+  for (const asset of film.assets) {
+    steps.push(assetStep(asset, assetsOk, modelId("assets")));
+  }
   steps.push(storyboardStep(film, boardName));
   steps.push(panelsStep(film));
-  steps.push(panelPreviewsStep(film, assetsOk));
+  steps.push(panelPreviewsStep(film, assetsOk, modelId("assets")));
   steps.push(scenesStep(film));
   steps.push(linkStep(film, i2vPossible));
   for (let i = 0; i < film.scenes.length; i += 1) {
-    steps.push(clipStep(i, film, clipsAnyOk, i2vPossible));
+    steps.push(
+      clipStep(
+        i,
+        film,
+        clipsAnyOk,
+        i2vPossible,
+        clipsOk ? modelId("clips") : modelId("clips_text"),
+      ),
+    );
   }
   steps.push(timelineStep(film, timelineName));
   steps.push(tracksStep(film));
   steps.push(placeStep());
-  steps.push(scoreStep(film, musicOk));
+  steps.push(scoreStep(film, musicOk, modelId("music")));
   steps.push(scorePlaceStep());
   steps.push(renderStep(film));
   steps.push(doneStep(film));
