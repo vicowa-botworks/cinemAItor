@@ -212,8 +212,7 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     this.resetTone = "danger";
     this.resetConfirmLabel = "Delete all";
     this.resetBusy = false;
-    this.resetMessage =
-      "This deletes the demo project “The Lighthouse (demo)” and every asset, " +
+    this.resetMessage = "This deletes the demo project “The Lighthouse (demo)” and every asset, " +
       "panel, scene, and timeline it created — including the global scene clips " +
       "and score that survive a project delete. You can then run the demo again " +
       "from scratch.";
@@ -236,8 +235,7 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
       if (result.found) {
         clearMovieState();
         await this._loadProjects();
-        this.resetMessage =
-          `Deleted ${d.assets} asset(s), ${d.timelines} timeline(s), ` +
+        this.resetMessage = `Deleted ${d.assets} asset(s), ${d.timelines} timeline(s), ` +
           `${d.scenes} scene(s), ${d.panels} panel(s), ${d.storyboards} ` +
           `storyboard(s) and the demo project.` +
           (result.errors.length ? ` Errors: ${result.errors.join("; ")}` : "");
@@ -249,9 +247,7 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
       this.resetTone = "default";
       this.resetPhase = "result";
     } catch (err) {
-      this.resetMessage = `Reset failed: ${
-        err?.message || err
-      }. You can try again.`;
+      this.resetMessage = `Reset failed: ${err?.message || err}. You can try again.`;
       this.resetConfirmLabel = "Try again";
       this.resetTone = "danger";
       this.resetPhase = "result";

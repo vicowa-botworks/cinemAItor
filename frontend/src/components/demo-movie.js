@@ -86,9 +86,7 @@ function projectStep(film) {
     title: "Create the project",
     async prepare(ctx) {
       const existing = await findProjectByName(ctx.api, film.project.name);
-      ctx.scratch.project = existing
-        ? { id: existing.id, name: existing.name }
-        : null;
+      ctx.scratch.project = existing ? { id: existing.id, name: existing.name } : null;
     },
     async describe(ctx) {
       return ctx.scratch.project
@@ -424,9 +422,7 @@ function clipStep(index, film, clipsAnyOk, i2vPossible, modelId) {
       if (reuse) {
         return `Scene ${index + 1} already has a clip — reusing it.`;
       }
-      const how = i2vPossible
-        ? "image-to-video from its panel preview"
-        : "text-to-video";
+      const how = i2vPossible ? "image-to-video from its panel preview" : "text-to-video";
       return `Generating the clip for "${scene.name}" — ${how}, driven by the scene's motion prompt.`;
     },
     async execute(ctx) {
@@ -517,8 +513,7 @@ function tracksStep(film) {
     async prepare(ctx) {
       const s = ctx.scratch;
       const detail = (await ctx.api.getTimeline(s.timeline.id)) ?? {};
-      const byName = (name) =>
-        (detail.tracks ?? []).find((t) => t.name === name);
+      const byName = (name) => (detail.tracks ?? []).find((t) => t.name === name);
       s._videoTrackFound = byName(film.timeline.video_track) ?? null;
       s._audioTrackFound = byName(film.timeline.audio_track) ?? null;
     },
@@ -717,9 +712,7 @@ function scorePlaceStep() {
       const videoItems = (videoTrack?.items ?? []).filter(
         (it) => it.asset_version_id,
       );
-      const total = videoItems.length
-        ? Math.max(...videoItems.map((it) => it.end_time))
-        : 0;
+      const total = videoItems.length ? Math.max(...videoItems.map((it) => it.end_time)) : 0;
       if (total <= 0) return { kind: "none", skipped: true };
       await ctx.api.createTimelineItem(s.timeline.id, {
         track_id: s.audioTrack.id,
@@ -804,8 +797,7 @@ function doneStep(film) {
  */
 export function buildMovieDemoSteps(host, preflight) {
   const film = DEMO_FILM;
-  const task = (key) =>
-    (preflight?.tasks ?? []).find((t) => t.key === key) ?? {};
+  const task = (key) => (preflight?.tasks ?? []).find((t) => t.key === key) ?? {};
   const assetsOk = task("assets").ok === true;
   const clipsOk = task("clips").ok === true;
   const clipsTextOk = task("clips_text").ok === true;

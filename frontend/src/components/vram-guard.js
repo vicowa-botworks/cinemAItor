@@ -1,11 +1,6 @@
 import { html } from "lit";
 import { api } from "../api.js";
-import {
-  formatGb,
-  hardwareOf,
-  vramPreCheck,
-  vramSufficient,
-} from "./asset-generation.js";
+import { formatGb, hardwareOf, vramPreCheck, vramSufficient } from "./asset-generation.js";
 import "./vram-choice-dialog.js";
 
 /**

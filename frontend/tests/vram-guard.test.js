@@ -89,9 +89,7 @@ describe("demoVramDevice", () => {
           calls += 1;
           // 1st probe: free 2 GiB (below 4 GiB). 2nd (re-probe after free):
           // free 12 GiB (fits).
-          return calls === 1
-            ? stubHardware(16384, 14336)
-            : stubHardware(16384, 4096);
+          return calls === 1 ? stubHardware(16384, 14336) : stubHardware(16384, 4096);
         },
         async () => {
           freed += 1;
