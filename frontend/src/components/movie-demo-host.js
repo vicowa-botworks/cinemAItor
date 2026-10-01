@@ -114,6 +114,7 @@ export const MovieDemoHost = (superClass) =>
       if (!this.movieDemoPage) return;
       this._movieStarting = true;
       this._movieError = "";
+      this.requestUpdate?.();
       try {
         const preflight = await demoPreflight(api);
         const scratch = {};
@@ -128,6 +129,7 @@ export const MovieDemoHost = (superClass) =>
         this._movieError = err instanceof Error ? err.message : String(err);
       } finally {
         this._movieStarting = false;
+        this.requestUpdate?.();
       }
     }
 

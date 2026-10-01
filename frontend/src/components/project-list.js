@@ -167,7 +167,7 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
         style="background-color: var(--color-accent, #8b5cf6);"
         ?disabled=${this._movieRun || this._movieStarting}
         @click=${this._onStartMovieDemo}>
-        ${this._movieStarting ? "Starting…" : "Guided movie demo"}
+        ${this._movieStarting ? "Starting…" : this._movieRun ? "Running…" : "Guided movie demo"}
       </button>
     `;
   }
@@ -230,18 +230,22 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     }
     this.resetBusy = true;
     try {
+      // The saved run (localStorage) is independent of the DB objects — the demo
+      // stores it the moment you start, before anything is created. Clear it
+      // either way so a stopped/partial run can't re-appear as a card.
+      clearMovieState();
       const result = await resetDemoData(api);
       const d = result.deleted;
       if (result.found) {
-        clearMovieState();
         await this._loadProjects();
         this.resetMessage = `Deleted ${d.assets} asset(s), ${d.timelines} timeline(s), ` +
           `${d.scenes} scene(s), ${d.panels} panel(s), ${d.storyboards} ` +
-          `storyboard(s) and the demo project.` +
+          `storyboard(s) and the demo project. Saved demo progress cleared.` +
           (result.errors.length ? ` Errors: ${result.errors.join("; ")}` : "");
         this.resetConfirmLabel = "Done";
       } else {
-        this.resetMessage = "No demo data found to reset.";
+        this.resetMessage = "No demo data to remove. Saved demo progress " +
+          "cleared — it won't auto-resume.";
         this.resetConfirmLabel = "Close";
       }
       this.resetTone = "default";

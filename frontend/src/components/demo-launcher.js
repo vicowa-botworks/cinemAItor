@@ -47,6 +47,7 @@ export class DemoLauncher extends LitElement {
     busy: { type: Boolean },
     title: { type: String },
     hideGuided: { type: Boolean },
+    starting: { type: Boolean },
   };
 
   constructor() {
@@ -54,6 +55,7 @@ export class DemoLauncher extends LitElement {
     this.busy = false;
     this.title = "Demo";
     this.hideGuided = false;
+    this.starting = false;
   }
 
   _title() {
@@ -71,13 +73,23 @@ export class DemoLauncher extends LitElement {
   }
 
   render() {
+    // While a run is starting or alive, collapse to one labelled button so the
+    // click is visibly registered (no still-clickable buttons) and a
+    // double-click can't queue a second run.
+    if (this.busy) {
+      return html`
+        <span class="launcher" title=${this._title()}>
+          <button disabled>${this.starting ? "Starting…" : "Running…"}</button>
+        </span>
+      `;
+    }
     return html`
       <span class="launcher" title=${this._title()}>
-        <button ?disabled=${this.busy} @click=${() => this._start("auto")}>
+        <button @click=${() => this._start("auto")}>
           Demo: auto
         </button>
         ${this.hideGuided ? nothing : html`
-          <button ?disabled=${this.busy} @click=${() => this._start("guided")}>
+          <button @click=${() => this._start("guided")}>
             Demo: guided
           </button>
         `}
