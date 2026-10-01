@@ -66,6 +66,7 @@ export const DemoHost = (superClass) =>
           : nothing}
         <demo-launcher
           .busy=${this._demoStarting || Boolean(this._demoRun)}
+          .starting=${this._demoStarting}
           .title=${this.demoTitle ?? "Demo"}
           .hideGuided=${this.demoHideGuided === true}
           @start-demo=${this._onStartDemo}></demo-launcher>
@@ -93,6 +94,7 @@ export const DemoHost = (superClass) =>
       if (this._demoStarting || this._demoRun) return;
       this._demoStarting = true;
       this._demoError = "";
+      this.requestUpdate?.();
       try {
         const preflight = await demoPreflight(api);
         const steps = this.buildDemoSteps(mode, preflight);
@@ -103,10 +105,12 @@ export const DemoHost = (superClass) =>
         });
         this._demoStarting = false;
         this._demoRun = run;
+        this.requestUpdate?.();
         await run.start();
       } catch (err) {
         this._demoStarting = false;
         this._demoError = err instanceof Error ? err.message : String(err);
+        this.requestUpdate?.();
       }
     }
 
@@ -115,6 +119,7 @@ export const DemoHost = (superClass) =>
       if (!run) return;
       if (run.finished) {
         this._demoRun = null;
+        this.requestUpdate?.();
         return;
       }
       run.stop();
@@ -123,5 +128,6 @@ export const DemoHost = (superClass) =>
     _demoClose() {
       this._demoRun?.stop();
       this._demoRun = null;
+      this.requestUpdate?.();
     }
   };
