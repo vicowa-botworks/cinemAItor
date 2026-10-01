@@ -57,6 +57,11 @@ function makeApi(overrides = {}) {
   const id = (p) => `${p}-${++seq}`;
   const api = {
     created,
+    // Non-local_cli model so demoVramDevice returns early (device: null)
+    // without touching the real module-level api / hardware probes.
+    async getModel() {
+      return { id: 10, backend: "mock", vram_requirement_mb: null };
+    },
     async listProjects() {
       return created.projects;
     },
@@ -259,7 +264,10 @@ describe("buildMovieDemoSteps", () => {
   it("the project step reuses an existing project and creates one only when absent", async () => {
     // Existing → no create, scratch.project set from the match.
     let api = makeApi();
-    api.created.projects.push({ id: "p-existing", name: DEMO_FILM.project.name });
+    api.created.projects.push({
+      id: "p-existing",
+      name: DEMO_FILM.project.name,
+    });
     let steps = buildMovieDemoSteps({}, makePreflight());
     let ctx = { host: {}, api, scratch: {} };
     let s = step(steps, "movie-project");
@@ -330,7 +338,11 @@ describe("buildMovieDemoSteps", () => {
         assets: { key: "assets", ok: false, model_id: null, error: "none" },
       }),
     );
-    const ctx = { host: {}, api, scratch: { project: { id: "p1", name: "x" } } };
+    const ctx = {
+      host: {},
+      api,
+      scratch: { project: { id: "p1", name: "x" } },
+    };
     const s = step(steps, `assets-${slug}`);
     await s.prepare(ctx);
     const work = await s.execute(ctx);
@@ -454,7 +466,10 @@ describe("buildMovieDemoSteps", () => {
     const queued = await renderStep.execute(b.ctx);
     assertEquals(queued.kind, "render");
     assertEquals(queued.render_id, b.api.created.renders[0].id);
-    assertEquals(b.api.created.renders[0].preset_id, DEMO_FILM.timeline.render_preset);
+    assertEquals(
+      b.api.created.renders[0].preset_id,
+      DEMO_FILM.timeline.render_preset,
+    );
   });
 });
 

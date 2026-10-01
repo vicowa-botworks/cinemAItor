@@ -58,9 +58,12 @@ the engine knows nothing about specific pages.
 
 **Steps drive the host's own code paths.** `prepare` fills the page's actual form fields and
 `execute` calls the page's actual submit handler, so every validation, enhancement, and API call the
-user would make by hand happens for real. Demo mode bypasses the pre-generation VRAM dialog (the
-runner's own GPU→CPU auto-fallback still applies), and it works best with an LLM configured —
-auto-enhance runs when the page's preferences say so, and degrades silently without one.
+user would make by hand happens for real. Demo mode bypasses the interactive pre-generation VRAM
+dialog but still resolves the device: before each generation it force-frees the local GPU services
+(ComfyUI / llama) and re-probes, then generates on the GPU when the model fits afterwards or lets
+the runner's live auto-fallback decide otherwise — so an unattended demo never silently drops to the
+CPU without making the room first. It also works best with an LLM configured — auto-enhance runs
+when the page's preferences say so, and degrades silently without one.
 
 ## Engine events
 
