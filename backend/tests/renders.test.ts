@@ -487,6 +487,53 @@ describe("renders", () => {
     });
   });
 
+  it("references raw input pads for fx-free video items (no empty filter node)", () => {
+    // Regression: an item with no source edit, no grade and no fade produced
+    // an empty filter chain, emitted as a nameless node ("[0:v][v0]") that
+    // ffmpeg rejects with "No such filter: ''". Such items must reference
+    // their raw input pad directly in the downstream concat/xfade.
+    const item = (
+      i: number,
+      file: string,
+    ): RenderInputItem => ({
+      file_path: file,
+      start_time: i * 15,
+      end_time: (i + 1) * 15,
+      duration: 15,
+      transition: "cut",
+      transition_duration: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+      color_grade: null,
+      consumes_full_source: true,
+    });
+    const args = buildFxArgs([item(0, "/tmp/a.mp4"), item(1, "/tmp/b.mp4")], [], "/tmp/out.mp4");
+    const fc = args[args.indexOf("-filter_complex") + 1];
+    assert(!fc.includes("[v0]"), `empty filter node leaked into: ${fc}`);
+    assert(!fc.includes("[v1]"), `empty filter node leaked into: ${fc}`);
+    assertEquals(fc, "[0:v][1:v]concat=n=2:v=1:a=0[x1]");
+  });
+
+  it("tail-trims an fx-free item in the fx pass to its slot length", () => {
+    // A slot shorter than its source (consumes_full_source: false) with no
+    // other fx must be cut to the slot length for a frame-accurate cut.
+    const item: RenderInputItem = {
+      file_path: "/tmp/long.mp4",
+      start_time: 0,
+      end_time: 15,
+      duration: 15,
+      transition: "cut",
+      transition_duration: 0.5,
+      fade_in: 0,
+      fade_out: 0,
+      color_grade: null,
+      consumes_full_source: false,
+    };
+    const args = buildFxArgs([item], [], "/tmp/out.mp4");
+    const fc = args[args.indexOf("-filter_complex") + 1];
+    assert(fc.includes("trim=end=15"), `expected a tail trim in: ${fc}`);
+  });
+
   it("applies per-item fx (transition / fades / color grade) at render time", async () => {
     // Unique per-process output path: a hardcoded /tmp file would be
     // shared between parallel test processes.
