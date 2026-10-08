@@ -115,7 +115,7 @@ export const DEMO_FILM = {
       name: "EXT. Lighthouse head - DUSK",
       description:
         "The lighthouse on its head at dusk. The beam sweeps empty water as the keeper climbs in — the film opens on the machine and its keeper.",
-      target_duration: 12,
+      target_duration: 15,
       prompt:
         "Slow aerial push-in on the lighthouse as the beam completes its sweep; sea spray catches the light. Handheld energy, natural dusk light, 24mm wide.",
     },
@@ -123,7 +123,7 @@ export const DEMO_FILM = {
       name: "INT. Keeper's quarters - NIGHT",
       description:
         "A small room lit by lamp and log. The keeper and his daughter argue about leaving; the light still turns through the round window.",
-      target_duration: 30,
+      target_duration: 15,
       prompt:
         "Slow dolly around the lamplit room as the two argue; the beam sweeps the wall in long passes. Practical lamp light, 35mm, restrained moves.",
     },
@@ -131,7 +131,7 @@ export const DEMO_FILM = {
       name: "EXT. Shingle beach - DAWN",
       description:
         "Dawn, the storm passed. The keeper finds the beached boat and walks out to it; the lighthouse light no longer turns.",
-      target_duration: 20,
+      target_duration: 15,
       prompt:
         "Wide static shot as the keeper walks out across the shingle to the beached boat; the light stands dark in the background. Flat dawn light, 50mm.",
     },

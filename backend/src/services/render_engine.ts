@@ -420,16 +420,26 @@ export function buildFxArgs(
   for (const audio of audioItems) args.push("-i", audio.file_path);
 
   const filters: string[] = [];
+  // The label the downstream concat/xfade reads for each item: the item's
+  // filter output [vi] when it carries fx, or its raw input pad [i:v] when it
+  // has none — an empty filter chain would emit a nameless node ("[0:v][v0]")
+  // that ffmpeg rejects with "No such filter: ''".
+  const itemLabel: string[] = items.map((_, i) => `[${i}:v]`);
   for (const [i, item] of items.entries()) {
     const chain: string[] = [];
+    const so = item.source_offset ?? 0;
+    const speed = item.speed ?? 1;
     if (itemNeedsSourceEdit(item)) {
-      const so = item.source_offset ?? 0;
-      const speed = item.speed ?? 1;
       const srcEnd = round4(so + item.duration / speed);
       chain.push(
         `trim=start=${round4(so)}:end=${srcEnd}`,
         `setpts=(PTS-STARTPTS)/${round4(speed)}`,
       );
+    } else if (item.consumes_full_source === false) {
+      // Tail-trimmed: the slot is shorter than the source and the item starts
+      // at offset 0 at normal speed (so no start/source-edit), but it must be
+      // cut to its slot length for a frame-accurate cut.
+      chain.push(`trim=end=${round4(item.duration)}`);
     }
     const grade = item.color_grade ?? {};
     if (
@@ -453,11 +463,14 @@ export function buildFxArgs(
       const st = Math.max(0, round2(item.duration - item.fade_out));
       chain.push(`fade=t=out:st=${st}:d=${round2(item.fade_out)}`);
     }
-    filters.push(`[${i}:v]${chain.join(",")}[v${i}]`);
+    if (chain.length > 0) {
+      filters.push(`[${i}:v]${chain.join(",")}[v${i}]`);
+      itemLabel[i] = `[v${i}]`;
+    }
   }
 
   let acc = round2(items[0].duration);
-  let prev = "[v0]";
+  let prev = itemLabel[0];
   for (let i = 1; i < items.length; i++) {
     const next = items[i];
     if (next.transition !== "cut") {
@@ -467,12 +480,12 @@ export function buildFxArgs(
       );
       const offset = round2(acc - td);
       filters.push(
-        `${prev}[v${i}]xfade=transition=${XFADE_NAMES[next.transition] ?? "fade"}` +
+        `${prev}${itemLabel[i]}xfade=transition=${XFADE_NAMES[next.transition] ?? "fade"}` +
           `:duration=${td}:offset=${offset}[x${i}]`,
       );
       acc = round2(acc + next.duration - td);
     } else {
-      filters.push(`${prev}[v${i}]concat=n=2:v=1:a=0[x${i}]`);
+      filters.push(`${prev}${itemLabel[i]}concat=n=2:v=1:a=0[x${i}]`);
       acc = round2(acc + next.duration);
     }
     prev = `[x${i}]`;
