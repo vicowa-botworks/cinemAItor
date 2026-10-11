@@ -124,6 +124,16 @@ export class DemoRun {
     return this._finished;
   }
 
+  /** True once the run has begun (start() advanced past the intro state). */
+  get started() {
+    return this._idx >= 0;
+  }
+
+  /** True when the run was stopped or failed (a terminal or winding-down state). */
+  get stopped() {
+    return this._stopped;
+  }
+
   /** True when the run ended in a step failure (not done/stopped). */
   get failed() {
     return this._failedEntry !== null;

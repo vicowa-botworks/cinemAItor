@@ -41,14 +41,75 @@ export class DemoRunner extends LitElement {
   set run(value) {
     if (this._runRef) this._runRef._onEvent = () => {};
     this._runRef = value;
-    this._paused = false;
-    this._phase = "intro";
     this._log = [];
+    this._paused = false;
     if (value) {
       value._onEvent = (event) => this._onEvent(event);
       this._states = value.states;
+      // A run adopted mid-flight (kept alive across a navigation) already fired
+      // its start/step events while this panel was gone — rebuild the view from
+      // its live state so the card isn't blank (issue #197).
+      if (value.started) this._rehydrate(value);
+      else this._phase = "intro";
       if (this.renderRoot) this.requestUpdate();
+    } else {
+      this._states = [];
+      this._phase = "intro";
     }
+  }
+
+  /**
+   * Rebuild the narration + phase for a run already in progress. The engine's
+   * `states` are the source of truth; the log is reconstructed from them (no
+   * event replay), so a reattached card reads coherently and later events
+   * continue updating it in place.
+   */
+  _rehydrate(run) {
+    const total = run.states.length;
+    this._phase = run.finished
+      ? run.failed ? "failed" : run.stopped ? "stopped" : "done"
+      : "running";
+    const log = [
+      {
+        key: "start",
+        cls: "info",
+        title: this.title,
+        text: `${total} steps (automatic). Welcome back — the demo kept ` +
+          "running while you were away; here's its progress.",
+        live: "",
+      },
+    ];
+    run.states.forEach((s) => {
+      let live = "";
+      let text = "";
+      switch (s.status) {
+        case "done":
+          live = " ✓ done";
+          break;
+        case "skipped":
+          live = " – skipped";
+          break;
+        case "failed":
+          live = ` ✗ failed: ${s.error ?? ""}`;
+          break;
+        case "running":
+          text = "Running — watching the job…";
+          break;
+        case "ready":
+          text = "Ready.";
+          break;
+        default:
+          return; // pending — nothing to show yet
+      }
+      log.push({
+        key: s.id,
+        cls: "step",
+        title: this._stepLabel(s, s.index, total),
+        text,
+        live,
+      });
+    });
+    this._log = log;
   }
 
   get run() {

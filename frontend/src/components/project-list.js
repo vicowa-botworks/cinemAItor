@@ -148,6 +148,13 @@ export class ProjectList extends MovieDemoHost(DemoHost(LitElement)) {
     return true;
   }
 
+  /** The auto movie demo drives the API directly (no page form), so it can keep
+   * running when this page is navigated away from — and its progress card
+   * reappears when you come back (issue #197). */
+  get demoKeepAliveKey() {
+    return "movie-auto";
+  }
+
   get movieDemoPage() {
     return "projects";
   }

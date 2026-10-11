@@ -710,4 +710,39 @@ describe("DemoRun", () => {
     await run.continue();
     assertEquals(executed, ["a", "b"]);
   });
+
+  it("stopped is false until stop(), which settles a not-yet-started run", () => {
+    const run = new DemoRun({
+      steps: [makeStep({ id: "a", title: "A" })],
+      mode: "auto",
+      dwellMs: 0,
+    });
+    assertEquals(run.stopped, false);
+    run.stop();
+    assertEquals(run.stopped, true);
+    assertEquals(run.finished, true);
+  });
+
+  it("started is false before start and true once the run advances", async () => {
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+    const run = new DemoRun({
+      steps: [
+        makeStep({ id: "a", title: "A", prepare: () => gate }),
+      ],
+      mode: "auto",
+      dwellMs: 0,
+      pollMs: 0,
+    });
+    assertEquals(run.started, false);
+    const started = run.start();
+    await tick();
+    await tick();
+    assertEquals(run.started, true); // advanced into step 1, blocked in prepare
+    release();
+    await started;
+    assertEquals(run.finished, true);
+  });
 });
