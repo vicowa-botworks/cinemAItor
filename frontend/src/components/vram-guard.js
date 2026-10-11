@@ -18,13 +18,15 @@ import "./vram-choice-dialog.js";
  *   "cuda"   — "free up VRAM" + recheck confirmed enough VRAM → queue with device=cuda
  *   "cancel" — the user dismissed the dialog → the host must abort the submit
  *
- * Hosts may set `this.vramBypass = true` (demo mode): the interactive dialog
- * is never opened. Instead `resolveVramDevice` hands the most demanding local
- * CLI candidate to `demoVramDevice`, which force-frees the local GPU services
- * (ComfyUI / llama) and re-probes, then resolves "cuda" (it fits) or null
- * (let the runner's live auto-fallback decide) and leaves a `vramNote`
- * warning on the host when the run will drop to the CPU — so an unattended
- * demo never runs silently on the CPU without making the room first.
+ * Hosts may set `this.vramBypass = true` (demo mode): `resolveVramDevice`
+ * hands the most demanding local CLI candidate to `demoVramDevice`, which
+ * force-frees the local GPU services (ComfyUI / llama), waits for the unload
+ * to take effect, and re-probes. It resolves "cuda" when freeing made the
+ * model fit, or null (let the runner's live auto-fallback decide) when there
+ * is nothing to guard — leaving a `vramNote` warning on the host either way.
+ * When freeing genuinely cannot make the model fit, the demo does NOT silently
+ * drop to the CPU (issue #198): it opens the same choice dialog and waits for
+ * the user to free memory (→ GPU) or explicitly approve the slow CPU path.
  */
 export const VramGuard = (superClass) =>
   class extends superClass {
@@ -82,6 +84,12 @@ export const VramGuard = (superClass) =>
           .sort((a, b) => b.vram_requirement_mb - a.vram_requirement_mb)[0];
         const decision = await demoVramDevice(candidate);
         this._vramNote = decision.note;
+        // Freed the local GPU services and it STILL won't fit: never silently
+        // drop a demo run to the CPU (issue #198). Ask the user — free memory
+        // and continue on the GPU, or explicitly approve the slow CPU path.
+        if (decision.blocked && candidate) {
+          return this._openVramDialog(candidate, decision.check);
+        }
         return decision.device;
       }
       for (const model of list) {
@@ -121,12 +129,24 @@ export const VramGuard = (superClass) =>
       // If VRAM auto-unload is enabled, free the local GPU services once and
       // re-probe — if that's enough, continue on the GPU without a dialog.
       if (await this._tryAutoFreeVram(model)) return "cuda";
-      if (this.vramBypass) return null; // demo: no dialog — the runner's live auto-fallback decides
+      return this._openVramDialog(model, check);
+    }
+
+    /**
+     * Open the VRAM choice dialog for a model that is short on VRAM and wait
+     * for the user's decision. Shared by the interactive path and the demo
+     * (vramBypass) "freed but still short" fallback, so a low-VRAM generation
+     * is never silently routed to the CPU.
+     * @param {{backend?: string, vram_requirement_mb?: number|null}} model
+     * @param {{requirementMb?: number|null, freeMb?: number|null, gpuModel?: string|null}} check
+     * @returns {Promise<"cpu" | "cuda" | "cancel">}
+     */
+    _openVramDialog(model, check) {
       this._vram = {
         open: true,
-        requirementGb: formatGb(check.requirementMb),
-        freeGb: formatGb(check.freeMb),
-        gpuModel: check.gpuModel ?? "",
+        requirementGb: formatGb(check?.requirementMb),
+        freeGb: formatGb(check?.freeMb),
+        gpuModel: check?.gpuModel ?? "",
         rechecking: false,
       };
       this._vramModel = model;
@@ -248,22 +268,38 @@ export const VramGuard = (superClass) =>
  * Demo/unattended VRAM decision — the no-dialog counterpart of the interactive
  * guard. When a local_cli model won't fit the free VRAM, force-free every
  * detected local GPU service (ComfyUI / llama) regardless of the auto-unload
- * setting, re-probe live, and report the outcome as a narration note. This is
- * what keeps a demo run from silently dropping to the CPU when a local LLM or
- * ComfyUI is hogging the GPU: it makes the room, and tells the user if it
- * still can't. Fail-open: any unknown (no local_cli model, no requirement,
- * the hardware endpoint erroring) resolves to `{device: null, note: null}`.
+ * setting, WAIT for the unload to actually take effect, re-probe, and report
+ * the outcome. This is what keeps a demo run from silently dropping to the CPU
+ * when a local LLM or ComfyUI is hogging the GPU: it makes the room, waits for
+ * the room to actually clear, and only then decides. Fail-open: any unknown
+ * (no local_cli model, no requirement, the hardware endpoint erroring)
+ * resolves to `{device: null, note: null}`.
+ *
+ * The wait matters: a ComfyUI `/free` or llama `/models/unload` request returns
+ * before the process has released its VRAM, so a single immediate re-probe
+ * still reads the old usage and wrongly drops the run to the CPU even though
+ * the memory frees a beat later — exactly the "it didn't clean VRAM, chose CPU"
+ * symptom (issue #198). Poll a few times before giving up on the GPU.
  *
  * @param {{backend?: string, vram_requirement_mb?: number|null} | null | undefined} model
  *   The model the run will use (for a demo step, the most demanding enabled
  *   candidate for its task type).
- * @returns {Promise<{device: string|null, note: string|null}>}
+ * @param {{attempts?: number, intervalMs?: number, sleep?: (ms:number)=>Promise<void>}} [opts]
+ *   Poll budget for the post-free re-probe (injectable for tests).
+ * @returns {Promise<{device: string|null, note: string|null, blocked?: boolean, check?: object|null}>}
  *   device "cuda" — freeing made it fit, queue on the GPU; device null — no
- *   local_cli gate, VRAM already sufficient, or still short after freeing
- *   (the runner's own CPU auto-fallback applies); note — a warning to surface
- *   in the narration (null when there is nothing to warn about).
+ *   local_cli gate / VRAM already sufficient (note null), or `blocked: true`
+ *   when it is still short after freeing (the caller must NOT silently run on
+ *   the CPU: the interactive guard opens the choice dialog, an unattended run
+ *   surfaces the note and lets the runner decide); note — a warning to surface
+ *   in the narration; check — the latest VRAM pre-check (for the dialog).
  */
-export async function demoVramDevice(model) {
+export async function demoVramDevice(model, opts = {}) {
+  const {
+    attempts = FREE_WAIT_ATTEMPTS,
+    intervalMs = FREE_WAIT_INTERVAL_MS,
+    sleep = sleepMs,
+  } = opts;
   if (!model || model.backend !== "local_cli") {
     return { device: null, note: null };
   }
@@ -275,18 +311,29 @@ export async function demoVramDevice(model) {
     return { device: null, note: null };
   }
   if (!check.needed) return { device: null, note: null };
-  // Tight: force-free the local GPU services and re-probe before deciding.
-  await _forceFreeVram();
+  // Tight: force-free the local GPU services, then re-probe — immediately once,
+  // and again on a short poll while the async unload lands.
+  const freed = await _forceFreeVram();
   let refit = false;
-  try {
-    const hw = await api.getModelsHardware({ refresh: true });
-    refit = vramSufficient(model, hardwareOf(hw));
-  } catch {
-    refit = false;
+  const reprobe = async () => {
+    try {
+      const hw = await api.getModelsHardware({ refresh: true });
+      check = vramPreCheck(model, hardwareOf(hw));
+      refit = vramSufficient(model, hardwareOf(hw));
+    } catch {
+      /* keep the last check; the poll retries until the budget is spent */
+    }
+  };
+  await reprobe();
+  for (let i = 0; freed && !refit && i < attempts; i++) {
+    await sleep(intervalMs);
+    await reprobe();
   }
   if (refit) {
     return {
       device: "cuda",
+      blocked: false,
+      check,
       note: `Free VRAM was tight (${formatGb(check.freeMb)} free of ` +
         `${formatGb(check.requirementMb)} needed), so I freed the local GPU ` +
         `services first — it fits now and this runs on the GPU.`,
@@ -294,11 +341,19 @@ export async function demoVramDevice(model) {
   }
   return {
     device: null,
+    blocked: true,
+    check,
     note: `Not enough free VRAM (${formatGb(check.freeMb)} free, ` +
       `${formatGb(check.requirementMb)} needed) even after freeing the local ` +
-      `GPU services — this runs on the CPU, which is much slower.`,
+      `GPU services — free some memory to run this on the GPU, otherwise it ` +
+      `falls back to the CPU (much slower).`,
   };
 }
+
+/** Post-free re-probe budget: ~6s total, enough for a ComfyUI/llama unload. */
+const FREE_WAIT_ATTEMPTS = 6;
+const FREE_WAIT_INTERVAL_MS = 1000;
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Force-free the detected local GPU services (ComfyUI / llama) regardless of
