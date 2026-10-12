@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { closeDb, getDb, resetDb } from "../src/db/database.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
 import * as schema from "../src/db/schema.ts";
