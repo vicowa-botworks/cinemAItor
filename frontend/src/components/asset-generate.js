@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import "./ref-input.js";
 import { buildAssistRequest, skillMatchesModel } from "../ai-assist-request.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
+import { autoModelFor, autoOptionLabel, loadModelDefaults } from "../model-defaults.js";
 import {
   ASPECT_RATIO_PRESETS,
   AUDIO_ASSET_TYPES,
@@ -254,6 +255,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     references: { state: true },
     includeCurrent: { state: true },
     models: { state: true },
+    taskDefaults: { state: true },
     busy: { state: true },
     error: { state: true },
     status: { state: true },
@@ -292,6 +294,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
     this.references = [];
     this.includeCurrent = false;
     this.models = [];
+    this.taskDefaults = {};
     this.busy = false;
     this.error = "";
     this.status = "";
@@ -356,6 +359,11 @@ export class AssetGenerate extends VramGuard(LitElement) {
 
   async _loadModels() {
     const taskType = this._taskType();
+    // The registry default decides which model "Auto" resolves to; loaded
+    // every time (not cached per task type) so an admin's change shows up.
+    loadModelDefaults(api).then((view) => {
+      this.taskDefaults = view.defaults;
+    });
     if (this._modelCache.has(taskType)) {
       this.models = this._modelCache.get(taskType);
       return;
@@ -585,14 +593,20 @@ export class AssetGenerate extends VramGuard(LitElement) {
     return this.kind === "video" ? VIDEO_ASSET_TYPES : IMAGE_ASSET_TYPES;
   }
 
-  /** The model the job will run on: the explicit pick, or the "auto" first. */
+  /** The model an omitted model_id resolves to for the current task type. */
+  _autoModel() {
+    // Matches the backend's pickModel: the task type's default when it is one
+    // of these enabled models, otherwise the first (ordered by name, version).
+    // The request still sends no model_id, so the server stays authoritative.
+    return autoModelFor(this.models, this.taskDefaults, this._taskType());
+  }
+
+  /** The model the job will run on: the explicit pick, or the "auto" one. */
   _selectedModel() {
     if (this.modelId) {
       return this.models.find((m) => m.id === this.modelId) ?? null;
     }
-    // Matches the backend's pickModel auto-pick (first enabled model for the
-    // task, ordered by name, version).
-    return this.models[0] ?? null;
+    return this._autoModel();
   }
 
   /** Live "W×H" for the current aspect/resolution picks, or "model default". */
@@ -955,7 +969,7 @@ export class AssetGenerate extends VramGuard(LitElement) {
                 this.modelId = e.target.value;
               }}
               ?disabled=${this.busy}>
-              <option value="">Auto (first enabled ${this._taskType()})</option>
+              <option value="">${autoOptionLabel(this._autoModel())} · ${this._taskType()}</option>
               ${this.models.map(
                 (m) => html`<option value=${m.id}>${m.display_name ?? m.name}</option>`,
               )}

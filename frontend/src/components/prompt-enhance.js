@@ -3,6 +3,7 @@
 // DOM-free; unit-tested in frontend/tests/prompt-enhance.test.js.
 
 import { buildAssistRequest, skillMatchesModel } from "../ai-assist-request.js";
+import { autoModelFor, loadModelDefaults } from "../model-defaults.js";
 
 const REF_TOKEN_RE = /@[A-Za-z0-9_][A-Za-z0-9_]*(?::v?\d+)?/;
 const PREFS_PREFIX = "cinemaitor:enhance:";
@@ -116,7 +117,7 @@ export async function runEnhance(
     models = [];
   }
   const model = (Array.isArray(models) ? models : []).find((m) => m.id === modelId) ??
-    models[0] ?? null;
+    autoModelFor(models, (await loadModelDefaults(api)).defaults, taskType);
   if (!model) return null;
 
   let skillId = "";

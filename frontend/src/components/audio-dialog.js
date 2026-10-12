@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import "./ref-input.js";
 import "./ai-assist-dialog.js";
 import { VramGuard } from "./vram-guard.js";
+import { autoModelFor, loadModelDefaults } from "../model-defaults.js";
 
 const KINDS = [
   { value: "music", label: "Music" },
@@ -267,16 +268,14 @@ export class AudioDialog extends VramGuard(LitElement) {
       this.error = "No project or scene context available.";
       return;
     }
-    // No model picker here — the backend auto-picks the first enabled model
-    // for the kind's task type, so the gate checks that same model.
+    // No model picker here — the backend auto-picks the task type's default
+    // (or the first enabled model), so the gate checks that same model.
     const taskType = this._kindTaskType();
-    let model = null;
-    try {
-      const models = await api.listModels({ task_type: taskType, enabled: true });
-      model = models[0] ?? null;
-    } catch {
-      model = null;
-    }
+    const [defaults, models] = await Promise.all([
+      loadModelDefaults(api).then((view) => view.defaults).catch(() => ({})),
+      api.listModels({ task_type: taskType, enabled: true }).catch(() => []),
+    ]);
+    const model = autoModelFor(models, defaults, taskType);
     const device = await this.resolveVramDevice(model);
     if (device === "cancel") return;
     this.submitting = true;

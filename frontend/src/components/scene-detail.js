@@ -6,9 +6,14 @@ import "./audio-dialog.js";
 import "./ai-assist-dialog.js";
 import { VramGuard } from "./vram-guard.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
+import { autoModelFor, loadModelDefaults } from "../model-defaults.js";
 import { DemoHost } from "./demo-host.js";
 import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildSceneDemoSteps } from "./demo-scenes.js";
+
+/** The two task types a scene generation may run (i2v when a panel preview
+ * is linked, t2v otherwise) — see backend creative_generation task upgrade. */
+const SCENE_TASK_TYPES = ["image_to_video", "text_to_video"];
 
 const SCENE_STATUSES = [
   "draft",
@@ -297,6 +302,7 @@ export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) 
     scene: { state: true },
     shots: { state: true },
     models: { state: true },
+    taskDefaults: { state: true },
     loading: { state: true },
     error: { state: true },
     notice: { state: true },
@@ -336,6 +342,7 @@ export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) 
     this.assistTarget = "scene";
     this._sceneId = null;
     this._modelChoice = "";
+    this.taskDefaults = {};
     this._seed = "";
     this._pollTimer = null;
     this._enhancePrefs = loadPrefs(window.localStorage, "scene");
@@ -587,7 +594,7 @@ export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) 
                       id="scene-model"
                       .value=${String(this._modelChoice ?? "")}
                       @change=${(e) => (this._modelChoice = e.target.value)}>
-                      <option value="">default (auto i2v / t2v)</option>
+                      <option value="">${this._autoOptionLabel()}</option>
                       ${this.models.map(
                         (m) =>
                           html`<option value=${m.id}>${m.name} (${
@@ -778,6 +785,11 @@ export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) 
   }
 
   async _loadModels() {
+    // The registry defaults decide which models "auto" resolves to (and which
+    // ones the VRAM guard has to be checked against).
+    loadModelDefaults(api).then((view) => {
+      this.taskDefaults = view.defaults;
+    });
     if (this.models.length > 0) return;
     try {
       const [i2v, t2v] = await Promise.all([
@@ -790,6 +802,31 @@ export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) 
     } catch {
       this.models = [];
     }
+  }
+
+  /**
+   * The models an auto (no explicit choice) run can land on: the default for
+   * each of the two task types the backend may pick. Empty when no defaults
+   * are configured — the caller then falls back to the whole candidate set,
+   * because without one the auto pick depends on each shot's inputs.
+   */
+  _autoModels() {
+    if (!SCENE_TASK_TYPES.some((t) => this.taskDefaults[t])) return [];
+    const picked = SCENE_TASK_TYPES.map((taskType) =>
+      autoModelFor(
+        this.models.filter((m) => m.task_types?.includes(taskType)),
+        this.taskDefaults,
+        taskType,
+      )
+    ).filter(Boolean);
+    return [...new Set(picked)];
+  }
+
+  /** Label for the auto option, naming the defaults it resolves to. */
+  _autoOptionLabel() {
+    const names = this._autoModels().map((m) => m.display_name ?? m.name);
+    if (names.length === 0) return "default (auto i2v / t2v)";
+    return `default (${[...new Set(names)].join(" / ")})`;
   }
 
   async _load() {
@@ -1093,10 +1130,12 @@ export class SceneDetail extends MovieDemoHost(DemoHost(VramGuard(LitElement))) 
       if (this.error) return;
     }
     // The backend picks i2v (linked panel preview) or t2v when no model is
-    // chosen, so gate on the whole candidate set — never silently fall to CPU.
+    // chosen, so gate on every model the run could land on — never silently
+    // fall to CPU. With task-type defaults that is just those defaults;
+    // otherwise the whole candidate set.
     const model = this._modelChoice
       ? this.models.find((m) => m.id === this._modelChoice) ?? null
-      : this.models;
+      : (this._autoModels().length > 0 ? this._autoModels() : this.models);
     const device = await this.resolveVramDevice(model);
     if (device === "cancel") return;
     const options = {};

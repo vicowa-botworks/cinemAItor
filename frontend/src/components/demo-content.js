@@ -5,6 +5,8 @@
 // frontend/tests/demo-mode.test.js. Step builders that drive the real page
 // components live with each page (see the page demos in docs/demo.md).
 
+import { autoModelFor, loadModelDefaults } from "../model-defaults.js";
+
 // The demo film. Prompts are deliberately simple and model-agnostic: the demo's
 // job is to show the flow, and the model-skill auto-enhance (prompt-enhance.js)
 // polishes them per the selected model when the user has that on.
@@ -215,6 +217,9 @@ export const DEMO_TASKS = [
  * optional-signal only (prompt auto-enhance) and never gates the demo.
  */
 export async function demoPreflight(api) {
+  // The demo runs the same auto-pick the pages use, so honour the configured
+  // task-type defaults rather than always taking the first enabled model.
+  const { defaults } = await loadModelDefaults(api);
   const tasks = [];
   for (const task of DEMO_TASKS) {
     let row;
@@ -223,10 +228,11 @@ export async function demoPreflight(api) {
         task_type: task.task_type,
         enabled: "true",
       });
+      const picked = autoModelFor(models, defaults, task.task_type);
       row = {
         ...task,
-        ok: models.length > 0,
-        model_id: models.length > 0 ? models[0].id : null,
+        ok: Boolean(picked),
+        model_id: picked?.id ?? null,
         error: null,
       };
     } catch (err) {

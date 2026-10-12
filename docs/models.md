@@ -31,6 +31,8 @@ task mapping, hardware detection, and requirement warnings.
 | PATCH  | `/api/v1/models/huggingface/settings`      | Store or clear the HF token (`{token}`) (admin)                               |
 | POST   | `/api/v1/models/huggingface/settings/test` | Validate the effective token via HF `/whoami-v2` (admin)                      |
 | POST   | `/api/v1/models/from-huggingface`          | Register a model straight from an HF repo (admin)                             |
+| GET    | `/api/v1/models/defaults`                  | Default model per task type (`{defaults, models, task_types}`)                |
+| PUT    | `/api/v1/models/defaults/:taskType`        | Set (`{model_id}`) or clear (`null`) one default (admin)                      |
 | GET    | `/api/v1/models/:id`                       | One model                                                                     |
 | PATCH  | `/api/v1/models/:id`                       | Update metadata / enable / disable (admin)                                    |
 | DELETE | `/api/v1/models/:id`                       | Remove model + installed files (admin)                                        |
@@ -284,6 +286,12 @@ job instead of always forcing a CPU fallback.
   - Removing a model deletes its benchmark rows (explicit cleanup — SQLite FK enforcement is off).
   - The model-manager UI shows a Benchmark button per model and a per-task results table (latest
     runs first), polling the job to a terminal state before refreshing.
+- **Default model per task type** (`db/model_defaults.ts`, `task_type_defaults`, migration 0032):
+  which model an auto-picked generation gets when the request omits `model_id` — project override >
+  the registry default for the task > the first enabled model (alphabetical). Admins set it in the
+  model-manager's **Task defaults** panel; a project overrides it in its own form. A default that
+  stops qualifying (model removed, disabled, or its task types edited) is skipped rather than
+  failing the run. See `docs/model_defaults.md`.
 
 ## Real adapters (GEN-009/010)
 

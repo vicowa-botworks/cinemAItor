@@ -318,7 +318,7 @@ function enqueueGeneration(
   resolution: number | undefined,
 ) {
   const taskType = inputs.length > 0 ? KIND_TASK_TYPES[kind].input : KIND_TASK_TYPES[kind].text;
-  const model = pickModel(taskType, modelId);
+  const model = pickModel(taskType, modelId, target.project_id);
   // Output size (image kind only): concrete width/height from the aspect ratio
   // + base edge. The runner exposes these to the model (RUNNER_WIDTH/RUNNER_
   // HEIGHT env, {width}/{height} CLI args, {{width}}/{{height}} ComfyUI slots).

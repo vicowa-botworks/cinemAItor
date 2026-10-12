@@ -526,8 +526,10 @@ export function deleteModel(userId: number, id: string): boolean {
   if (!existing) return false;
   const db = getDb();
   // SQLite FK enforcement is off in this app, so remove benchmark rows
-  // explicitly (the migration's ON DELETE CASCADE is declarative only).
+  // explicitly (the migration's ON DELETE CASCADE is declarative only) — and
+  // any task-type default held by this model, which would otherwise dangle.
   deleteBenchmarkResults(id);
+  db.prepare("DELETE FROM task_type_defaults WHERE model_id = ?").run(id);
   db.prepare("DELETE FROM models WHERE id = ?").run(id);
   logAudit(userId, "model.remove", id, { name: existing.name });
   return true;

@@ -623,6 +623,23 @@ class ApiClient {
     return this.request(`/models/${encodeURIComponent(id)}`);
   }
 
+  /**
+   * Default model per task type (docs/model_defaults.md): what the server
+   * auto-picks when a generation request omits model_id. `models` names each
+   * default so a picker can label it without a second request.
+   */
+  listModelDefaults() {
+    return this.request("/models/defaults");
+  }
+
+  /** Admin: set the default for one task type, or null to clear it. */
+  setModelDefault(taskType, modelId) {
+    return this.request(`/models/defaults/${encodeURIComponent(taskType)}`, {
+      method: "PUT",
+      body: JSON.stringify({ model_id: modelId }),
+    });
+  }
+
   registerModel(data) {
     return this.request("/models", {
       method: "POST",

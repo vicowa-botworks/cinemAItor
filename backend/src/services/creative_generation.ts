@@ -1,5 +1,6 @@
 import { badRequest, notFound } from "../errors.ts";
 import { findModelsForTask, getModel, type Model } from "../db/models.ts";
+import { parseModelPreferences, resolveDefaultModel } from "../db/model_defaults.ts";
 import { createJob } from "../db/jobs.ts";
 import {
   createAsset,
@@ -9,9 +10,9 @@ import {
   hasAssetPermission,
 } from "../db/assets.ts";
 import { isAudioAssetType } from "../db/audio.ts";
-import { type CreativePrompt, creativePrompt, getPanel } from "../db/storyboards.ts";
+import { type CreativePrompt, creativePrompt, getPanel, getStoryboard } from "../db/storyboards.ts";
 import { creativePromptFor, getScene } from "../db/scenes.ts";
-import { getProjectAccessible } from "../db/projects.ts";
+import { getProjectAccessible, getProjectById } from "../db/projects.ts";
 import { listReferencesForSource, type ReferenceRow } from "../db/references.ts";
 import { getDb } from "../db/database.ts";
 import { type GenerationDevice, resolveDevice } from "./asset_generation.ts";
@@ -42,7 +43,35 @@ export function deviceJobSettings(
   return settings;
 }
 
-export function pickModel(taskType: string, modelId: string | undefined): Model {
+/**
+ * A project's per-task-type default overrides (its
+ * `default_model_preferences_json`, migration 0001). Global assets and
+ * project-less paths have none.
+ */
+function projectModelPreferences(
+  projectId: string | null | undefined,
+): Record<string, string> {
+  if (!projectId) return {};
+  return parseModelPreferences(getProjectById(projectId)?.default_model_preferences_json);
+}
+
+/**
+ * The model a generation request runs on.
+ *
+ * An explicit `model_id` is validated and always wins. Otherwise the default
+ * for the task type is resolved — project override, then the registry-wide
+ * task-type default (docs/model_defaults.md) — and only when no default
+ * applies does it fall back to the first enabled model for the task
+ * (alphabetical, the historical behaviour).
+ *
+ * `projectId` scopes the project override; pass null/undefined for global
+ * assets and project-less paths.
+ */
+export function pickModel(
+  taskType: string,
+  modelId: string | undefined,
+  projectId?: string | null,
+): Model {
   if (modelId) {
     const model = getModel(modelId);
     if (!model) throw badRequest("Model not found");
@@ -54,6 +83,8 @@ export function pickModel(taskType: string, modelId: string | undefined): Model 
     }
     return model;
   }
+  const preferred = resolveDefaultModel(taskType, projectModelPreferences(projectId));
+  if (preferred) return preferred;
   const candidates = findModelsForTask(taskType);
   if (candidates.length === 0) {
     throw badRequest(
@@ -121,7 +152,11 @@ export function generatePanelPreview(
   );
   if (!prompt) throw badRequest("Panel has no prompt");
 
-  const model = pickModel("text_to_image", options.model_id);
+  const model = pickModel(
+    "text_to_image",
+    options.model_id,
+    getStoryboard(panel.storyboard_id, userId, "read")?.project_id,
+  );
 
   // Target asset: one image asset per panel, created on first use.
   const slug = `panel_${panelId.slice(0, 8)}`;
@@ -208,22 +243,28 @@ export function generateScene(
   let jobType: "image_to_video" | "text_to_video";
   let model: Model;
   let inputs: { asset_id: string; version_number: number }[] = [];
+  const preferences = projectModelPreferences(scene.project_id);
   if (inputRow) {
-    model = pickModel("image_to_video", options.model_id);
+    model = pickModel("image_to_video", options.model_id, scene.project_id);
     jobType = "image_to_video";
     inputs.push(inputRow);
   } else if (options.model_id) {
-    model = pickModel("text_to_video", options.model_id);
+    model = pickModel("text_to_video", options.model_id, scene.project_id);
     jobType = "text_to_video";
   } else {
-    const t2v = findModelsForTask("text_to_video");
-    if (t2v.length === 0) {
+    // No explicit model: the task-type default (project override first), then
+    // the first enabled t2v model — resolved here rather than through
+    // pickModel so this path keeps its own guidance for a user with no t2v
+    // model at all.
+    const t2v = resolveDefaultModel("text_to_video", preferences) ??
+      findModelsForTask("text_to_video")[0];
+    if (!t2v) {
       throw badRequest(
         "No image input found and no enabled text_to_video model available. " +
           "Generate a linked panel preview first, or install a text_to_video model.",
       );
     }
-    model = t2v[0];
+    model = t2v;
     jobType = "text_to_video";
   }
 
@@ -318,7 +359,7 @@ export function batchGenerateScene(
   ).get(sceneId) as { asset_id: string; version_number: number } | undefined;
 
   const jobType: "image_to_video" | "text_to_video" = inputRow ? "image_to_video" : "text_to_video";
-  const model = pickModel(jobType, options.model_id);
+  const model = pickModel(jobType, options.model_id, scene.project_id);
   const baseInputs = inputRow ? [inputRow] : [];
   const scenePrompt = creativePromptFor("scene", sceneId, userId);
   // Shared fallback references: shots without their own prompt inherit the
@@ -459,7 +500,7 @@ export function generateAudio(
   }
 
   const taskType = AUDIO_KIND_TASK_TYPES[kind];
-  const model = pickModel(taskType, options.model_id);
+  const model = pickModel(taskType, options.model_id, projectId);
 
   const hex = Array.from(
     crypto.getRandomValues(new Uint8Array(4)),
@@ -547,7 +588,7 @@ export function generateSubtitles(
     throw badRequest("Asset version has no stored file");
   }
 
-  const model = pickModel(SUBTITLE_JOB_TYPE, options.model_id);
+  const model = pickModel(SUBTITLE_JOB_TYPE, options.model_id, asset.project_id);
 
   const hex = Array.from(
     crypto.getRandomValues(new Uint8Array(4)),

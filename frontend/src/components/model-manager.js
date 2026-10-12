@@ -8,6 +8,11 @@ import {
   needsProposalNudge,
 } from "../copilot-followup.js";
 import { installProgressLabel, installProgressPercent } from "../install-progress.js";
+import {
+  defaultTaskTypesFor,
+  invalidateModelDefaults,
+  loadModelDefaults,
+} from "../model-defaults.js";
 import "./confirm-dialog.js";
 
 const TASK_TYPES = [
@@ -287,6 +292,12 @@ export class ModelManager extends LitElement {
       opacity: 0.7;
     }
 
+    .chip.default {
+      background-color: rgba(59, 130, 246, 0.15);
+      color: #1d4ed8;
+      border-color: transparent;
+    }
+
     .chip.health-ok {
       background-color: rgba(34, 197, 94, 0.15);
       color: #15803d;
@@ -365,6 +376,43 @@ export class ModelManager extends LitElement {
     }
 
     .admin-note {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .task-defaults {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .default-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .default-row .default-task {
+      min-width: 140px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .default-row select {
+      padding: 7px 10px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text);
+      font-size: 13px;
+      min-width: 240px;
+    }
+
+    .default-row .default-hint {
       font-size: 12px;
       color: var(--color-text-muted);
     }
@@ -1323,6 +1371,10 @@ export class ModelManager extends LitElement {
     vramServices: { state: true },
     vramFreeBusy: { state: true },
     vramFreeResult: { state: true },
+    taskDefaults: { state: true },
+    defaultCandidates: { state: true },
+    defaultsBusy: { state: true },
+    defaultsError: { state: true },
   };
 
   constructor() {
@@ -1334,6 +1386,10 @@ export class ModelManager extends LitElement {
     this.vramServices = null;
     this.vramFreeBusy = false;
     this.vramFreeResult = null;
+    this.taskDefaults = {};
+    this.defaultCandidates = [];
+    this.defaultsBusy = null;
+    this.defaultsError = "";
     this.isAdmin = false;
     this.loading = false;
     this.busyId = null;
@@ -1641,6 +1697,8 @@ export class ModelManager extends LitElement {
         ${this._renderCopilotPanel()}
 
         ${this._renderHfPanel()}
+
+        ${this._renderTaskDefaultsPanel()}
 
         <div class="panel">
           <div class="filters">
@@ -2634,6 +2692,72 @@ export class ModelManager extends LitElement {
     `;
   }
 
+  /**
+   * Default model per task type (docs/model_defaults.md). Only task types with
+   * at least one enabled model are listed — a default for a task nothing
+   * serves is not actionable.
+   */
+  _renderTaskDefaultsPanel() {
+    const rows = TASK_TYPES.filter(
+      (t) => this._defaultCandidatesFor(t).length > 0 || this.taskDefaults[t],
+    );
+    return html`
+      <div class="panel">
+        <h3>Task defaults</h3>
+        <p class="admin-note">
+          The model used when a generation does not pick one. A project can
+          override these for its own assets in its settings.
+        </p>
+        ${this.defaultsError ? html`<div class="error">${this.defaultsError}</div>` : null}
+        ${rows.length === 0
+          ? html`<p class="admin-note">
+              No enabled models yet — a task type appears here once a model
+              supports it.
+            </p>`
+          : html`
+            <div class="task-defaults">
+              ${rows.map((taskType) => {
+                const candidates = this._defaultCandidatesFor(taskType);
+                const current = this.taskDefaults[taskType] ?? "";
+                const known = candidates.some((m) => m.id === current);
+                const busy = this.defaultsBusy === taskType;
+                return html`
+                  <div class="default-row">
+                    <span class="default-task">${taskType}</span>
+                    <select
+                      .value=${current}
+                      ?disabled=${!this.isAdmin || busy}
+                      @change=${(e) => this._onDefaultChange(taskType, e.target.value)}>
+                      <option value="">No default — first enabled</option>
+                      ${known || current === ""
+                        ? null
+                        : html`<option value=${current}>${current} (unavailable)</option>`}
+                      ${candidates.map(
+                        (m) =>
+                          html`<option value=${m.id}>${m.name}${
+                            m.version ? ` ${m.version}` : ""
+                          }</option>`,
+                      )}
+                    </select>
+                    <span class="default-hint">
+                      ${busy
+                        ? "Saving…"
+                        : candidates.length === 1
+                        ? "only enabled model for this task"
+                        : `${candidates.length} models available`}
+                    </span>
+                  </div>
+                `;
+              })}
+            </div>
+          `}
+        ${!this.isAdmin
+          ? html`<p class="admin-note">Only admins can change the defaults.</p>`
+          : null}
+      </div>
+    `;
+  }
+
   _renderVramUnloadPanel() {
     const settings = this.vramSettings;
     const services = this.vramServices?.services ?? [];
@@ -3567,6 +3691,14 @@ export class ModelManager extends LitElement {
           ${m.installed_at
             ? html`<span class="chip">installed</span>`
             : html`<span class="chip health-unknown">not installed</span>`}
+          ${defaultTaskTypesFor(this.taskDefaults, m.id).map(
+            (t) =>
+              html`
+                <span class="chip default" title="Default model for ${t}">
+                  default · ${t}
+                </span>
+              `,
+          )}
         </div>
 
         <div class="model-meta">
@@ -3984,6 +4116,7 @@ export class ModelManager extends LitElement {
     try {
       await this._loadModels();
       await this._loadHardware();
+      await this._loadTaskDefaults();
       await this._loadVramUnload();
       await this._loadBenchmarks();
       await this._loadLlm();
@@ -3991,6 +4124,51 @@ export class ModelManager extends LitElement {
       await this._loadMcp();
     } finally {
       this.loading = false;
+    }
+  }
+
+  /**
+   * Default model per task type, plus an unfiltered list of enabled models to
+   * offer as candidates (this.models follows the list filters, so it can't
+   * back the pickers).
+   */
+  async _loadTaskDefaults() {
+    const view = await loadModelDefaults(api, { refresh: true });
+    this.taskDefaults = view.defaults;
+    try {
+      this.defaultCandidates = await api.listModels({ enabled: "true" });
+    } catch {
+      this.defaultCandidates = [];
+    }
+  }
+
+  /** Enabled models that can serve a task type, in the server's order. */
+  _defaultCandidatesFor(taskType) {
+    return this.defaultCandidates.filter(
+      (m) => m.enabled && (m.task_types ?? []).includes(taskType),
+    );
+  }
+
+  async _onDefaultChange(taskType, modelId) {
+    this.defaultsBusy = taskType;
+    this.defaultsError = "";
+    try {
+      await api.setModelDefault(taskType, modelId === "" ? null : modelId);
+      // Pickers elsewhere cache the defaults for the page — make them re-read.
+      invalidateModelDefaults();
+      await this._loadTaskDefaults();
+      this.notice = {
+        kind: "ok",
+        text: modelId
+          ? `Default for ${taskType} set to ${
+            this.defaultCandidates.find((m) => m.id === modelId)?.name ?? modelId
+          }.`
+          : `Default for ${taskType} cleared — the first enabled model is used.`,
+      };
+    } catch (err) {
+      this.defaultsError = err?.message ?? "Could not save the default.";
+    } finally {
+      this.defaultsBusy = null;
     }
   }
 

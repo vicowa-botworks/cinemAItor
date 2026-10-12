@@ -10,6 +10,7 @@ import {
   listBenchmarkResults,
   listModels,
   MODEL_SOURCES,
+  MODEL_TASK_TYPES,
   registerModel,
   type RegisterModelInput,
   setModelHealth,
@@ -17,6 +18,7 @@ import {
   updateModel,
   type UpdateModelInput,
 } from "@cinemaItor/db/models.ts";
+import { listTaskTypeDefaults, setTaskTypeDefault } from "@cinemaItor/db/model_defaults.ts";
 import {
   getInstallProgress,
   installModelById,
@@ -79,7 +81,7 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
 }
 
 interface ParamContext extends AuthedContext {
-  params: { id?: string; repoId?: string };
+  params: { id?: string; repoId?: string; taskType?: string };
 }
 
 function requireIdParam(ctx: ParamContext): string {
@@ -350,6 +352,36 @@ export const modelRouter = new Router()
     logAudit(adminId, "vram_unload.free", "setting", JSON.stringify(targetKinds ?? "all-enabled"));
     ctx.response.body = { results };
   })
+  .get("/api/v1/models/defaults", authMiddleware, (ctx, _next) => {
+    // Auth-only (not admin): every generation picker reads this to label and
+    // pre-check the model the server would auto-pick.
+    requireUserId(ctx);
+    const defaults = listTaskTypeDefaults();
+    // The models map lets a picker name each default without a second call.
+    // A default whose model has since been removed is omitted (and skipped at
+    // resolution time), so the two views never disagree.
+    const models: Record<string, { id: string; name: string }> = {};
+    for (const modelId of Object.values(defaults)) {
+      const model = getModel(modelId);
+      if (model) models[modelId] = { id: model.id, name: model.name };
+    }
+    ctx.response.body = { defaults, models, task_types: [...MODEL_TASK_TYPES] };
+  })
+  .put("/api/v1/models/defaults/:taskType", authMiddleware, async (ctx, _next) => {
+    const adminId = requireAdmin(ctx);
+    const taskType = ((ctx as ParamContext).params.taskType ?? "").trim();
+    if (!taskType) throw badRequest("task_type is required");
+    const body = await readJsonBody(ctx);
+    if (!("model_id" in body)) {
+      throw badRequest("model_id is required (send null to clear the default)");
+    }
+    const raw = body.model_id;
+    if (raw !== null && typeof raw !== "string") {
+      throw badRequest("model_id must be a model id or null");
+    }
+    const modelId = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+    ctx.response.body = setTaskTypeDefault(adminId, taskType, modelId);
+  })
   .get("/api/v1/models/install-progress", authMiddleware, (ctx, _next) => {
     requireUserId(ctx);
     ctx.response.body = { installs: listInstallProgress() };
@@ -488,6 +520,85 @@ export const openApiOps: Record<string, OperationMeta> = {
     requestBody: { schema: ref("ModelCreateRequest") },
     responses: {
       201: { description: "The registered model", schema: ref("Model") },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  "GET /api/v1/models/defaults": {
+    summary: "Default model per task type",
+    description: "Which model an auto-picked generation request gets when it " +
+      "omits model_id: project override > this registry-wide default > the " +
+      "first enabled model for the task (docs/model_defaults.md). The `models` " +
+      "map resolves each default id to a display name in one round trip.",
+    responses: {
+      200: {
+        description: "The task-type defaults",
+        schema: {
+          type: "object",
+          required: ["defaults", "models", "task_types"],
+          properties: {
+            defaults: {
+              type: "object",
+              description: "Canonical task type -> default model id",
+              additionalProperties: { type: "string" },
+            },
+            task_types: {
+              type: "array",
+              description: "Every canonical task type, in registry order",
+              items: { type: "string" },
+            },
+            models: {
+              type: "object",
+              description: "Default model id -> display info",
+              additionalProperties: {
+                type: "object",
+                required: ["id", "name"],
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...errorResponses(401),
+    },
+  },
+  "PUT /api/v1/models/defaults/{taskType}": {
+    summary: "Set or clear the default model for a task type (admin)",
+    description: "The model must exist, be enabled and support the task type. " +
+      "One default per task type, so setting one replaces the previous choice. " +
+      "Send `model_id: null` to clear it and fall back to the first enabled " +
+      "model.",
+    adminOnly: true,
+    parameters: {
+      taskType: {
+        schema: { type: "string" },
+        description: "Canonical task type (dashed HF aliases are normalized)",
+        required: true,
+      },
+    },
+    requestBody: {
+      schema: {
+        type: "object",
+        required: ["model_id"],
+        properties: {
+          model_id: { type: ["string", "null"] },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "The stored default",
+        schema: {
+          type: "object",
+          required: ["task_type", "model_id"],
+          properties: {
+            task_type: { type: "string" },
+            model_id: { type: ["string", "null"] },
+          },
+        },
+      },
       ...errorResponses(400, 401, 403),
     },
   },

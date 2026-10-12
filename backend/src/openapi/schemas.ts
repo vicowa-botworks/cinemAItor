@@ -236,7 +236,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       default_export_preset_id: { type: ["string", "null"] },
       default_model_preferences_json: {
         type: ["string", "null"],
-        description: "JSON-encoded per-task model preferences",
+        description: "JSON object of canonical task type -> default model id " +
+          "(project override of the registry task-type defaults)",
       },
       template_id: { type: ["string", "null"] },
       status: { type: "string", enum: ["active", "archived", "deleted"] },
@@ -261,7 +262,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       audio_sample_rate: { type: "integer", exclusiveMinimum: 0 },
       default_export_preset_id: { type: "string" },
       default_model_preferences: {
-        description: "Object or JSON string of per-task model preferences",
+        description: "Object or JSON string of canonical task type -> model id " +
+          "(overrides the registry task-type defaults for this project)",
       },
       template_id: {
         type: "string",
@@ -284,7 +286,8 @@ const SCHEMAS: Record<string, OpenApiSchema> = {
       audio_sample_rate: { type: "integer", exclusiveMinimum: 0 },
       default_export_preset_id: { type: ["string", "null"] },
       default_model_preferences: {
-        description: "Object, JSON string, or null to clear",
+        description: "Object, JSON string, or null to clear; a null entry clears " +
+          "one task type",
       },
       template_id: { type: ["string", "null"] },
     },

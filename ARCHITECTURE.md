@@ -88,7 +88,8 @@ app-root (main router)
 │   │             lockout), #/users)
 ├── project-list (project dashboard)
 │   ├── project-card (individual project)
-│   └── project-form (create; template picker pre-creates a starting timeline)
+│   └── project-form (create; template picker pre-creates a starting timeline; per-project
+│       default models per task type — docs/model_defaults.md)
 ├── project-detail (project settings, edit, delete; shows the project's template)
 │   └── project-form (edit)
 ├── asset-list (global library + per-project via #/project/:id/assets; Generate panel)
@@ -147,7 +148,9 @@ app-root (main router)
 │   │              editor (PATCH task_types on an existing model) + per-model
 │   │              default_settings JSON editor (PATCH default_settings) + generation-profiles
 │   │              editor (draft_settings/production_settings JSON overrides merged over the
-│   │              defaults by the job's quality profile; docs/generation_profiles.md),
+│   │              defaults by the job's quality profile; docs/generation_profiles.md) +
+│   │              Task defaults panel (one default model per task type, admin-set, with
+│   │              `default · <task>` chips on the model cards; docs/model_defaults.md),
  │   │              LLM assistant settings panel + connection test (docs/llm.md),
   │   │              MCP Servers panel (admin: rows + status chips, add/edit form per
   │   │              transport, test connection, enable toggle, delete via confirm-dialog,
@@ -237,6 +240,12 @@ app-root (main router)
 │   │             embedded in scene-detail and timeline-detail, Enhance with AI button (shared
 │   │             ai-assist-dialog, pre-selects the auto-picked model))
 ├── creative-assets (shared deterministic slug→asset-id map for panel_/scene_/shot_)
+├── model-defaults (shared default-model-per-task-type support — pure, DOM-free, unit-tested:
+│   │              autoModelFor (the model the server picks from a picker's own candidates), the
+│   │              auto-option label + model-card default badges, the project preference map
+│   │              read/write helpers, and one cached load of GET /models/defaults shared by every
+│   │              picker; consumed by asset-generate, storyboard-detail, scene-detail, audio-dialog,
+│   │              timeline-detail, prompt-enhance, demo-content, model-manager, project-form)
 ├── audio-adjustments (shared trim/gain parse/prefill/validation for the asset-detail
 │   │                  adjustments UI)
 ├── install-progress (shared pure byte/percent/label formatting for the model install
@@ -371,6 +380,14 @@ server.ts (entry point)
    │   ├── Model benchmark (WS 14): /:id/benchmark (POST, any auth — measurement only)
    │   │   + /:id/benchmarks (GET); deterministic per-task prompts, 2 candidates each,
    │   │   `model_benchmark` job records duration_ms / candidate_count / output_bytes rows
+   │   ├── Task-type defaults (db/model_defaults.ts; migration 0032): GET /defaults (any auth —
+   │   │   `{defaults, models, task_types}`) + PUT /defaults/:taskType (admin; `model_id` or null)
+   │   │   — one default model per task type, so an omitted `model_id` resolves
+   │   │   project override > global default > first enabled (alphabetical). A default whose model
+   │   │   is missing/disabled/task-incompatible is skipped, never an error; `deleteModel` clears
+   │   │   its rows. Both routes mount before /:id. Project overrides reuse the (previously
+   │   │   dormant) `projects.default_model_preferences_json`, now validated by
+   │   │   `normalizeModelPreferences` on POST/PATCH /projects; see docs/model_defaults.md
    │   ├── Hardware detection + requirement warnings (/hardware; 60s cache, ?refresh=1
    │   │   re-probes live for the pre-generation VRAM re-check)
    │   ├── HuggingFace catalog: /huggingface/search, /huggingface/:repoId (recursive file

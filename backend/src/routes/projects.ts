@@ -13,6 +13,7 @@ import {
   updateProject,
 } from "@cinemaItor/db/projects.ts";
 import { applyTemplateStructure, getTemplate } from "@cinemaItor/db/templates.ts";
+import { normalizeModelPreferences } from "@cinemaItor/db/model_defaults.ts";
 import { badRequest, forbidden, notFound, unauthorized } from "@cinemaItor/errors.ts";
 import type { OperationMeta } from "@cinemaItor/openapi/types.ts";
 import { errorResponses, ref } from "@cinemaItor/openapi/types.ts";
@@ -80,16 +81,10 @@ function modelPreferences(
   const value = body.default_model_preferences;
   if (value === undefined) return undefined;
   if (value === null) return null;
-  if (typeof value === "string") {
-    try {
-      JSON.parse(value);
-    } catch {
-      throw badRequest("default_model_preferences must be valid JSON");
-    }
-    return value;
-  }
-  if (typeof value === "object") return JSON.stringify(value);
-  throw badRequest("default_model_preferences must be an object or JSON string");
+  // Validated + normalized to canonical task-type keys (docs/model_defaults.md):
+  // the column existed from migration 0001 but nothing read it until the
+  // task-type defaults did, so it now has a real contract.
+  return normalizeModelPreferences(value);
 }
 
 function requireName(body: Record<string, unknown>): string {
@@ -254,7 +249,9 @@ export const openApiOps: Record<string, OperationMeta> = {
   "PATCH /api/v1/projects/{id}": {
     summary: "Update project settings",
     description: "At least one field must be present. default_model_preferences accepts " +
-      "an object or a JSON string.",
+      "an object (or JSON string) of canonical task type -> model id, or null to " +
+      "clear the whole map; a null entry clears one task type. See " +
+      "docs/model_defaults.md.",
     requestBody: { schema: ref("ProjectUpdates") },
     responses: {
       200: { description: "The updated project", schema: ref("Project") },
