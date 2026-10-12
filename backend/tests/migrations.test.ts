@@ -36,6 +36,7 @@ describe("migrations", () => {
         "asset_references",
         "prompt_versions",
         "models",
+        "task_type_defaults",
         "generation_jobs",
         "job_events",
         "storyboards",
@@ -99,6 +100,7 @@ describe("migrations", () => {
         "0029_mcp_servers.sql",
         "0030_generation_profiles.sql",
         "0031_asset_slug_partial_unique.sql",
+        "0032_task_type_defaults.sql",
       ]);
       assertEquals(first.skipped, []);
       const second = runMigrations(db);
@@ -135,12 +137,13 @@ describe("migrations", () => {
         "0029_mcp_servers.sql",
         "0030_generation_profiles.sql",
         "0031_asset_slug_partial_unique.sql",
+        "0032_task_type_defaults.sql",
       ]);
       assertEquals(
         (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as {
           n: number;
         }).n,
-        31,
+        32,
       );
     } finally {
       db.close();
@@ -183,6 +186,7 @@ describe("migrations", () => {
       "0029_mcp_servers.sql",
       "0030_generation_profiles.sql",
       "0031_asset_slug_partial_unique.sql",
+      "0032_task_type_defaults.sql",
     ]);
   });
 

@@ -1,5 +1,10 @@
-import { css, html, LitElement } from "lit";
+import { css, html, LitElement, nothing } from "lit";
 import { api } from "../api.js";
+import {
+  loadModelDefaults,
+  parseProjectPreferences,
+  projectPreferencesPayload,
+} from "../model-defaults.js";
 
 const ASPECT_RATIOS = [
   { value: "16:9", label: "16:9 (TV / YouTube, landscape)" },
@@ -25,6 +30,17 @@ const RESOLUTIONS = [
   { label: "1080 x 1920 (HD vertical)", width: 1080, height: 1920 },
   { label: "720 x 1280 (SD vertical)", width: 720, height: 1280 },
   { label: "1080 x 1080 (square)", width: 1080, height: 1080 },
+];
+
+/** Task types the project-level model override offers a pick for. */
+const MODEL_PREF_TASK_TYPES = [
+  "text_to_image",
+  "image_to_image",
+  "text_to_video",
+  "image_to_video",
+  "music",
+  "voice",
+  "audio",
 ];
 
 export class ProjectForm extends LitElement {
@@ -126,6 +142,34 @@ export class ProjectForm extends LitElement {
       margin-top: 12px;
       min-height: 18px;
     }
+
+    .model-prefs {
+      grid-column: 1 / -1;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+
+    .model-prefs > summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--color-text-muted);
+    }
+
+    .model-prefs .prefs-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 16px;
+      margin-top: 14px;
+    }
+
+    .model-prefs .hint {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
   `;
 
   static properties = {
@@ -140,6 +184,11 @@ export class ProjectForm extends LitElement {
     sampleRate: {},
     template: {},
     templates: {},
+    modelPrefs: { state: true },
+    modelOptions: { state: true },
+    globalDefaults: { state: true },
+    globalModelInfo: { state: true },
+    taskTypes: { state: true },
   };
 
   constructor() {
@@ -155,15 +204,38 @@ export class ProjectForm extends LitElement {
     this.sampleRate = 48000;
     this.template = "";
     this.templates = [];
+    this.modelPrefs = {};
+    this.modelOptions = [];
+    this.globalDefaults = {};
+    this.globalModelInfo = {};
+    this.taskTypes = MODEL_PREF_TASK_TYPES;
+    this._modelsLoaded = false;
   }
 
   async firstUpdated() {
-    if (this.project) return;
-    try {
-      this.templates = await api.listTemplates();
-    } catch {
-      this.templates = [];
+    // All three feed the model-defaults section; the defaults view also
+    // carries the canonical task-type list, so the form never hardcodes it.
+    const [defaults, models, templates] = await Promise.all([
+      loadModelDefaults(api),
+      api.listModels({ enabled: "true" }).then(
+        (m) => {
+          // A successful (even empty) list means the defaults section reflects
+          // reality and may write the project's preference map. A failed one
+          // must not let a save wipe the stored preferences.
+          this._modelsLoaded = true;
+          return m;
+        },
+        () => [],
+      ),
+      this.project ? Promise.resolve(this.templates) : api.listTemplates().catch(() => []),
+    ]);
+    this.globalDefaults = defaults.defaults;
+    this.globalModelInfo = defaults.models;
+    if (Array.isArray(defaults.taskTypes) && defaults.taskTypes.length > 0) {
+      this.taskTypes = defaults.taskTypes;
     }
+    this.modelOptions = Array.isArray(models) ? models : [];
+    this.templates = Array.isArray(templates) ? templates : [];
   }
 
   willUpdate(changed) {
@@ -177,12 +249,16 @@ export class ProjectForm extends LitElement {
       this.resolution = RESOLUTIONS.some((r) => `${r.width}x${r.height}` === key)
         ? key
         : "1920x1080";
+      this.modelPrefs = parseProjectPreferences(
+        this.project.default_model_preferences_json,
+      );
     }
   }
 
   _payload() {
     const res = RESOLUTIONS.find((r) => `${r.width}x${r.height}` === this.resolution) ??
       RESOLUTIONS[0];
+    const prefs = projectPreferencesPayload(this.modelPrefs);
     return {
       name: this.name.trim(),
       description: this.description.trim() || null,
@@ -191,6 +267,9 @@ export class ProjectForm extends LitElement {
       resolution_width: res.width,
       resolution_height: res.height,
       audio_sample_rate: Number(this.sampleRate),
+      // Omitted (not emptied) when the model list never loaded, so a save
+      // never silently wipes the project's stored overrides.
+      ...(this._modelsLoaded ? { default_model_preferences: prefs } : {}),
       ...(this.template ? { template_id: this.template } : {}),
     };
   }
@@ -216,6 +295,76 @@ export class ProjectForm extends LitElement {
     } finally {
       this.saving = false;
     }
+  }
+
+  _modelsForTaskType(taskType) {
+    return this.modelOptions.filter((m) => m.task_types?.includes(taskType));
+  }
+
+  /** Label naming what happens when no project override is chosen. */
+  _globalDefaultLabel(taskType) {
+    const id = this.globalDefaults[taskType];
+    if (!id) return "no default (first enabled)";
+    const name = this.globalModelInfo[id]?.name ??
+      this.modelOptions.find((m) => m.id === id)?.display_name ??
+      this.modelOptions.find((m) => m.id === id)?.name;
+    return name ? `global default (${name})` : `global default (${id})`;
+  }
+
+  _renderModelDefaults() {
+    if (this._modelsLoaded && this.modelOptions.length === 0) return nothing;
+    const taskTypes = this.taskTypes.filter((t) =>
+      this._modelsForTaskType(t).length > 0 || this.modelPrefs[t] || this.globalDefaults[t]
+    );
+    if (taskTypes.length === 0) return nothing;
+    const anySet = Object.values(this.modelPrefs).some((v) => v);
+    return html`
+      <details class="model-prefs" ?open=${anySet}>
+        <summary>
+          Default models for this project
+          <span class="hint">
+            Overrides the registry default for generation runs in this project
+            that don't name a model.
+          </span>
+        </summary>
+        <div class="prefs-grid">
+          ${taskTypes.map((taskType) => {
+            const options = this._modelsForTaskType(taskType);
+            const current = this.modelPrefs[taskType] ?? "";
+            return html`
+              <div class="form-group">
+                <label for="pf-model-${taskType}">${taskType}</label>
+                <select
+                  id="pf-model-${taskType}"
+                  .value=${current}
+                  @change=${(e) => this._setModelPref(taskType, e.target.value)}>
+                  <option value="">${this._globalDefaultLabel(taskType)}</option>
+                  ${options.map(
+                    (m) =>
+                      html`
+                        <option value=${m.id} ?selected=${m.id === current}>
+                          ${m.display_name ?? m.name}
+                        </option>
+                      `,
+                  )}
+                </select>
+              </div>
+            `;
+          })}
+        </div>
+        <span class="hint">
+          A model must support the task type; a run that names its own model
+          always wins over these.
+        </span>
+      </details>
+    `;
+  }
+
+  _setModelPref(taskType, modelId) {
+    const next = { ...this.modelPrefs };
+    if (modelId) next[taskType] = modelId;
+    else delete next[taskType];
+    this.modelPrefs = next;
   }
 
   render() {
@@ -293,6 +442,8 @@ export class ProjectForm extends LitElement {
               )}
             </select>
           </div>
+
+          ${this._renderModelDefaults()}
 
           ${this.project ? html`` : html`
             <div class="form-group full">

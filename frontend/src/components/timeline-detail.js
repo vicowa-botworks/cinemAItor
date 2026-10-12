@@ -6,6 +6,7 @@ import { filmstripFramesFor } from "../timeline-playback.js";
 import { parseAudioMetadata } from "../audio-adjustments.js";
 import "./audio-dialog.js";
 import { VramGuard } from "./vram-guard.js";
+import { autoModelFor, loadModelDefaults } from "../model-defaults.js";
 import { DemoHost } from "./demo-host.js";
 import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildTimelineDemoSteps } from "./demo-timeline.js";
@@ -1663,15 +1664,13 @@ export class TimelineDetail extends MovieDemoHost(
   async _generateScore() {
     const prompt = this.scorePrompt.trim();
     if (!prompt) return;
-    // No model picker here — the backend auto-picks the first enabled music
-    // model, so the gate checks that same model.
-    let model = null;
-    try {
-      const models = await api.listModels({ task_type: "music", enabled: true });
-      model = models[0] ?? null;
-    } catch {
-      model = null;
-    }
+    // No model picker here — the backend auto-picks the music task type's
+    // default (or the first enabled model), so the gate checks that model.
+    const [defaults, models] = await Promise.all([
+      loadModelDefaults(api).then((view) => view.defaults).catch(() => ({})),
+      api.listModels({ task_type: "music", enabled: true }).catch(() => []),
+    ]);
+    const model = autoModelFor(models, defaults, "music");
     const device = await this.resolveVramDevice(model);
     if (device === "cancel") return;
     this.scoreBusy = true;

@@ -42,6 +42,14 @@ function del(path: string, token?: string): Promise<Response> {
   return fetch(`${baseUrl}${path}`, { method: "DELETE", headers: headers(token) });
 }
 
+function put(path: string, body: unknown, token?: string): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    method: "PUT",
+    headers: headers(token),
+    body: JSON.stringify(body),
+  });
+}
+
 interface ModelBody {
   id: string;
   name: string;
@@ -710,6 +718,174 @@ describe("models api", () => {
         ).map((r) => r.action);
         assertEquals(actions, ["model.register", "model.disable", "model.remove"]);
       })();
+    });
+  });
+
+  describe("task-type defaults", () => {
+    function registerT2I(name: string, token = adminToken): Promise<ModelBody> {
+      return registerModel({
+        name,
+        version: "1",
+        backend: "mock",
+        task_types: ["text_to_image"],
+      }, token).then((r) => r.json() as Promise<ModelBody>);
+    }
+
+    it("reads and writes the default for a task type", async () => {
+      await withServer((base) => {
+        baseUrl = base;
+        return (async () => {
+          const empty = await get("/api/v1/models/defaults", adminToken);
+          assertEquals(empty.status, 200);
+          assertEquals((await empty.json() as { defaults: Record<string, string> }).defaults, {});
+
+          const alpha = await registerT2I("default-alpha");
+          const beta = await registerT2I("default-beta");
+
+          const set = await put(
+            "/api/v1/models/defaults/text_to_image",
+            { model_id: alpha.id },
+            adminToken,
+          );
+          assertEquals(set.status, 200);
+          assertEquals(await set.json(), { task_type: "text_to_image", model_id: alpha.id });
+
+          // The models map names the default so a picker needs one round trip.
+          const view = (await (await get("/api/v1/models/defaults", adminToken))
+            .json()) as {
+              defaults: Record<string, string>;
+              models: Record<string, { id: string; name: string }>;
+            };
+          assertEquals(view.defaults, { text_to_image: alpha.id });
+          assertEquals(view.models[alpha.id], { id: alpha.id, name: "default-alpha" });
+
+          // Setting another model replaces it — one default per task type.
+          await put("/api/v1/models/defaults/text_to_image", { model_id: beta.id }, adminToken);
+          const replaced = (await (await get("/api/v1/models/defaults", adminToken))
+            .json()) as { defaults: Record<string, string> };
+          assertEquals(replaced.defaults, { text_to_image: beta.id });
+
+          const cleared = await put(
+            "/api/v1/models/defaults/text_to_image",
+            { model_id: null },
+            adminToken,
+          );
+          assertEquals(cleared.status, 200);
+          const after = (await (await get("/api/v1/models/defaults", adminToken))
+            .json()) as { defaults: Record<string, string> };
+          assertEquals(after.defaults, {});
+        })();
+      });
+    });
+
+    it("is readable by non-admins but only writable by admins", async () => {
+      const email = `user.${Math.random().toString(36).slice(2)}@example.com`;
+      createUser(email, await hashPassword("password123"), "Regular User");
+      await withServer((base) => {
+        baseUrl = base;
+        return (async () => {
+          const model = await registerT2I("readable-default");
+          const login = await post("/api/v1/auth/login", { email, password: "password123" });
+          const userToken = ((await login.json()) as { token: string }).token;
+
+          // Every generation picker reads this to label the auto-pick.
+          assertEquals((await get("/api/v1/models/defaults", userToken)).status, 200);
+          assertEquals(
+            (await put(
+              "/api/v1/models/defaults/text_to_image",
+              { model_id: model.id },
+              userToken,
+            )).status,
+            403,
+          );
+        })();
+      });
+    });
+
+    it("requires authentication", () =>
+      withServer((base) => {
+        baseUrl = base;
+        return (async () => {
+          assertEquals((await get("/api/v1/models/defaults")).status, 401);
+          assertEquals(
+            (await put("/api/v1/models/defaults/text_to_image", { model_id: null })).status,
+            401,
+          );
+        })();
+      }));
+
+    it("rejects a default that cannot serve the task", async () => {
+      await withServer((base) => {
+        baseUrl = base;
+        return (async () => {
+          const videoOnly = await registerModel({
+            name: "video-only",
+            version: "1",
+            backend: "mock",
+            task_types: ["image_to_video"],
+          }).then((r) => r.json() as Promise<ModelBody>);
+
+          assertEquals(
+            (await put("/api/v1/models/defaults/text_to_speech", {
+              model_id: videoOnly.id,
+            }, adminToken)).status,
+            400,
+          );
+          assertEquals(
+            (await put("/api/v1/models/defaults/text_to_image", {
+              model_id: videoOnly.id,
+            }, adminToken)).status,
+            400,
+          );
+          assertEquals(
+            (await put("/api/v1/models/defaults/text_to_image", {
+              model_id: "ghost-model",
+            }, adminToken)).status,
+            400,
+          );
+          // model_id is mandatory (null is the explicit clear).
+          assertEquals(
+            (await put("/api/v1/models/defaults/text_to_image", {}, adminToken)).status,
+            400,
+          );
+          assertEquals(
+            (await put("/api/v1/models/defaults/text_to_image", {
+              model_id: 42,
+            }, adminToken)).status,
+            400,
+          );
+        })();
+      });
+    });
+
+    it("normalizes a dashed task-type alias", async () => {
+      await withServer((base) => {
+        baseUrl = base;
+        return (async () => {
+          const model = await registerT2I("alias-default");
+          const res = await put(
+            "/api/v1/models/defaults/text-to-image",
+            { model_id: model.id },
+            adminToken,
+          );
+          assertEquals(res.status, 200);
+          assertEquals(await res.json(), { task_type: "text_to_image", model_id: model.id });
+        })();
+      });
+    });
+
+    it("drops the default when its model is removed", async () => {
+      await withServer((base) => {
+        baseUrl = base;
+        return (async () => {
+          const model = await registerT2I("doomed-default");
+          await put("/api/v1/models/defaults/text_to_image", { model_id: model.id }, adminToken);
+          await del(`/api/v1/models/${model.id}`, adminToken);
+          const view = (await (await get("/api/v1/models/defaults", adminToken))
+            .json()) as { defaults: Record<string, string> };
+          assertEquals(view.defaults, {});
+        })();
+      });
     });
   });
 });

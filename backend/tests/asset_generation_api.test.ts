@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { closeDb } from "../src/db/database.ts";
-import { createProject } from "../src/db/projects.ts";
+import { createProject, updateProject } from "../src/db/projects.ts";
+import { setTaskTypeDefault } from "../src/db/model_defaults.ts";
 import { getAssetById } from "../src/db/assets.ts";
 import { registerModel } from "../src/db/models.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
@@ -265,6 +266,71 @@ describe("asset generation api", () => {
         assertEquals(status, 200);
         const detail = json as Record<string, unknown>;
         assertEquals(detail.unique_slug, slug);
+      })();
+    });
+  });
+
+  it("auto-picks the task-type default, then the project override", async () => {
+    await withServer((base) => {
+      baseUrl = base;
+      return (async () => {
+        // Alphabetically after mock-t2i, so a plain auto-pick never lands on it.
+        const alt = registerModel(ownerId, {
+          name: "zzz-alt-t2i",
+          version: "1.0",
+          backend: "mock",
+          task_types: ["text_to_image"],
+          enabled: true,
+        }).id;
+
+        const generate = async (slug: string, withProject: boolean) =>
+          await req(
+            "POST",
+            "/api/v1/assets/generate",
+            {
+              kind: "image",
+              prompt: "a lighthouse at dusk",
+              unique_slug: slug,
+              ...(withProject ? { project_id: projectId } : {}),
+            },
+            ownerToken,
+          );
+
+        // No default set: the historical first-enabled (alphabetical) pick.
+        const before = await generate(uniqueSlug("auto_none"), false);
+        assertEquals(before.status, 202);
+        assertEquals((before.json as { model_id: string }).model_id, t2iModelId);
+
+        // The registry-wide default now decides.
+        setTaskTypeDefault(ownerId, "text_to_image", alt);
+        const withDefault = await generate(uniqueSlug("auto_default"), false);
+        assertEquals(withDefault.status, 202);
+        assertEquals((withDefault.json as { model_id: string }).model_id, alt);
+
+        // The project's own preference beats the registry default — but only
+        // for assets created in that project.
+        updateProject(projectId, ownerId, {
+          default_model_preferences_json: JSON.stringify({ text_to_image: t2iModelId }),
+        });
+        const overridden = await generate(uniqueSlug("auto_override"), true);
+        assertEquals(overridden.status, 202);
+        assertEquals((overridden.json as { model_id: string }).model_id, t2iModelId);
+        const stillGlobal = await generate(uniqueSlug("auto_global"), false);
+        assertEquals((stillGlobal.json as { model_id: string }).model_id, alt);
+
+        // An explicit model_id still outranks both.
+        const explicit = await req(
+          "POST",
+          "/api/v1/assets/generate",
+          {
+            kind: "image",
+            prompt: "a lighthouse at dusk",
+            unique_slug: uniqueSlug("auto_explicit"),
+            model_id: alt,
+          },
+          ownerToken,
+        );
+        assertEquals((explicit.json as { model_id: string }).model_id, alt);
       })();
     });
   });

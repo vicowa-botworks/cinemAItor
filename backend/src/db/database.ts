@@ -25,6 +25,11 @@ function migrateLegacy(database: Database): void {
   }
 }
 
+/**
+ * Every table `resetDb()` truncates between tests. A new migration that adds a
+ * table must add it here too, or the row survives into the next test and the
+ * isolation fails in confusing ways.
+ */
 const ALL_TABLES = [
   "prompts",
   "scenes",
@@ -37,6 +42,7 @@ const ALL_TABLES = [
   "asset_references",
   "assets",
   "models",
+  "task_type_defaults",
   "generation_jobs",
   "job_events",
   "model_benchmarks",

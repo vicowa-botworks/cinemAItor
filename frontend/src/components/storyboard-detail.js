@@ -5,6 +5,7 @@ import { creativeAssetIds, forgetCreativeAssetIds } from "../creative-assets.js"
 import { VramGuard } from "./vram-guard.js";
 import { reconcilePreviews } from "./preview-reconcile.js";
 import { loadPrefs, runEnhance, savePrefs } from "./prompt-enhance.js";
+import { autoModelFor, autoOptionLabel, loadModelDefaults } from "../model-defaults.js";
 import { DemoHost } from "./demo-host.js";
 import { MovieDemoHost } from "./movie-demo-host.js";
 import { buildStoryboardDemoSteps } from "./demo-storyboard.js";
@@ -385,6 +386,7 @@ export class StoryboardDetail extends MovieDemoHost(
     board: { state: true },
     panels: { state: true },
     models: { state: true },
+    taskDefaults: { state: true },
     loading: { state: true },
     error: { state: true },
     notice: { state: true },
@@ -403,6 +405,7 @@ export class StoryboardDetail extends MovieDemoHost(
     this.board = null;
     this.panels = [];
     this.models = [];
+    this.taskDefaults = {};
     this.loading = false;
     this.error = "";
     this.notice = null;
@@ -699,7 +702,9 @@ export class StoryboardDetail extends MovieDemoHost(
                           id="model-${panel.id}"
                           .value=${String(draft.model_id ?? "")}
                           @change=${(e) => this._setDraftField("model_id", e.target.value)}>
-                          <option value="">default (first enabled)</option>
+                          <option value="">${autoOptionLabel(
+                            autoModelFor(this.models, this.taskDefaults, "text_to_image"),
+                          )}</option>
                           ${this.models.map(
                             (m) => html`<option value=${m.id}>${m.name}</option>`,
                           )}
@@ -758,6 +763,11 @@ export class StoryboardDetail extends MovieDemoHost(
   }
 
   async _loadModels() {
+    // The registry default decides which model "default" resolves to (and
+    // which one the VRAM guard must be checked against).
+    loadModelDefaults(api).then((view) => {
+      this.taskDefaults = view.defaults;
+    });
     if (this.models.length > 0) return;
     try {
       this.models = (await api.listModels({ task_type: "text_to_image" }))
@@ -770,7 +780,7 @@ export class StoryboardDetail extends MovieDemoHost(
   }
 
   _panelModelId() {
-    return this.models[0]?.id ?? null;
+    return autoModelFor(this.models, this.taskDefaults, "text_to_image")?.id ?? null;
   }
 
   _openAssist(panel) {
