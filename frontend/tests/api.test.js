@@ -1155,7 +1155,7 @@ describe("ApiClient", () => {
       );
     });
 
-    it("collapses whitespace and truncates long details", async () => {
+    it("collapses whitespace and truncates long details with an ellipsis", async () => {
       globalThis.fetch = async () =>
         jsonResponse({
           error: {
@@ -1167,15 +1167,35 @@ describe("ApiClient", () => {
       const err = await assertRejects(() => api.testLlm(), ApiError);
       assert(!err.message.includes("\n"), "details must be collapsed to one line");
       assert(err.message.length < 400, `message should stay bounded: ${err.message.length}`);
+      assert(err.message.endsWith("…"), `truncation must be marked: ${err.message.slice(-5)}`);
     });
 
     it("does not repeat details already present in the message", async () => {
       globalThis.fetch = async () =>
         jsonResponse({
-          error: { code: "X", message: "boom: nope", details: "nope" },
-        }, 500);
-      const err = await assertRejects(() => api.listProjects(), ApiError);
-      assertEquals(err.message, "boom: nope");
+          error: {
+            code: "LLM_BAD_RESPONSE",
+            message: "boom: the gateway refused this prompt",
+            details: "the gateway refused this prompt",
+          },
+        }, 502);
+      const err = await assertRejects(() => api.testLlm(), ApiError);
+      assertEquals(err.message, "boom: the gateway refused this prompt");
+    });
+
+    it("keeps non-LLM details out of the message", async () => {
+      // `details` also carries subprocess stderr and log tails on other
+      // endpoints; those hold server-side paths and stay server-side.
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "GENERATION_FAILED",
+            message: "Thumbnail generation failed",
+            details: "ffmpeg exited while reading /var/lib/cinemaitor/app_data/media/ab/cd",
+          },
+        }, 502);
+      const err = await assertRejects(() => api.getAssetThumbnailUrl("a-1", "v-1"), ApiError);
+      assertEquals(err.message, "Thumbnail generation failed");
     });
 
     it("falls back to status text when error body is not JSON", async () => {

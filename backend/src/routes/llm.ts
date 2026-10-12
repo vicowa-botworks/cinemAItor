@@ -22,6 +22,8 @@ import {
   agentToolDefs,
   approveProposal,
   listProposals,
+  mcpAgentTools,
+  mcpToolDefs,
   rejectProposal,
   runAgent,
 } from "@cinemaItor/services/llm_agent.ts";
@@ -179,9 +181,15 @@ function handleUpdateSettings(ctx: Context, body: Record<string, unknown>): void
 
 async function handleTest(ctx: Context): Promise<void> {
   requireAdmin(ctx);
-  // Probe with the copilot's own admin tool set so the advisory result matches
-  // what the copilot will actually send.
-  const result = await testLlmConnection(agentToolDefs(true));
+  // Probe with the tool set a real copilot turn assembles: the built-in admin
+  // defs plus every connected MCP server's schema, passed through unchanged.
+  // That pass-through is exactly the material a strict gateway refuses, so
+  // probing without it can go green while the copilot still fails.
+  const mcpEntries = await mcpAgentTools(true);
+  const result = await testLlmConnection([
+    ...agentToolDefs(true),
+    ...mcpToolDefs(mcpEntries),
+  ]);
   if (!result.ok) {
     const { status, code, message, details } = result.error;
     ctx.response.status = status;
@@ -708,8 +716,10 @@ export const openApiOps: Record<string, OperationMeta> = {
     summary: "Test the LLM connection with a real-shaped completion",
     description: "Sends a completion using the configured max_tokens (so an oversized " +
       "cap fails here rather than on the first real prompt), then makes a second advisory " +
-      "request carrying the Model Copilot's tool definitions to report whether the endpoint " +
-      "supports tool calling. Only the first request decides the result.",
+      "request carrying the tool set a real Model Copilot turn assembles (built-in admin " +
+      "definitions plus every connected MCP server's schema) on its own bounded timeout. " +
+      "Only a refused request counts as unsupported; a timeout is inconclusive. Only the " +
+      "first request decides the result.",
     adminOnly: true,
     responses: {
       200: {
@@ -728,6 +738,10 @@ export const openApiOps: Record<string, OperationMeta> = {
               required: ["supported"],
               properties: {
                 supported: { type: "boolean" },
+                inconclusive: {
+                  type: "boolean",
+                  description: "Probe could not reach a verdict (timeout, unreachable, auth)",
+                },
                 error: { type: "string" },
               },
             },

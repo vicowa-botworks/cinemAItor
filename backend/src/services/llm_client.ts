@@ -234,8 +234,32 @@ export async function chatLlm(
 
 /** Outcome of the advisory tool-calling probe (see `testLlmConnection`). */
 export interface LlmToolSupport {
+  /**
+   * False only when the endpoint REFUSED a request that carried tool
+   * definitions. Transport-level failures leave this true — see `inconclusive`.
+   */
   supported: boolean;
+  /**
+   * The probe could not reach a verdict (timeout, unreachable, auth, unknown
+   * model). Those say nothing about tool support, and the gate request has
+   * already reported them, so the UI stays silent.
+   */
+  inconclusive?: boolean;
+  /** The endpoint's own reason, when it refused the request. */
   error?: string;
+}
+
+/**
+ * The probe only needs to learn whether the endpoint ACCEPTS a `tools` array,
+ * which is a fast answer. Left on the configured timeout (default 300 s, max
+ * 3600 s) it would double the worst-case wall time of the synchronous test
+ * endpoint for information an admin cannot act on any faster.
+ */
+export const PROBE_TIMEOUT_SECONDS = 60;
+
+/** The probe's timeout: never longer than the configured request timeout. */
+export function probeTimeoutFor(configuredSeconds: number): number {
+  return Math.min(PROBE_TIMEOUT_SECONDS, configuredSeconds);
 }
 
 /** Probe tool used when the caller does not supply the real tool set. */
@@ -261,7 +285,9 @@ const PROBE_TOOL: LlmToolDef = {
  * The tool probe is a second, ADVISORY request: every Model Copilot turn
  * carries a `tools` array, so a model that rejects one cannot drive the
  * copilot even though plain chat and assist still work. Reporting it without
- * failing the check keeps the test honest for both kinds of consumer.
+ * failing the check keeps the test honest for both kinds of consumer. It runs
+ * on its own short timeout so the endpoint's worst case stays one configured
+ * timeout plus a minute, not two full timeouts.
  */
 export async function testLlmConnection(
   toolDefs?: LlmToolDef[],
@@ -286,7 +312,10 @@ export async function testLlmConnection(
     if (err instanceof AppError) return { ok: false, error: err };
     throw err;
   }
-  const tools = await probeToolSupport(toolDefs ?? [PROBE_TOOL]);
+  const tools = await probeToolSupport(
+    toolDefs ?? [PROBE_TOOL],
+    probeTimeoutFor(getLlmSettings().timeoutSeconds),
+  );
   return {
     ok: true,
     latencyMs: result.latencyMs,
@@ -298,22 +327,39 @@ export async function testLlmConnection(
 
 /**
  * Sends one tool-bearing completion. Only the endpoint REJECTING the request
- * counts as unsupported — whether the model chose to call the tool says
- * nothing about the endpoint's capability.
+ * counts as unsupported — whether the model chose to call the tool says nothing
+ * about capability, and neither does a timeout, an auth failure or a dropped
+ * connection. Collapsing those into "this model has no tool calling" would be a
+ * confidently wrong diagnosis, and the slow models most likely to time out here
+ * are exactly the ones it would fire on.
+ *
+ * The probe sends a small `max_tokens` so `tools` is the only variable
+ * separating it from the gate request: a refusal then means the tool array was
+ * refused, not that the prompt outgrew the context window.
  */
-async function probeToolSupport(tools: LlmToolDef[]): Promise<LlmToolSupport> {
+async function probeToolSupport(
+  tools: LlmToolDef[],
+  timeoutSeconds: number,
+): Promise<LlmToolSupport> {
   try {
     await chatLlm({
       messages: [
         { role: "user", content: "List the registered models." },
       ],
+      maxTokens: 64,
+      timeoutSeconds,
       tools,
     });
     return { supported: true };
   } catch (err) {
-    const message = err instanceof AppError
-      ? (err.details || err.message)
-      : (err instanceof Error ? err.message : String(err));
-    return { supported: false, error: message.slice(0, 300) };
+    // Only a request the endpoint refused is evidence about tool support.
+    if (!(err instanceof AppError) || err.code !== ERROR_CODES.LLM_BAD_RESPONSE) {
+      return { supported: true, inconclusive: true };
+    }
+    // Report the refusal as a refusal, with the endpoint's own reason attached:
+    // a 400 may mean "no tool calling" or something else entirely, and the
+    // detail is what lets the admin tell which.
+    const reason = (err.details || err.message).trim();
+    return { supported: false, error: reason.slice(0, 300) };
   }
 }

@@ -4,6 +4,7 @@ import { closeDb } from "../src/db/database.ts";
 import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
+import { probeTimeoutFor } from "../src/services/llm_client.ts";
 
 interface FakeLlmState {
   status: number;
@@ -20,6 +21,8 @@ interface FakeLlmState {
   toolStatus: number;
   /** Error message served for a rejected tool request. */
   toolError: string;
+  /** Delay (ms) applied only to tool-bearing requests. */
+  toolDelayMs: number;
 }
 
 function freshState(): FakeLlmState {
@@ -35,6 +38,7 @@ function freshState(): FakeLlmState {
     bodies: [],
     toolStatus: 0,
     toolError: "this model does not support tools",
+    toolDelayMs: 0,
   };
 }
 
@@ -65,6 +69,9 @@ function startFakeLlm(state: FakeLlmState): {
             { error: { message: state.toolError } },
             { status: state.toolStatus },
           );
+        }
+        if (state.toolDelayMs > 0 && Array.isArray(state.lastBody.tools)) {
+          await new Promise((r) => setTimeout(r, state.toolDelayMs));
         }
         const message: Record<string, unknown> = {
           role: "assistant",
@@ -379,6 +386,52 @@ describe("llm api", () => {
         body.tools.error?.includes("does not support tools"),
         `expected the probe reason, got: ${body.tools.error}`,
       );
+    });
+  });
+
+  it("connection test: a slow probe is inconclusive, not a refusal", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await put("/api/v1/llm/settings", {
+        enabled: true,
+        base_url: fake.url,
+        model: "fake-model",
+        timeout_seconds: 1,
+      }, adminToken);
+      // Only the tool-bearing request stalls, so the gate still passes.
+      state.toolDelayMs = 1500;
+      const res = await post("/api/v1/llm/test", {}, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        tools: { supported: boolean; inconclusive?: boolean; error?: string };
+      };
+      assertEquals(body.ok, true);
+      // A timeout says nothing about tool support. Reporting it as a refusal
+      // would be a confidently wrong diagnosis, and slow local models -- the
+      // ones most likely to stall -- would get it most often.
+      assertEquals(body.tools.supported, true);
+      assertEquals(body.tools.inconclusive, true);
+      assertEquals(body.tools.error, undefined);
+    });
+  });
+
+  it("connection test: the probe isolates tools with a small max_tokens", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await put("/api/v1/llm/settings", {
+        enabled: true,
+        base_url: fake.url,
+        model: "fake-model",
+        max_tokens: "32768",
+      }, adminToken);
+      await post("/api/v1/llm/test", {}, adminToken);
+      // The gate carries the configured cap; the probe does not, so `tools` is
+      // the only difference between the two requests and a probe refusal means
+      // the tool array was refused rather than the prompt outgrowing the
+      // context window.
+      assertEquals(state.bodies[0]?.max_tokens, 32768);
+      assertEquals(state.bodies[1]?.max_tokens, 64);
     });
   });
 
@@ -883,5 +936,21 @@ describe("llm api", () => {
       const health = await fetchWithRetry(`${base}/api/v1/health`);
       assertEquals(health.status, 200);
     });
+  });
+});
+
+describe("llm connection test probe budget", () => {
+  it("caps the probe at its own short timeout", () => {
+    // The probe only asks whether the endpoint accepts a `tools` array, which
+    // is a fast answer. On the configured timeout it would double the
+    // worst-case wall time of a synchronous endpoint (default 300s, max 3600s)
+    // for information an admin cannot act on any faster.
+    assertEquals(probeTimeoutFor(300), 60);
+    assertEquals(probeTimeoutFor(3600), 60);
+  });
+
+  it("never extends a shorter configured timeout", () => {
+    assertEquals(probeTimeoutFor(15), 15);
+    assertEquals(probeTimeoutFor(60), 60);
   });
 });

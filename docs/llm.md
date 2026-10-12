@@ -64,10 +64,12 @@ require admin; reading settings requires admin; every authenticated user can rea
 
 Calls are synchronous (bounded by `llm_timeout_seconds`), never queued jobs.
 
-Every mapped error carries the endpoint's own response excerpt in `details`, and the frontend
-appends a compact form of it to the displayed message. A bare `HTTP 400` is useless on its own — the
-upstream sentence ("request exceeds the context window: prompt (59) + max tokens (262144)…") is what
-the user has to act on.
+Every mapped error carries the endpoint's own response excerpt in `details`. For the `LLM_*` codes
+the frontend appends a compact form of it to the displayed message — a bare `HTTP 400` is useless on
+its own, and the upstream sentence ("request exceeds the context window: prompt (59) + max tokens
+(262144)…") is what the user has to act on. Other codes keep `details` off the screen: the same
+field carries a thumbnail generator's stderr and a subprocess log tail, which contain server-side
+paths.
 
 ### Connection test
 
@@ -78,13 +80,31 @@ the settings get:
    `max_tokens` is a per-request cap the endpoint may refuse outright, and every real request sends
    the configured value; probing with a different one lets a broken setting pass the test and then
    fail the first real prompt.
-2. **The advisory tool probe.** A second completion carrying the Model Copilot's own admin tool
-   definitions. Only the endpoint _rejecting the request_ counts as unsupported — whether the model
-   chose to call a tool says nothing about capability. This never fails the check (plain chat and
-   prompt-enhance work without tool calling), but the UI warns when it fails, because every copilot
-   turn sends `tools` and would otherwise fail with no explanation.
+   - **Known limit:** the gate prompt is only a few tokens, so it catches a cap that fills the whole
+     context window, not one that merely leaves no room for a real copilot turn. Nothing in the
+     backend reports the model's context length, so there is nothing to validate against — size the
+     cap with headroom for the copilot's system prompt and tool schemas, not just for this request.
+2. **The advisory tool probe.** A second completion carrying the tool set a real copilot turn
+   assembles: the built-in admin definitions **plus every connected MCP server's schema, passed
+   through unchanged** — that pass-through is exactly what a strict gateway refuses, so omitting it
+   would let the probe go green while the copilot still fails.
+   - It sends a small `max_tokens` of its own, so `tools` is the only variable separating it from
+     the gate: a refusal then means the tool array was refused, not the prompt.
+   - It runs on its own bounded timeout (`min(60s, llm_timeout_seconds)`) rather than the configured
+     one, so the endpoint's worst case is one configured timeout plus a minute — not two full
+     timeouts.
+   - Three-way verdict. Only a request the endpoint **refused** (`LLM_BAD_RESPONSE`) is evidence
+     about tool support. A timeout, an unreachable endpoint, an auth failure or an unknown model is
+     **inconclusive** and stays silent — those say nothing about tools, and the gate has already
+     reported them. Reporting a stall as "this model has no tool calling" would be a confidently
+     wrong diagnosis, and slow local models are the ones most likely to stall.
 
-Response: `{ok: true, latency_ms, model, content, tools: {supported, error?}}`.
+This never fails the check: plain chat and prompt-enhance work without tool calling, so a model
+without it is a working configuration. The UI warns when the probe is refused, quoting the
+endpoint's own reason rather than asserting a cause — a refusal can also mean a schema the gateway
+rejected.
+
+Response: `{ok: true, latency_ms, model, content, tools: {supported, inconclusive?, error?}}`.
 
 ## Chat
 
