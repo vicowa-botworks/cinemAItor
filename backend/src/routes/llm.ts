@@ -19,6 +19,7 @@ import { chatLlm, type LlmMessage, testLlmConnection } from "@cinemaItor/service
 import {
   type AgentProposal,
   type AgentStep,
+  agentToolDefs,
   approveProposal,
   listProposals,
   rejectProposal,
@@ -178,7 +179,9 @@ function handleUpdateSettings(ctx: Context, body: Record<string, unknown>): void
 
 async function handleTest(ctx: Context): Promise<void> {
   requireAdmin(ctx);
-  const result = await testLlmConnection();
+  // Probe with the copilot's own admin tool set so the advisory result matches
+  // what the copilot will actually send.
+  const result = await testLlmConnection(agentToolDefs(true));
   if (!result.ok) {
     const { status, code, message, details } = result.error;
     ctx.response.status = status;
@@ -190,6 +193,7 @@ async function handleTest(ctx: Context): Promise<void> {
     latency_ms: result.latencyMs,
     model: result.model,
     content: result.content,
+    tools: result.tools,
   };
 }
 
@@ -701,19 +705,32 @@ export const openApiOps: Record<string, OperationMeta> = {
     },
   },
   "POST /api/v1/llm/test": {
-    summary: "Test the LLM connection with a minimal completion",
+    summary: "Test the LLM connection with a real-shaped completion",
+    description: "Sends a completion using the configured max_tokens (so an oversized " +
+      "cap fails here rather than on the first real prompt), then makes a second advisory " +
+      "request carrying the Model Copilot's tool definitions to report whether the endpoint " +
+      "supports tool calling. Only the first request decides the result.",
     adminOnly: true,
     responses: {
       200: {
         description: "Connection succeeded",
         schema: {
           type: "object",
-          required: ["ok", "latency_ms", "model", "content"],
+          required: ["ok", "latency_ms", "model", "content", "tools"],
           properties: {
             ok: { type: "boolean", enum: [true] },
             latency_ms: { type: "integer" },
             model: { type: "string" },
             content: { type: "string" },
+            tools: {
+              type: "object",
+              description: "Advisory tool-calling probe; the copilot needs it, chat does not",
+              required: ["supported"],
+              properties: {
+                supported: { type: "boolean" },
+                error: { type: "string" },
+              },
+            },
           },
         },
       },

@@ -1136,6 +1136,48 @@ describe("ApiClient", () => {
       assertEquals(err.message, "Invalid credentials");
     });
 
+    it("appends the upstream details to a generic message", async () => {
+      // The LLM/gateway case: `message` is a bare status, `details` is the
+      // only actionable text. Dropping it left users with "HTTP 400".
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "LLM_BAD_RESPONSE",
+            message: "The LLM endpoint returned an unexpected response: HTTP 400",
+            details: "request exceeds the context window: prompt (59) + max tokens (262144)",
+          },
+        }, 502);
+      const err = await assertRejects(() => api.testLlm(), ApiError);
+      assertEquals(err.code, "LLM_BAD_RESPONSE");
+      assert(
+        err.message.includes("request exceeds the context window"),
+        `expected the upstream reason in the message, got: ${err.message}`,
+      );
+    });
+
+    it("collapses whitespace and truncates long details", async () => {
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "LLM_BAD_RESPONSE",
+            message: "bad request",
+            details: `line one\n\t${"x".repeat(400)}`,
+          },
+        }, 502);
+      const err = await assertRejects(() => api.testLlm(), ApiError);
+      assert(!err.message.includes("\n"), "details must be collapsed to one line");
+      assert(err.message.length < 400, `message should stay bounded: ${err.message.length}`);
+    });
+
+    it("does not repeat details already present in the message", async () => {
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: { code: "X", message: "boom: nope", details: "nope" },
+        }, 500);
+      const err = await assertRejects(() => api.listProjects(), ApiError);
+      assertEquals(err.message, "boom: nope");
+    });
+
     it("falls back to status text when error body is not JSON", async () => {
       globalThis.fetch = async () => ({
         ok: false,

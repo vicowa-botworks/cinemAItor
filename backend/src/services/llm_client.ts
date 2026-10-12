@@ -232,26 +232,88 @@ export async function chatLlm(
   };
 }
 
-/** Minimal completion used by the connection test endpoint. */
-export async function testLlmConnection(): Promise<
-  | { ok: true; latencyMs: number; model: string; content: string }
+/** Outcome of the advisory tool-calling probe (see `testLlmConnection`). */
+export interface LlmToolSupport {
+  supported: boolean;
+  error?: string;
+}
+
+/** Probe tool used when the caller does not supply the real tool set. */
+const PROBE_TOOL: LlmToolDef = {
+  type: "function",
+  function: {
+    name: "cinemaitor_connection_probe",
+    description: "Internal no-op used by the LLM connection test.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+};
+
+/**
+ * Connection check used by the test endpoint.
+ *
+ * The completion deliberately goes out with the CONFIGURED max_tokens rather
+ * than a small fixed one. `max_tokens` is a per-request cap the endpoint may
+ * refuse outright — a value that fills the model's whole context window is
+ * rejected by strict gateways — and every real request sends the configured
+ * value. Hardcoding 16 here meant a broken setting produced a green test and
+ * then a failure on the first actual prompt.
+ *
+ * The tool probe is a second, ADVISORY request: every Model Copilot turn
+ * carries a `tools` array, so a model that rejects one cannot drive the
+ * copilot even though plain chat and assist still work. Reporting it without
+ * failing the check keeps the test honest for both kinds of consumer.
+ */
+export async function testLlmConnection(
+  toolDefs?: LlmToolDef[],
+): Promise<
+  | {
+    ok: true;
+    latencyMs: number;
+    model: string;
+    content: string;
+    tools: LlmToolSupport;
+  }
   | { ok: false; error: AppError }
 > {
+  let result: LlmChatResult;
   try {
-    const result = await chatLlm({
+    result = await chatLlm({
       messages: [
         { role: "user", content: "Reply with exactly: OK" },
       ],
-      maxTokens: 16,
     });
-    return {
-      ok: true,
-      latencyMs: result.latencyMs,
-      model: result.model,
-      content: (result.content ?? "").trim(),
-    };
   } catch (err) {
     if (err instanceof AppError) return { ok: false, error: err };
     throw err;
+  }
+  const tools = await probeToolSupport(toolDefs ?? [PROBE_TOOL]);
+  return {
+    ok: true,
+    latencyMs: result.latencyMs,
+    model: result.model,
+    content: (result.content ?? "").trim(),
+    tools,
+  };
+}
+
+/**
+ * Sends one tool-bearing completion. Only the endpoint REJECTING the request
+ * counts as unsupported — whether the model chose to call the tool says
+ * nothing about the endpoint's capability.
+ */
+async function probeToolSupport(tools: LlmToolDef[]): Promise<LlmToolSupport> {
+  try {
+    await chatLlm({
+      messages: [
+        { role: "user", content: "List the registered models." },
+      ],
+      tools,
+    });
+    return { supported: true };
+  } catch (err) {
+    const message = err instanceof AppError
+      ? (err.details || err.message)
+      : (err instanceof Error ? err.message : String(err));
+    return { supported: false, error: message.slice(0, 300) };
   }
 }

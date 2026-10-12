@@ -24,12 +24,21 @@ class ApiError extends Error {
 
 // The backend sends `{error: {code, message, details?, traceId}}`; older
 // shapes carry a plain string. Extract both the human message and the code.
+//
+// `details` is the upstream's own explanation — an LLM gateway's reason for
+// rejecting a request, a node's stderr tail. The generic `message` is often
+// just a status ("...unexpected response: HTTP 400"), which leaves the user
+// with nothing to act on, so a compact excerpt is appended to it.
+const ERROR_DETAILS_MAX_CHARS = 300;
+
 function extractApiError(body, fallbackMessage) {
   const detail = body && body.error !== undefined ? body.error : body;
-  const message = typeof detail === "string"
-    ? detail
-    : (detail && detail.message) || fallbackMessage;
+  let message = typeof detail === "string" ? detail : (detail && detail.message) || fallbackMessage;
   const code = detail && typeof detail === "object" && detail.code ? detail.code : null;
+  if (detail && typeof detail === "object" && typeof detail.details === "string") {
+    const extra = detail.details.replace(/\s+/g, " ").trim().slice(0, ERROR_DETAILS_MAX_CHARS);
+    if (extra && !message.includes(extra)) message = `${message} — ${extra}`;
+  }
   return { message, code };
 }
 

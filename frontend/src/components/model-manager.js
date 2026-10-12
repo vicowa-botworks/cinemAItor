@@ -365,6 +365,11 @@ export class ModelManager extends LitElement {
       color: #b91c1c;
     }
 
+    .notice.warn {
+      background-color: rgba(245, 158, 11, 0.14);
+      color: #b45309;
+    }
+
     .empty {
       background-color: var(--color-surface);
       border: 1px dashed var(--color-border);
@@ -4357,10 +4362,17 @@ export class ModelManager extends LitElement {
       // first — testing the form is the point of the button.
       await this._persistLlmDraft();
       const result = await api.testLlm();
-      this.llmNotice = {
-        kind: "ok",
-        text: `Connection OK — "${result.model}" answered in ${result.latency_ms} ms.`,
-      };
+      const tools = result.tools;
+      const answered = `Connection OK — "${result.model}" answered in ${result.latency_ms} ms`;
+      // Advisory: chat and prompt-enhance work without tool calling, the
+      // Model Copilot does not — so this warns instead of failing the test.
+      this.llmNotice = tools && tools.supported === false
+        ? {
+          kind: "warn",
+          text: `${answered}, but it rejected tool calling — the Model Copilot will not ` +
+            `work with this model${tools.error ? `: ${tools.error}` : "."}`,
+        }
+        : { kind: "ok", text: `${answered}.` };
     } catch (err) {
       this.llmError = err.message || "Connection test failed.";
     } finally {
