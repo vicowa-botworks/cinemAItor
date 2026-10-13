@@ -19,15 +19,15 @@ model metadata. No cloud LLM services.
 
 Stored in `app_settings` (same mechanism as the SMTP settings, see `docs/email.md`):
 
-| Key                   | Meaning                                                                                                                                        |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `llm_enabled`         | `"0"` / `"1"` — when off every LLM endpoint answers `503`                                                                                      |
-| `llm_base_url`        | Server root, e.g. `http://127.0.0.1:11434/v1` (Ollama) or `http://127.0.0.1:8080/v1` (llama.cpp). Requests go to `{base_url}/chat/completions` |
-| `llm_api_key`         | Optional bearer key; sent only when non-empty                                                                                                  |
-| `llm_model`           | Model name to send in the request body (`qwen2.5:14b`, `local-model`, …)                                                                       |
-| `llm_temperature`     | Sampling temperature string (`"0.7"`), sent when set                                                                                           |
-| `llm_max_tokens`      | Default max completion tokens (`"1024"`), sent when set                                                                                        |
-| `llm_timeout_seconds` | Request timeout (`"300"` default; 1–3600)                                                                                                      |
+| Key                   | Meaning                                                                                                                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm_enabled`         | `"0"` / `"1"` — when off every LLM endpoint answers `503`                                                                                                                                                                                                                        |
+| `llm_base_url`        | Server root, e.g. `http://127.0.0.1:11434/v1` (Ollama) or `http://127.0.0.1:8080/v1` (llama.cpp). Requests go to `{base_url}/chat/completions`                                                                                                                                   |
+| `llm_api_key`         | Optional bearer key; sent only when non-empty                                                                                                                                                                                                                                    |
+| `llm_model`           | Model name to send in the request body (`qwen2.5:14b`, `local-model`, …)                                                                                                                                                                                                         |
+| `llm_temperature`     | Sampling temperature string (`"0.7"`), sent when set                                                                                                                                                                                                                             |
+| `llm_max_tokens`      | Default max completion tokens (`"1024"`), sent when set. A per-request **cap**, sent on every call — some endpoints reject a request outright when `prompt + max_tokens` exceeds the model's context window, so it must stay comfortably below it (strict gateways do not clamp) |
+| `llm_timeout_seconds` | Request timeout (`"300"` default; 1–3600)                                                                                                                                                                                                                                        |
 
 The key is never returned by any endpoint — settings GET exposes `api_key_set: boolean`. PUT accepts
 a partial update; `llm_api_key` accepts a string (set/replace) or `null` (clear). Mutating settings
@@ -40,7 +40,7 @@ require admin; reading settings requires admin; every authenticated user can rea
 | GET    | `/api/v1/llm/settings`              | admin         | Current settings (key masked) + `enabled` + `configured`                                                             |
 | PUT    | `/api/v1/llm/settings`              | admin         | Partial update (see table above)                                                                                     |
 | GET    | `/api/v1/llm/status`                | authenticated | `{configured: boolean}` — enabled + has base URL + has model name                                                    |
-| POST   | `/api/v1/llm/test`                  | admin         | Minimal completion; `200 {ok: true, latency_ms, model}` or a mapped error                                            |
+| POST   | `/api/v1/llm/test`                  | admin         | Completion + tool probe; `200 {ok: true, latency_ms, model, content, tools}` or a mapped error                       |
 | POST   | `/api/v1/llm/chat`                  | authenticated | One-shot chat `{messages, model?, temperature?, max_tokens?}`                                                        |
 | POST   | `/api/v1/llm/assist`                | authenticated | `{purpose, context, model_id?, skill_id?, max_tokens?}` → `{purpose, content}`                                       |
 | POST   | `/api/v1/llm/agent`                 | authenticated | Model Copilot: `{history, model?, conversation_id?}` → `{reply, model, iterations, truncated, steps[], proposals[]}` |
@@ -63,6 +63,48 @@ require admin; reading settings requires admin; every authenticated user can rea
 | Non-JSON or unexpected response   | 502    | `LLM_BAD_RESPONSE`    |
 
 Calls are synchronous (bounded by `llm_timeout_seconds`), never queued jobs.
+
+Every mapped error carries the endpoint's own response excerpt in `details`. For the `LLM_*` codes
+the frontend appends a compact form of it to the displayed message — a bare `HTTP 400` is useless on
+its own, and the upstream sentence ("request exceeds the context window: prompt (59) + max tokens
+(262144)…") is what the user has to act on. Other codes keep `details` off the screen: the same
+field carries a thumbnail generator's stderr and a subprocess log tail, which contain server-side
+paths.
+
+### Connection test
+
+`POST /api/v1/llm/test` sends **two** requests, because a green light here is the only pre-flight
+the settings get:
+
+1. **The gate.** A completion sent with the **configured `max_tokens`** — not a small fixed one.
+   `max_tokens` is a per-request cap the endpoint may refuse outright, and every real request sends
+   the configured value; probing with a different one lets a broken setting pass the test and then
+   fail the first real prompt.
+   - **Known limit:** the gate prompt is only a few tokens, so it catches a cap that fills the whole
+     context window, not one that merely leaves no room for a real copilot turn. Nothing in the
+     backend reports the model's context length, so there is nothing to validate against — size the
+     cap with headroom for the copilot's system prompt and tool schemas, not just for this request.
+2. **The advisory tool probe.** A second completion carrying the tool set a real copilot turn
+   assembles: the built-in admin definitions **plus every connected MCP server's schema, passed
+   through unchanged** — that pass-through is exactly what a strict gateway refuses, so omitting it
+   would let the probe go green while the copilot still fails.
+   - It sends a small `max_tokens` of its own, so `tools` is the only variable separating it from
+     the gate: a refusal then means the tool array was refused, not the prompt.
+   - It runs on its own bounded timeout (`min(60s, llm_timeout_seconds)`) rather than the configured
+     one, so the endpoint's worst case is one configured timeout plus a minute — not two full
+     timeouts.
+   - Three-way verdict. Only a request the endpoint **refused** (`LLM_BAD_RESPONSE`) is evidence
+     about tool support. A timeout, an unreachable endpoint, an auth failure or an unknown model is
+     **inconclusive** and stays silent — those say nothing about tools, and the gate has already
+     reported them. Reporting a stall as "this model has no tool calling" would be a confidently
+     wrong diagnosis, and slow local models are the ones most likely to stall.
+
+This never fails the check: plain chat and prompt-enhance work without tool calling, so a model
+without it is a working configuration. The UI warns when the probe is refused, quoting the
+endpoint's own reason rather than asserting a cause — a refusal can also mean a schema the gateway
+rejected.
+
+Response: `{ok: true, latency_ms, model, content, tools: {supported, inconclusive?, error?}}`.
 
 ## Chat
 

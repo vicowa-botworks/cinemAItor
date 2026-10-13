@@ -4,6 +4,7 @@ import { closeDb } from "../src/db/database.ts";
 import { createUser } from "../src/db/schema.ts";
 import { hashPassword } from "../src/services/password.ts";
 import { fetchWithRetry, freshMemoryDb, withServer } from "./helpers/http.ts";
+import { probeTimeoutFor } from "../src/services/llm_client.ts";
 
 interface FakeLlmState {
   status: number;
@@ -14,6 +15,14 @@ interface FakeLlmState {
   lastAuth: string | null;
   lastBody: Record<string, unknown> | null;
   calls: number;
+  /** Every request body in order (the connection test now sends two). */
+  bodies: Record<string, unknown>[];
+  /** When > 0, a request carrying `tools` fails with this status. */
+  toolStatus: number;
+  /** Error message served for a rejected tool request. */
+  toolError: string;
+  /** Delay (ms) applied only to tool-bearing requests. */
+  toolDelayMs: number;
 }
 
 function freshState(): FakeLlmState {
@@ -26,6 +35,10 @@ function freshState(): FakeLlmState {
     lastAuth: null,
     lastBody: null,
     calls: 0,
+    bodies: [],
+    toolStatus: 0,
+    toolError: "this model does not support tools",
+    toolDelayMs: 0,
   };
 }
 
@@ -41,6 +54,7 @@ function startFakeLlm(state: FakeLlmState): {
         state.calls += 1;
         state.lastAuth = req.headers.get("authorization");
         state.lastBody = (await req.json()) as Record<string, unknown>;
+        state.bodies.push(state.lastBody);
         if (state.delayMs > 0) {
           await new Promise((r) => setTimeout(r, state.delayMs));
         }
@@ -49,6 +63,15 @@ function startFakeLlm(state: FakeLlmState): {
             { error: { message: "fake llm failure" } },
             { status: state.status },
           );
+        }
+        if (state.toolStatus > 0 && Array.isArray(state.lastBody.tools)) {
+          return Response.json(
+            { error: { message: state.toolError } },
+            { status: state.toolStatus },
+          );
+        }
+        if (state.toolDelayMs > 0 && Array.isArray(state.lastBody.tools)) {
+          await new Promise((r) => setTimeout(r, state.toolDelayMs));
         }
         const message: Record<string, unknown> = {
           role: "assistant",
@@ -284,14 +307,131 @@ describe("llm api", () => {
         latency_ms: number;
         model: string;
         content: string;
+        tools: { supported: boolean; error?: string };
       };
       assertEquals(body.ok, true);
       assert(body.latency_ms >= 0);
       assertEquals(body.model, "fake-model");
       assertEquals(body.content, "OK");
+      assertEquals(body.tools.supported, true);
       // The configured model name is sent in the request body.
-      assertEquals(state.lastBody?.model, "fake-model");
-      assertEquals(state.calls, 1);
+      assertEquals(state.bodies[0]?.model, "fake-model");
+      // Second request: the advisory tool probe, carrying the copilot's own
+      // tool set rather than a placeholder.
+      assertEquals(state.calls, 2);
+      const probe = state.bodies[1];
+      assert(Array.isArray(probe?.tools), "the probe request must carry tools");
+      const names = (probe?.tools as { function: { name: string } }[])
+        .map((t) => t.function.name);
+      assert(
+        names.includes("list_models"),
+        `probe must carry the copilot's tools, got: ${names.join(", ")}`,
+      );
+    });
+  });
+
+  it("connection test: sends the configured max_tokens, not a fixed small one", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await put("/api/v1/llm/settings", {
+        enabled: true,
+        base_url: fake.url,
+        model: "fake-model",
+        max_tokens: "262144",
+      }, adminToken);
+      const res = await post("/api/v1/llm/test", {}, adminToken);
+      assertEquals(res.status, 200);
+      // A cap the endpoint refuses (e.g. one filling the whole context window)
+      // has to fail the test, so the test must send what real requests send.
+      assertEquals(state.bodies[0]?.max_tokens, 262144);
+    });
+  });
+
+  it("connection test: surfaces the upstream reason for a rejected request", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint();
+      state.status = 400;
+      const res = await post("/api/v1/llm/test", {}, adminToken);
+      assertEquals(res.status, 502);
+      const body = (await res.json()) as {
+        error: { code: string; details?: string };
+      };
+      assertEquals(body.error.code, "LLM_BAD_RESPONSE");
+      // The gateway's own explanation is the actionable half — a bare status
+      // code tells the user nothing.
+      assert(
+        body.error.details?.includes("fake llm failure"),
+        `expected the upstream reason in details, got: ${body.error.details}`,
+      );
+    });
+  });
+
+  it("connection test: a rejected tool probe warns without failing the test", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await setLlmEndpoint();
+      state.toolStatus = 400;
+      const res = await post("/api/v1/llm/test", {}, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        tools: { supported: boolean; error?: string };
+      };
+      // Chat and prompt-enhance work without tools, so the check stays green —
+      // but the copilot's dependency on tools must be reported.
+      assertEquals(body.ok, true);
+      assertEquals(body.tools.supported, false);
+      assert(
+        body.tools.error?.includes("does not support tools"),
+        `expected the probe reason, got: ${body.tools.error}`,
+      );
+    });
+  });
+
+  it("connection test: a slow probe is inconclusive, not a refusal", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await put("/api/v1/llm/settings", {
+        enabled: true,
+        base_url: fake.url,
+        model: "fake-model",
+        timeout_seconds: 1,
+      }, adminToken);
+      // Only the tool-bearing request stalls, so the gate still passes.
+      state.toolDelayMs = 1500;
+      const res = await post("/api/v1/llm/test", {}, adminToken);
+      assertEquals(res.status, 200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        tools: { supported: boolean; inconclusive?: boolean; error?: string };
+      };
+      assertEquals(body.ok, true);
+      // A timeout says nothing about tool support. Reporting it as a refusal
+      // would be a confidently wrong diagnosis, and slow local models -- the
+      // ones most likely to stall -- would get it most often.
+      assertEquals(body.tools.supported, true);
+      assertEquals(body.tools.inconclusive, true);
+      assertEquals(body.tools.error, undefined);
+    });
+  });
+
+  it("connection test: the probe isolates tools with a small max_tokens", async () => {
+    await withServer(async (base) => {
+      baseUrl = base;
+      await put("/api/v1/llm/settings", {
+        enabled: true,
+        base_url: fake.url,
+        model: "fake-model",
+        max_tokens: "32768",
+      }, adminToken);
+      await post("/api/v1/llm/test", {}, adminToken);
+      // The gate carries the configured cap; the probe does not, so `tools` is
+      // the only difference between the two requests and a probe refusal means
+      // the tool array was refused rather than the prompt outgrowing the
+      // context window.
+      assertEquals(state.bodies[0]?.max_tokens, 32768);
+      assertEquals(state.bodies[1]?.max_tokens, 64);
     });
   });
 
@@ -796,5 +936,21 @@ describe("llm api", () => {
       const health = await fetchWithRetry(`${base}/api/v1/health`);
       assertEquals(health.status, 200);
     });
+  });
+});
+
+describe("llm connection test probe budget", () => {
+  it("caps the probe at its own short timeout", () => {
+    // The probe only asks whether the endpoint accepts a `tools` array, which
+    // is a fast answer. On the configured timeout it would double the
+    // worst-case wall time of a synchronous endpoint (default 300s, max 3600s)
+    // for information an admin cannot act on any faster.
+    assertEquals(probeTimeoutFor(300), 60);
+    assertEquals(probeTimeoutFor(3600), 60);
+  });
+
+  it("never extends a shorter configured timeout", () => {
+    assertEquals(probeTimeoutFor(15), 15);
+    assertEquals(probeTimeoutFor(60), 60);
   });
 });

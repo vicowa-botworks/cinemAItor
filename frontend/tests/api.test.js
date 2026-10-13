@@ -1136,6 +1136,68 @@ describe("ApiClient", () => {
       assertEquals(err.message, "Invalid credentials");
     });
 
+    it("appends the upstream details to a generic message", async () => {
+      // The LLM/gateway case: `message` is a bare status, `details` is the
+      // only actionable text. Dropping it left users with "HTTP 400".
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "LLM_BAD_RESPONSE",
+            message: "The LLM endpoint returned an unexpected response: HTTP 400",
+            details: "request exceeds the context window: prompt (59) + max tokens (262144)",
+          },
+        }, 502);
+      const err = await assertRejects(() => api.testLlm(), ApiError);
+      assertEquals(err.code, "LLM_BAD_RESPONSE");
+      assert(
+        err.message.includes("request exceeds the context window"),
+        `expected the upstream reason in the message, got: ${err.message}`,
+      );
+    });
+
+    it("collapses whitespace and truncates long details with an ellipsis", async () => {
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "LLM_BAD_RESPONSE",
+            message: "bad request",
+            details: `line one\n\t${"x".repeat(400)}`,
+          },
+        }, 502);
+      const err = await assertRejects(() => api.testLlm(), ApiError);
+      assert(!err.message.includes("\n"), "details must be collapsed to one line");
+      assert(err.message.length < 400, `message should stay bounded: ${err.message.length}`);
+      assert(err.message.endsWith("…"), `truncation must be marked: ${err.message.slice(-5)}`);
+    });
+
+    it("does not repeat details already present in the message", async () => {
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "LLM_BAD_RESPONSE",
+            message: "boom: the gateway refused this prompt",
+            details: "the gateway refused this prompt",
+          },
+        }, 502);
+      const err = await assertRejects(() => api.testLlm(), ApiError);
+      assertEquals(err.message, "boom: the gateway refused this prompt");
+    });
+
+    it("keeps non-LLM details out of the message", async () => {
+      // `details` also carries subprocess stderr and log tails on other
+      // endpoints; those hold server-side paths and stay server-side.
+      globalThis.fetch = async () =>
+        jsonResponse({
+          error: {
+            code: "GENERATION_FAILED",
+            message: "Thumbnail generation failed",
+            details: "ffmpeg exited while reading /var/lib/cinemaitor/app_data/media/ab/cd",
+          },
+        }, 502);
+      const err = await assertRejects(() => api.getAssetThumbnailUrl("a-1", "v-1"), ApiError);
+      assertEquals(err.message, "Thumbnail generation failed");
+    });
+
     it("falls back to status text when error body is not JSON", async () => {
       globalThis.fetch = async () => ({
         ok: false,

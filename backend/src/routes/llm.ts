@@ -19,8 +19,11 @@ import { chatLlm, type LlmMessage, testLlmConnection } from "@cinemaItor/service
 import {
   type AgentProposal,
   type AgentStep,
+  agentToolDefs,
   approveProposal,
   listProposals,
+  mcpAgentTools,
+  mcpToolDefs,
   rejectProposal,
   runAgent,
 } from "@cinemaItor/services/llm_agent.ts";
@@ -178,7 +181,15 @@ function handleUpdateSettings(ctx: Context, body: Record<string, unknown>): void
 
 async function handleTest(ctx: Context): Promise<void> {
   requireAdmin(ctx);
-  const result = await testLlmConnection();
+  // Probe with the tool set a real copilot turn assembles: the built-in admin
+  // defs plus every connected MCP server's schema, passed through unchanged.
+  // That pass-through is exactly the material a strict gateway refuses, so
+  // probing without it can go green while the copilot still fails.
+  const mcpEntries = await mcpAgentTools(true);
+  const result = await testLlmConnection([
+    ...agentToolDefs(true),
+    ...mcpToolDefs(mcpEntries),
+  ]);
   if (!result.ok) {
     const { status, code, message, details } = result.error;
     ctx.response.status = status;
@@ -190,6 +201,7 @@ async function handleTest(ctx: Context): Promise<void> {
     latency_ms: result.latencyMs,
     model: result.model,
     content: result.content,
+    tools: result.tools,
   };
 }
 
@@ -701,19 +713,38 @@ export const openApiOps: Record<string, OperationMeta> = {
     },
   },
   "POST /api/v1/llm/test": {
-    summary: "Test the LLM connection with a minimal completion",
+    summary: "Test the LLM connection with a real-shaped completion",
+    description: "Sends a completion using the configured max_tokens (so an oversized " +
+      "cap fails here rather than on the first real prompt), then makes a second advisory " +
+      "request carrying the tool set a real Model Copilot turn assembles (built-in admin " +
+      "definitions plus every connected MCP server's schema) on its own bounded timeout. " +
+      "Only a refused request counts as unsupported; a timeout is inconclusive. Only the " +
+      "first request decides the result.",
     adminOnly: true,
     responses: {
       200: {
         description: "Connection succeeded",
         schema: {
           type: "object",
-          required: ["ok", "latency_ms", "model", "content"],
+          required: ["ok", "latency_ms", "model", "content", "tools"],
           properties: {
             ok: { type: "boolean", enum: [true] },
             latency_ms: { type: "integer" },
             model: { type: "string" },
             content: { type: "string" },
+            tools: {
+              type: "object",
+              description: "Advisory tool-calling probe; the copilot needs it, chat does not",
+              required: ["supported"],
+              properties: {
+                supported: { type: "boolean" },
+                inconclusive: {
+                  type: "boolean",
+                  description: "Probe could not reach a verdict (timeout, unreachable, auth)",
+                },
+                error: { type: "string" },
+              },
+            },
           },
         },
       },

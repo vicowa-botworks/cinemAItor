@@ -24,12 +24,45 @@ class ApiError extends Error {
 
 // The backend sends `{error: {code, message, details?, traceId}}`; older
 // shapes carry a plain string. Extract both the human message and the code.
+//
+// `details` is the upstream's own explanation — an LLM gateway's reason for
+// rejecting a request. The generic `message` is often just a status ("...HTTP
+// 400"), which leaves the user with nothing to act on, so a compact excerpt is
+// appended.
+//
+// Scoped to the LLM_* codes deliberately. `details` is also filled from a
+// thumbnail generator's stderr (routes/assets.ts) and a subprocess log tail
+// (services/model_runtime.ts), and both carry server-side paths. Those bytes
+// were already on the wire, but this is the code that would put them in front
+// of every authenticated user.
+const ERROR_DETAILS_MAX_CHARS = 300;
+const ERROR_DETAILS_CODES = new Set([
+  "LLM_BAD_RESPONSE",
+  "LLM_UNREACHABLE",
+  "LLM_AUTH_FAILED",
+  "LLM_MODEL_NOT_FOUND",
+  "LLM_TIMEOUT",
+]);
+
 function extractApiError(body, fallbackMessage) {
   const detail = body && body.error !== undefined ? body.error : body;
-  const message = typeof detail === "string"
-    ? detail
-    : (detail && detail.message) || fallbackMessage;
+  let message = typeof detail === "string" ? detail : (detail && detail.message) || fallbackMessage;
   const code = detail && typeof detail === "object" && detail.code ? detail.code : null;
+  if (
+    detail && typeof detail === "object" && typeof detail.details === "string" &&
+    ERROR_DETAILS_CODES.has(code)
+  ) {
+    const full = detail.details.replace(/\s+/g, " ").trim();
+    // Compare the whole excerpt BEFORE truncating: testing the truncated form
+    // lets a detail that is genuinely already in the message get appended
+    // anyway, cut mid-word.
+    if (full && !message.includes(full)) {
+      const extra = full.length > ERROR_DETAILS_MAX_CHARS
+        ? `${full.slice(0, ERROR_DETAILS_MAX_CHARS - 1)}…`
+        : full;
+      message = `${message} — ${extra}`;
+    }
+  }
   return { message, code };
 }
 
