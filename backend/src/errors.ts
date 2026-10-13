@@ -39,6 +39,19 @@ export interface ApiErrorBody {
   };
 }
 
+/**
+ * Bounds an AppError's `details` for the durable diagnostics row. Producers
+ * hand us anything from a short upstream error body to a whole tool stderr, and
+ * in a log the failure reason sits at the END, so the tail is what survives.
+ */
+const LOG_DETAILS_MAX_CHARS = 2000;
+
+function logDetails(details: string): string {
+  return details.length <= LOG_DETAILS_MAX_CHARS
+    ? details
+    : `…${details.slice(-LOG_DETAILS_MAX_CHARS)}`;
+}
+
 export class AppError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
@@ -131,6 +144,10 @@ export function errorHandler(logger: Logger): Middleware {
         logger.error("request failed", {
           code: body.error.code,
           message: body.error.message,
+          // The upstream's own explanation (an LLM endpoint's error body, a tool's
+          // stderr) is what turns a bare "HTTP 504" into a diagnosis, so it belongs
+          // in the durable row and not only in the response body.
+          ...(body.error.details ? { details: logDetails(body.error.details) } : {}),
           traceId: body.error.traceId,
           method: ctx.request.method,
           path: ctx.request.url.pathname,
