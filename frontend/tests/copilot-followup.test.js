@@ -5,6 +5,8 @@ import {
   collectPendingTools,
   followUpMessage,
   needsProposalNudge,
+  registryChangeForTool,
+  registryChangeForTurn,
 } from "../src/copilot-followup.js";
 
 describe("collectPendingTools", () => {
@@ -179,5 +181,113 @@ describe("needsProposalNudge", () => {
     assertEquals(needsProposalNudge(null), false);
     assertEquals(needsProposalNudge(undefined), false);
     assertEquals(needsProposalNudge(42), false);
+  });
+});
+
+describe("registryChangeForTool", () => {
+  it("reports no change for read-only tools", () => {
+    assertEquals(registryChangeForTool("list_models"), {
+      changed: false,
+      modelId: null,
+      added: false,
+      mcp: false,
+      benchmarks: false,
+      workflows: false,
+    });
+    assertEquals(registryChangeForTool(null), {
+      changed: false,
+      modelId: null,
+      added: false,
+      mcp: false,
+      benchmarks: false,
+      workflows: false,
+    });
+  });
+
+  it("takes the model id from the result, falling back to the args", () => {
+    assertEquals(
+      registryChangeForTool("register_model", { name: "Qwen" }, { model: { id: "qwen" } })
+        .modelId,
+      "qwen",
+    );
+    assertEquals(
+      registryChangeForTool("register_model", { name: "Qwen" }).added,
+      true,
+    );
+    assertEquals(
+      registryChangeForTool("update_model", { model_id: "qwen" }).modelId,
+      "qwen",
+    );
+    assertEquals(registryChangeForTool("update_model", { model_id: "qwen" }).added, false);
+    assertEquals(registryChangeForTool("install_model", { model_id: "qwen" }).modelId, "qwen");
+  });
+
+  it("flags the panels beyond the model list", () => {
+    assertEquals(registryChangeForTool("add_mcp_server").mcp, true);
+    assertEquals(registryChangeForTool("run_benchmark", { model_id: "qwen" }).benchmarks, true);
+    assertEquals(registryChangeForTool("update_workflow").workflows, true);
+    assertEquals(registryChangeForTool("install_model").mcp, false);
+  });
+
+  it("treats an executed MCP tool as a change (its effects are unknown)", () => {
+    const change = registryChangeForTool("mcp__comfy__restart", null, null);
+    assertEquals(change.changed, true);
+    assertEquals(change.mcp, true);
+    assertEquals(change.modelId, null);
+  });
+});
+
+describe("registryChangeForTurn", () => {
+  it("counts only steps that executed", () => {
+    // A proposal step has not run yet; the page refreshes when it is approved.
+    assertEquals(
+      registryChangeForTurn([
+        { tool: "register_model", args: {}, status: "proposal" },
+        { tool: "list_models", args: {}, status: "ok" },
+        { tool: "update_model", args: { model_id: "qwen" }, status: "error" },
+      ]),
+      {
+        changed: false,
+        modelId: null,
+        added: false,
+        mcp: false,
+        benchmarks: false,
+        workflows: false,
+      },
+    );
+  });
+
+  it("detects the auto-approved in-loop execution the page must reflect", () => {
+    const change = registryChangeForTurn([
+      { tool: "list_models", args: {}, status: "ok" },
+      { tool: "write_model_file", args: { model_id: "qwen" }, status: "ok" },
+      { tool: "install_model_deps", args: { model_id: "qwen" }, status: "ok" },
+      { tool: "update_model", args: { model_id: "qwen" }, status: "ok" },
+    ]);
+    assertEquals(change.changed, true);
+    assertEquals(change.modelId, "qwen");
+    assertEquals(change.added, false);
+  });
+
+  it("merges every executed step of the turn", () => {
+    const change = registryChangeForTurn([
+      { tool: "run_benchmark", args: { model_id: "qwen" }, status: "ok" },
+      { tool: "mcp__comfy__free", args: {}, status: "ok" },
+      { tool: "update_workflow", args: {}, status: "ok" },
+    ]);
+    assertEquals(change, {
+      changed: true,
+      modelId: "qwen",
+      added: false,
+      mcp: true,
+      benchmarks: true,
+      workflows: true,
+    });
+  });
+
+  it("tolerates a turn with no steps", () => {
+    assertEquals(registryChangeForTurn().changed, false);
+    assertEquals(registryChangeForTurn(null).changed, false);
+    assertEquals(registryChangeForTurn([null]).changed, false);
   });
 });
