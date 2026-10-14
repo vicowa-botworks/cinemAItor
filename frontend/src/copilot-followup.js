@@ -171,6 +171,7 @@ const NO_CHANGE = Object.freeze({
   changed: false,
   modelId: null,
   added: false,
+  addedModelId: null,
   mcp: false,
   benchmarks: false,
   workflows: false,
@@ -180,13 +181,18 @@ const NO_CHANGE = Object.freeze({
  * What running `tool` means for the page, from the arguments it was called
  * with and (when the caller has it) the tool's result.
  *
- * An MCP tool's side effects are unknown to us — the server declares only a
- * read-only hint — so any executed qualified tool counts as a change.
+ * An MCP tool's side effects are unknown HERE: the read-only hint lives on the
+ * server's registry row, which this layer never sees, and a read-only MCP tool
+ * executes inline and reports `status: "ok"` exactly like a mutating one
+ * (`llm_agent.ts` runToolInline). So any executed qualified tool counts as a
+ * change — a turn that only reads through an MCP server costs a few GETs. If
+ * that ever matters, filter on the step's gating in the backend, where the
+ * hint actually is, rather than guessing here.
  *
  * @param {string} tool Built-in tool name, or a qualified `mcp__…` name.
  * @param {{model_id?: string}|null} [args] Arguments the tool was called with.
  * @param {{model?: {id?: string}}|null} [result] Tool result, when available.
- * @returns {{changed: boolean, modelId: string|null, added: boolean, mcp: boolean, benchmarks: boolean, workflows: boolean}}
+ * @returns {{changed: boolean, modelId: string|null, added: boolean, addedModelId: string|null, mcp: boolean, benchmarks: boolean, workflows: boolean}}
  */
 export function registryChangeForTool(tool, args = null, result = null) {
   const isMcp = typeof tool === "string" && tool.startsWith(MCP_PREFIX);
@@ -199,13 +205,18 @@ export function registryChangeForTool(tool, args = null, result = null) {
     ? fromResult
     : (typeof fromArgs === "string" && fromArgs ? fromArgs : null);
 
+  // Only a brand-new row is expected to appear on the page. An update that
+  // takes a model out of the current filter (disabled, retasked) is the
+  // filter working as asked, not a change the user cannot see. The new row's
+  // id gets its own slot so that merging this with an update to some OTHER
+  // model can never leave the page looking for the wrong row.
+  const added = tool === "register_model" || tool === "register_model_from_huggingface";
+
   return {
     changed: true,
     modelId,
-    // Only a brand-new row is expected to appear on the page. An update that
-    // takes a model out of the current filter (disabled, retasked) is the
-    // filter working as asked, not a change the user cannot see.
-    added: tool === "register_model" || tool === "register_model_from_huggingface",
+    added,
+    addedModelId: added ? modelId : null,
     mcp: isMcp || tool === "add_mcp_server",
     benchmarks: tool === "run_benchmark",
     workflows: tool === "update_workflow",
@@ -220,6 +231,7 @@ export function mergeRegistryChanges(a, b) {
     changed: Boolean(first.changed || second.changed),
     modelId: second.modelId ?? first.modelId ?? null,
     added: Boolean(first.added || second.added),
+    addedModelId: second.addedModelId ?? first.addedModelId ?? null,
     mcp: Boolean(first.mcp || second.mcp),
     benchmarks: Boolean(first.benchmarks || second.benchmarks),
     workflows: Boolean(first.workflows || second.workflows),
@@ -233,7 +245,7 @@ export function mergeRegistryChanges(a, b) {
  * when the user resolves it — and an "error" step changed nothing.
  *
  * @param {Array<{tool: string, args?: object, status: string}>} [steps]
- * @returns {{changed: boolean, modelId: string|null, added: boolean, mcp: boolean, benchmarks: boolean, workflows: boolean}}
+ * @returns {{changed: boolean, modelId: string|null, added: boolean, addedModelId: string|null, mcp: boolean, benchmarks: boolean, workflows: boolean}}
  */
 export function registryChangeForTurn(steps = []) {
   return (steps ?? []).reduce(

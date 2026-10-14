@@ -3684,7 +3684,7 @@ export class ModelManager extends LitElement {
         text: `Registered "${res.model.name}" (id: ${res.model.id}, file: ${res.file}). ` +
           "Use its Install action to download the weights.",
       };
-      await this._refreshRegistry({ modelId: res.model.id, added: true });
+      await this._refreshRegistry({ added: true, addedModelId: res.model.id });
     } catch (err) {
       this.hfError = err?.message ?? "Registration failed";
     } finally {
@@ -4005,7 +4005,7 @@ export class ModelManager extends LitElement {
         kind: "ok",
         text: `"${m.name}" settings updated.`,
       };
-      await this._refreshRegistry({ modelId: m.id });
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to update settings.";
     } finally {
@@ -4101,7 +4101,7 @@ export class ModelManager extends LitElement {
         kind: "ok",
         text: `"${m.name}" generation profiles updated.`,
       };
-      await this._refreshRegistry({ modelId: m.id });
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to update profiles.";
     } finally {
@@ -4127,7 +4127,7 @@ export class ModelManager extends LitElement {
         text: `"${m.name}" task types updated.`,
       };
       // Task types decide which defaults picker offers the model.
-      await this._refreshRegistry({ modelId: m.id });
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to update task types.";
     } finally {
@@ -4171,16 +4171,24 @@ export class ModelManager extends LitElement {
    * also re-seeds the module-level defaults cache every other page's model
    * picker reads, so a model added or retasked here is picked up there.
    *
-   * @param {object} [change] What changed (see `registryChangeForTool`).
-   * @param {string|null} [change.modelId] Model the change touched.
-   * @param {boolean} [change.added] A new row — it must end up visible.
+   * @param {object} [change] What changed (see `registryChangeForTool`); an
+   * empty one means "something did". The read is always wholesale — what is
+   * passed only decides what else has to be re-read and what has to end up
+   * visible.
+   * @param {boolean} [change.added] A new row was created.
+   * @param {string|null} [change.addedModelId] That row's id, when known.
    * @param {boolean} [change.mcp] The MCP server list may have changed.
    * @param {boolean} [change.benchmarks] A benchmark ran.
    * @param {boolean} [change.workflows] A saved workflow was edited.
    */
   async _refreshRegistry(change = {}) {
-    const { modelId = null, added = false, mcp = false, benchmarks = false, workflows = false } =
-      change;
+    const {
+      added = false,
+      addedModelId = null,
+      mcp = false,
+      benchmarks = false,
+      workflows = false,
+    } = change;
     const parallel = [this._loadModels(), this._loadHardware(), this._loadTaskDefaults()];
     if (mcp) parallel.push(this._loadMcp());
     // The workflow list is only on screen once the user opens it; refresh it
@@ -4190,7 +4198,10 @@ export class ModelManager extends LitElement {
     this._reseedOpenEditors();
     // Benchmarks are per model, so they need the re-read list first.
     if (benchmarks) await this._loadBenchmarks();
-    if (added) await this._revealModel(modelId);
+    // The row to reveal is the one that was ADDED, never "the last model this
+    // change touched" — a turn that registered one model and updated another
+    // would otherwise go looking for the one that was already on screen.
+    if (added) await this._revealModel(addedModelId);
   }
 
   /**
@@ -4202,6 +4213,12 @@ export class ModelManager extends LitElement {
    */
   _reseedOpenEditors() {
     const row = (id) => this.models.find((m) => m.id === id);
+    // A change can also take the model an editor is open on out of the registry
+    // (the copilot removed it). Leaving the box up would show a model that no
+    // longer exists, with a Save that can only 404.
+    if (this.settingsEditorId && !row(this.settingsEditorId)) this._closeSettingsEditor();
+    if (this.taskEditorId && !row(this.taskEditorId)) this._closeTaskEditor();
+    if (this.profileEditorId && !row(this.profileEditorId)) this._closeProfileEditor();
     if (this.settingsEditorId) {
       const m = row(this.settingsEditorId);
       if (m && this.settingsDraft === this.settingsSeed) {
@@ -4239,6 +4256,8 @@ export class ModelManager extends LitElement {
    * filters, re-read, and say what was done.
    */
   async _revealModel(modelId) {
+    // A register whose id never reached us (a turn step carries arguments, not
+    // a result) has nothing to target; the approval path always has the id.
     if (!modelId) return;
     if (this.models.some((m) => m.id === modelId)) return;
     if (!this.enabledFilter && !this.taskFilter && !this.query) return;
@@ -4249,7 +4268,9 @@ export class ModelManager extends LitElement {
     if (!this.models.some((m) => m.id === modelId)) return;
     const shown = this.models.find((m) => m.id === modelId)?.name ?? modelId;
     this.notice = {
-      kind: "ok",
+      // Keep an earlier notice's own tone: re-styling an error as a success
+      // because a sentence was appended to it would be a lie of its own.
+      kind: this.notice?.kind ?? "ok",
       text: `${this.notice?.text ? this.notice.text + " " : ""}` +
         `Filters were hiding "${shown}", so they were cleared.`,
     };
@@ -4842,7 +4863,7 @@ export class ModelManager extends LitElement {
       };
       this.showRegister = false;
       this._registerReset();
-      await this._refreshRegistry({ modelId: model.id, added: true });
+      await this._refreshRegistry({ added: true, addedModelId: model.id });
     } catch (err) {
       this.error = err.message || "Failed to register model.";
     } finally {
@@ -4857,7 +4878,8 @@ export class ModelManager extends LitElement {
     try {
       const result = await fn(id);
       this.notice = { kind: "ok", text: noticeFn(result) };
-      await this._loadModels();
+      // Health check and verify both write to the row the card shows.
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Operation failed.";
     } finally {
@@ -4876,7 +4898,7 @@ export class ModelManager extends LitElement {
         text: `"${m.name}" ${enabled ? "enabled" : "disabled"}.`,
       };
       // Enabled models are what the task-type default pickers offer.
-      await this._refreshRegistry({ modelId: m.id });
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to update model.";
     } finally {
@@ -4896,7 +4918,7 @@ export class ModelManager extends LitElement {
           ? `"${m.name}": auto-approval ON — the copilot's model-scoped tools run without asking.`
           : `"${m.name}": auto-approval OFF — every tool call needs your approval again.`,
       };
-      await this._loadModels();
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to update model.";
     } finally {
@@ -5010,7 +5032,7 @@ export class ModelManager extends LitElement {
         kind: "ok",
         text: `"${m.name}" installed (file ${this._fmtBytes(result.install?.fileBytes)}).`,
       };
-      await this._refreshRegistry({ modelId: m.id });
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to install model.";
     } finally {
@@ -5044,7 +5066,7 @@ export class ModelManager extends LitElement {
             kind: "ok",
             text: `"${st.model.name}" install finished.`,
           };
-          this._refreshRegistry({ modelId });
+          this._refreshRegistry();
         }
         return;
       }
@@ -5091,7 +5113,7 @@ export class ModelManager extends LitElement {
     try {
       await api.deleteModel(m.id);
       this.notice = { kind: "ok", text: `"${m.name}" removed.` };
-      await this._refreshRegistry({ modelId: m.id });
+      await this._refreshRegistry();
     } catch (err) {
       this.error = err.message || "Failed to remove model.";
     } finally {
@@ -5142,7 +5164,7 @@ export class ModelManager extends LitElement {
     try {
       const { job_id, tasks } = await api.requestModelBenchmark(m.id);
       const job = await this._waitJob(job_id);
-      await this._refreshRegistry({ modelId: m.id, benchmarks: true });
+      await this._refreshRegistry({ benchmarks: true });
       if (job.status === "succeeded") {
         this.notice = {
           kind: "ok",

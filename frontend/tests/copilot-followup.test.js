@@ -4,6 +4,7 @@ import {
   agentHistory,
   collectPendingTools,
   followUpMessage,
+  mergeRegistryChanges,
   needsProposalNudge,
   registryChangeForTool,
   registryChangeForTurn,
@@ -190,6 +191,7 @@ describe("registryChangeForTool", () => {
       changed: false,
       modelId: null,
       added: false,
+      addedModelId: null,
       mcp: false,
       benchmarks: false,
       workflows: false,
@@ -198,6 +200,7 @@ describe("registryChangeForTool", () => {
       changed: false,
       modelId: null,
       added: false,
+      addedModelId: null,
       mcp: false,
       benchmarks: false,
       workflows: false,
@@ -222,6 +225,18 @@ describe("registryChangeForTool", () => {
     assertEquals(registryChangeForTool("install_model", { model_id: "qwen" }).modelId, "qwen");
   });
 
+  it("keeps the added row's id separate from the touched model", () => {
+    // The page reveals `addedModelId`; an update to some other model must never
+    // take its place, or the new row stays hidden behind the filter.
+    assertEquals(
+      registryChangeForTool("register_model", { name: "Qwen" }, { model: { id: "qwen" } })
+        .addedModelId,
+      "qwen",
+    );
+    assertEquals(registryChangeForTool("update_model", { model_id: "qwen" }).addedModelId, null);
+    assertEquals(registryChangeForTool("install_model", { model_id: "qwen" }).addedModelId, null);
+  });
+
   it("flags the panels beyond the model list", () => {
     assertEquals(registryChangeForTool("add_mcp_server").mcp, true);
     assertEquals(registryChangeForTool("run_benchmark", { model_id: "qwen" }).benchmarks, true);
@@ -234,6 +249,61 @@ describe("registryChangeForTool", () => {
     assertEquals(change.changed, true);
     assertEquals(change.mcp, true);
     assertEquals(change.modelId, null);
+  });
+});
+
+describe("mergeRegistryChanges", () => {
+  it("unions two changes", () => {
+    assertEquals(
+      mergeRegistryChanges(
+        registryChangeForTool("run_benchmark", { model_id: "qwen" }),
+        registryChangeForTool("add_mcp_server"),
+      ),
+      {
+        changed: true,
+        modelId: "qwen",
+        added: false,
+        addedModelId: null,
+        mcp: true,
+        benchmarks: true,
+        workflows: false,
+      },
+    );
+  });
+
+  it("treats a missing side as no change", () => {
+    const one = registryChangeForTool("update_model", { model_id: "qwen" });
+    assertEquals(mergeRegistryChanges(null, one), one);
+    assertEquals(mergeRegistryChanges(one, undefined), one);
+    assertEquals(mergeRegistryChanges(null, null).changed, false);
+  });
+
+  it("keeps the added row when a later step touched another model", () => {
+    // The shape the reveal path is judged on: register A, then update B.
+    const merged = mergeRegistryChanges(
+      registryChangeForTool("register_model", { name: "A" }, { model: { id: "a" } }),
+      registryChangeForTool("update_model", { model_id: "b" }),
+    );
+    assertEquals(merged.added, true);
+    assertEquals(merged.addedModelId, "a");
+    assertEquals(merged.modelId, "b");
+  });
+
+  it("lets the last known model id win", () => {
+    assertEquals(
+      mergeRegistryChanges(
+        registryChangeForTool("update_model", { model_id: "a" }),
+        registryChangeForTool("update_model", { model_id: "b" }),
+      ).modelId,
+      "b",
+    );
+    assertEquals(
+      mergeRegistryChanges(
+        registryChangeForTool("update_model", { model_id: "a" }),
+        registryChangeForTool("add_mcp_server"),
+      ).modelId,
+      "a",
+    );
   });
 });
 
@@ -250,6 +320,7 @@ describe("registryChangeForTurn", () => {
         changed: false,
         modelId: null,
         added: false,
+        addedModelId: null,
         mcp: false,
         benchmarks: false,
         workflows: false,
@@ -279,10 +350,23 @@ describe("registryChangeForTurn", () => {
       changed: true,
       modelId: "qwen",
       added: false,
+      addedModelId: null,
       mcp: true,
       benchmarks: true,
       workflows: true,
     });
+  });
+
+  it("does not let a later update shadow a registered model", () => {
+    // A turn that registers one model and updates another: the reveal has to
+    // look for the new row, not the model that was already on the page.
+    const change = registryChangeForTurn([
+      { tool: "register_model", args: { name: "A" }, status: "ok" },
+      { tool: "update_model", args: { model_id: "b" }, status: "ok" },
+    ]);
+    assertEquals(change.added, true);
+    assertEquals(change.addedModelId, null); // a step carries no result, so no id
+    assertEquals(change.modelId, "b");
   });
 
   it("tolerates a turn with no steps", () => {
