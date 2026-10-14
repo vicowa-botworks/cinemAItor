@@ -160,8 +160,11 @@ app-root (main router)
  │   │              HuggingFace browse/search → register panel (recursive file listing incl.
 │   │              subdirs, repo tags + README, task prefill from pipeline tag, optional
  │   │              stored HF token with test, "Ask Model Copilot" handoff), Model Copilot chat
-  │   │              with approve/reject proposal cards; approving a mutating proposal refreshes
-  │   │              the registered-model list so the change is visible without a page reload;
+  │   │              with approve/reject proposal cards; every change that executes — an
+  │   │              approved proposal, or a tool the copilot auto-ran inside its turn — refreshes
+  │   │              the panels it touched (models, hardware warnings, task defaults, MCP servers,
+  │   │              benchmarks) so the page reflects it without a reload, clearing a list filter
+  │   │              that would hide a newly registered model;
    │   │              install/remove confirm through confirm-dialog — the modal stays open with a
    │   │              spinner ("Installing…") + live progress bar (bytes/total/%/speed polled from
    │   │              install-progress) while the multi-GB download runs; a reloaded page
@@ -793,7 +796,9 @@ The `prompts` table is structured to support:
   Minimal in-browser smoke test (`e2e/`, Playwright, `e2e-smoke` CI job): boots a throwaway
   backend + frontend pair on dedicated ports, bootstraps an admin, then verifies the ES module graph
   loads (all boot components registered — catches any module that fails to parse in the browser), UI
-  login works, and the assets page renders. Chromium headless, single spec.
+  login works, and the assets page renders. A second spec (`model-refresh.spec.ts`) checks that the
+  Models page reflects what the Model Copilot did without a reload, with the copilot's LLM call
+  stubbed in the page. Chromium headless.
 
 ### Deployment
 

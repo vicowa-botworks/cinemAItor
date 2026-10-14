@@ -363,6 +363,28 @@ error: a long-running approval whose client-side request was dropped (or a dupli
 (`Running… since HH:MM`) while the server-side run is still executing — instead of stranding stale,
 re-clickable buttons.
 
+**The page follows the copilot.** Whatever executes, the Models page re-reads what it changed — no
+reload, and no stale card claiming the change happened. `registryChangeForTool` /
+`registryChangeForTurn` (`frontend/src/copilot-followup.js`, pure and unit-tested) turn a tool call
+— or a finished turn's steps — into a change descriptor: which model was touched, whether a new row
+appeared, and whether the MCP server list, the benchmark table or the workflow list is implicated.
+`model-manager`'s `_refreshRegistry()` re-reads exactly those panels, plus the hardware warnings the
+registry feeds and the task-type defaults — whose module-level cache every other page's model picker
+reads, so a model registered or retasked here is offered there on the next picker. The new row's id
+travels in its own slot rather than sharing the "model touched" slot, so a turn that registered one
+model and updated another still goes looking for the right row. Both execution paths feed it: the
+approval click, and a turn whose tools auto-executed in-loop under `agent_auto_approve` (or an
+auto-approve MCP server), where there is no card whose click could carry the refresh — a step
+reported `ok` for a mutating tool is the only signal. A model the copilot _registers_ while a list
+filter hides it is revealed anyway: the filters are cleared and the notice says so, because
+"registered" above a page that still looks empty reads as nothing having happened. Every non-copilot
+mutation path goes through the same `_refreshRegistry()` too — register, HF register, enable, the
+settings/profile/task-type editors, install, remove, benchmark, health check, verify checksum, and
+the auto-approve toggle — so the page has one refresh contract, not one per button. An editor left
+open on a model the copilot just changed re-seeds from the fresh row — unless the user has typed in
+it, whereupon their unsaved text wins — and closes instead when the change removed that model,
+because a box for a row that no longer exists can only fail on Save.
+
 **Auto-continue.** A copilot turn ends when it creates its proposals — approving a proposal only
 executes the tool, it does not resume the conversation. So after each approval/rejection resolves,
 the UI automatically sends one follow-up turn (rendered as a dashed `auto-continue` bubble) whose
